@@ -163,3 +163,5 @@ Then run `/reload-plugins`. Your `statusLine` entry doesn't change between versi
 - [DESIGN.md](DESIGN.md): how VArgus works, every rule with its reason, and what is still to be
   checked.
 - [AGENTS.md](AGENTS.md): working rules for coding agents in this repo.
+- Checks: `claude plugin validate .`, `tsc -p .`, `claude plugin test .`,
+  `sh tests/reader.test.sh` (DESIGN.md "Tests" has the details).

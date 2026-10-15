@@ -1,0 +1,12 @@
+{
+  "name": "vargus",
+  "owner": { "name": "zhoufanscut" },
+  "description": "VArgus, a Claude Code status line fed by a mod",
+  "plugins": [
+    {
+      "name": "vargus",
+      "source": "./",
+      "description": "A Claude Code status line fed by a mod"
+    }
+  ]
+}

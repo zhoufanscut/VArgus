@@ -10,11 +10,11 @@ This file is how VArgus works: each rule, with the reason for it. It is edited i
 rule changes, in the same commit as the code. It holds no history: what shipped in which version
 goes in CHANGELOG.md, why one change was made in its commit message.
 
-No code exists yet, so until the first release this file is the intended design. A point that a
-live session still has to settle is marked **Unsettled** and listed in [Unsettled](#unsettled).
-The mod API is early access: each fact about it here was read from the types and docs, or
-measured, on the Claude Code version named in [Scope](#scope) or beside the fact, and is
-re-checked on each new release.
+Until the first release this file is the intended design, and the code covers only part of it. A
+point that a live session still has to settle is marked **Unsettled** and listed in
+[Unsettled](#unsettled). The mod API is early access: each fact about it here was read from the
+types and docs, or measured, on the Claude Code version named in [Scope](#scope) or beside the fact,
+and is re-checked on each new release.
 
 Code comments cite this file by section name: `(DESIGN, "The line file")`.
 
@@ -92,12 +92,16 @@ hooks/hooks.json                { "modules": ["./register.ts"] }
 hooks/register.ts               wiring only
 src/collect/*.ts                events → values
 src/render/*.ts                 pure: values + options + width → the line's text
+src/render/text.ts              cleanText, the `~` for home
 src/theme/*.ts                  palettes, resolvePalette, ANSI
 src/i18n/en.ts                  the English labels; the `Labels` type is taken from it
 src/i18n/index.ts               the language registry, resolveLabels
 src/write.ts                    the line file
 types/index.d.ts                the `$.state` contract (`PluginState`), named by `types` in plugin.json
 skills/vargus-setup/SKILL.md    how the agent sets up the reader
+tests/*.test.ts                 `claude plugin test .`
+tests/reader.test.sh            the reader, run by `sh`
+tsconfig.json                   for `tsc -p .`
 ```
 
 Collectors hear events and update values; the renderer turns them into text; the writer puts the
@@ -125,6 +129,8 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
   Why: the reader runs every second, and
   most ticks change nothing. So the shown line can lag the mod's values by up to about a second:
   an event-triggered reader run can come before the mod's write.
+- The first write is started, not awaited, in `session.start`: the engine awaits the first
+  `session.start` before the first prompt, and a slow or refused write must not hold it.
 - Only an interactive session writes (`session.start`'s `isInteractive`). Why: `claude -p` and
   SDK runs load plugins too, show no status line, and would each leave a folder behind.
 - The width is `e.viewport.columns` read by a `ui.render` hook on `PromptHint` that only
@@ -297,8 +303,8 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 - **Develop against the folder** (`--plugin-dir`, or the mods folder with hot reload): a plugin
   installed from a git marketplace is a cached copy keyed by version, so edits reach it only after
   a version bump. One installed from a local directory marketplace runs from that folder
-  (`$.plugin.root`, measured on 2.1.300); whether edits reach it without a restart is not
-  measured.
+  (`$.plugin.root`); an edit reaches a running session at `/reload-plugins`, not before
+  (measured on 2.1.300).
 - **`userConfig`**: flat fields, `type` one of `string`, `number`, `boolean`, `directory`,
   `file`; `options` gives a picker (≥ 2.1.271; older versions can't load the plugin at all);
   each option is a `/config` row (≥ 2.1.269) except `sensitive` and `multiple`; unknown keys fail
@@ -436,11 +442,21 @@ What the types and docs alone can't settle and no live session has settled yet; 
 
 - `claude plugin validate .` reads the manifest and the module as the engine will, and reports
   what the engine would refuse.
-- `tsc -p .` type-checks against the types the engine writes into `.claude-plugin/types/`.
+- `tsc -p .` type-checks against the types the engine writes into `.claude-plugin/types/`
+  (gitignored by the engine's own `.gitignore` there). The engine writes them only for a folder
+  it watches: start `claude --plugin-dir .` once per Claude Code release.
 - `claude plugin test .` runs the `*.test.ts` files: the renderer's output for given values and
   widths, the writer's file, and each rule in [Rules carried over from
-  VantageHUD](#rules-carried-over-from-vantagehud).
-- The reader is tested as a shell command against a line file written by the tests.
+  VantageHUD](#rules-carried-over-from-vantagehud). A test has no files, network or processes:
+  the writer's tests drive the mod through `$.session.start` and answer its calls with hooks of
+  their own beneath it (`fs.write`, `process.run`, `session.id`), each returning `{ value }`.
+- `sh tests/reader.test.sh` runs the reader as `sh -c` and `bash -c` against line files it
+  writes (present, missing, empty id), and checks that the setup skill and README.md carry the
+  same command.
+- Development loop: install from the working copy (`claude plugin marketplace add --scope local
+  .`, `claude plugin install --scope local vargus@vargus`); a directory marketplace runs from the
+  folder, so `/reload-plugins` picks up edits, and the data folder is the real `vargus-vargus`.
+  The reader goes in `.claude/settings.local.json` (gitignored).
 - The fragment order and each fragment's default match [Fragments](#fragments).
 - The labels test in [Languages](#languages).
 
