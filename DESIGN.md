@@ -116,7 +116,7 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
 
 | Data | Source | Basis |
 |---|---|---|
-| Tokens per request, per agent (subagents; workflow agents and teammates: [Unsettled](#unsettled) 2), counted from when this process loaded the mod or from the last clear/resume; a resumed session's earlier history is not in them, while `$.session.usage()` counts from its first launch | `turn.step` result `usage` ("as the API reported it"), `e.agentId`; `token:` sums `input_tokens + output_tokens`, main loop and subagents, as VantageHUD did (cache reads and writes left out: `ctx:` is the cache-inclusive gauge; `input_tokens` is the part neither read from nor written to the cache, so nothing counts twice) | types; a subagent's steps measured (2.1.300); workflow agents unverified |
+| Tokens per request, per agent (subagents and in-process teammates; workflow agents: [Unsettled](#unsettled) 1), counted from when this process loaded the mod or from the last clear/resume; a resumed session's earlier history is not in them, while `$.session.usage()` counts from its first launch | `turn.step` result `usage` ("as the API reported it"), `e.agentId`; `token:` sums `input_tokens + output_tokens`, main loop and subagents, as VantageHUD did (cache reads and writes left out: `ctx:` is the cache-inclusive gauge; `input_tokens` is the part neither read from nor written to the cache, so nothing counts twice) | types; measured (2.1.300): a subagent's steps, and an in-process teammate's (`agent.spawn` `isTeammate`) on both its first turn and one after a `SendMessage`, the line's `token:` equal to the sum; workflow agents unverified |
 | Context %, cost, session start, `five_hour`/`seven_day`/`spend_limit` | `$.session.usage()`; pushed by `session.measure` after each main-thread turn and when a limit window moves a whole point. After `/clear` or a resume nothing pushes the context and start until the next main-thread turn, so the tick reads `$.session.usage()` again (free without a breakdown) until that turn's `session.measure`, taking each answer: a first answer that still described the session left is corrected on the next tick. VantageHUD avoided `ctx:0%` on a resumed conversation by working the percent out from the transcript; whether the host has a percent right after a resume is not measured | types |
 | Folder, model, effort | `$.session.cwd()` and `$.session.model()` on each tick (a `/model` switch raises no event but the classic `PostModelSwitch`, and classic hooks don't run where an organization manages Claude Code), `effort` on the main loop's `turn.step` input, so none shows before a session's first request. Not filled in earlier from settings and the model's default: the engine's order (model-config docs) also takes `--effort`, a session-only `/effort`, an organization default and caps, which a mod can't read | types, docs |
 | Tool / agent / skill / workflow counts | the main loop's `tool.call` (no `e.agentId`): every call, `Agent`, `Skill`, and `Workflow` other than a resume; counted when the call is asked for, a refused one included, as VantageHUD counted the transcript's tool_use blocks. Not `agent.spawn`: it fires for each workflow agent too | types |
@@ -225,7 +225,7 @@ language touches no fragment.
   `SessionEndInput`). At `session.end` with reason `clear` or `resume` ("another took its place")
   the mod also starts its own counts over, as `$.session.usage()` does at `/clear`. The counts live
   in `$.state`, so a hot reload keeps them (the types say so; a lost worker is not stated,
-  [Unsettled](#unsettled) 4). The reader keys on `CLAUDE_CODE_SESSION_ID`; both sides use the id as
+  [Unsettled](#unsettled) 2). The reader keys on `CLAUDE_CODE_SESSION_ID`; both sides use the id as
   given, and the mod writes nothing for an empty id. Measured (2.1.300, a second session driven in
   tmux): the reader's `CLAUDE_CODE_SESSION_ID` and the payload's `session_id` agreed in all 618
   reader runs (212 of them the two probe sessions', 148 of those the one with the `/clear` and
@@ -259,8 +259,12 @@ language touches no fragment.
   removed ([Not in this version](#not-in-this-version)).
 - If `mv` fails (an organization hook refuses the process, say), the mod writes `line` directly;
   a read can then catch a half-written line for one run.
-- Whether two Claude Code processes can write one session's file is not known. **Unsettled** 1.
-  `mv` on the real data folder's disk (ext4) against tmpfs, in one run from Python (300 each,
+- Two Claude Code processes on one session (`claude --resume <id>` in a second window while the
+  first runs) share the id, so both write the same file and both windows show whichever wrote
+  last. Measured (2.1.300): the second process's `$.session.id()` was the first's; in 20 s of
+  reads the file held the second's line 355 times and the first's 43 times, and both rows showed
+  the second's (`session:0m`, no `token:`). Left so: the reader has only the session id to key on.
+- `mv` on the real data folder's disk (ext4) against tmpfs, in one run from Python (300 each,
   2026-10-15): median 1.28 against 1.26 ms, 95th percentile 2.11 against 1.57 ms.
 - The folder is left behind when the session ends: `$.fs` has no delete. Later: remove it at
   `session.end`, plus an age prune for sessions that were killed ([Not in this
@@ -454,18 +458,16 @@ for it, not the code.
 - Teammates running in their own tmux pane: each "runs no loop here", so their requests are not
   seen.
 - The old payload's `cost.total_cost_usd` included teammates; whether `$.session.usage().cost`
-  does is unverified ([Unsettled](#unsettled) 3).
+  does is not measured. VArgus shows no cost, so it matters only if a cost fragment is added.
 
 ## Unsettled
 
 What the types and docs alone can't settle and no live session has settled yet; none blocks
 0.1.0's line. A throwaway mod run in a live session settles each.
 
-1. Whether two Claude Code processes can write one session's line file (the same session resumed
-   in a second window) ([The line file](#the-line-file)).
-2. `turn.step` carries usage for workflow (`ultracode`) agents and Agent-tool teammates.
-3. Whether `$.session.usage().cost` includes teammates.
-4. Whether `$.state` survives a lost worker, as it survives a hot reload.
+1. `turn.step` carries usage for workflow (`ultracode`) agents (in-process teammates measured:
+   [Data sources](#data-sources)).
+2. Whether `$.state` survives a lost worker, as it survives a hot reload.
 
 ## Tests
 
