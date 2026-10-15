@@ -4,6 +4,25 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-10-15
+
+### Fixed
+
+- **A one-project install no longer blanks the status line in every other project.** The
+  `vargus-setup` skill put the status-line command in your user settings whatever scope the
+  plugin was installed at; installed for one project only, the mod writes no line elsewhere, so
+  every other project's row stayed blank. The skill now reads the install scope (`claude plugin
+  list --json`): at user scope it writes your user settings as before; at project or local scope
+  it offers a user-scope install, or puts the command in that project's
+  `.claude/settings.local.json`. It also stops when the plugin came from a marketplace not named
+  `vargus` (the line would stay blank), and its uninstall step names the scope.
+- README: install at user scope; the uninstall command with its scope.
+
+### Added
+
+- README: **install from a clone**, updated with `git pull` and `/reload-plugins` (a folder
+  marketplace is read from the folder, also across a version change).
+
 ## [0.1.0] - 2026-10-15
 
 The first release: VantageHUD 0.6.0's status line, rebuilt as a Claude Code mod. The mod keeps the
@@ -36,4 +55,5 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
+[0.1.1]: https://github.com/zhoufanscut/VArgus/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/zhoufanscut/VArgus/releases/tag/v0.1.0
