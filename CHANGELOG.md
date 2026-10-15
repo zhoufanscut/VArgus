@@ -4,6 +4,14 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Setting up a one-project install now offers to remove a VArgus status-line command an earlier
+  setup left in your user settings, which blanked the row in every other project; 0.1.1 wrote
+  the project's `.claude/settings.local.json` but left that one in place.
+
 ## [0.1.1] - 2026-10-15
 
 ### Fixed
@@ -55,5 +63,6 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/zhoufanscut/VArgus/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/zhoufanscut/VArgus/releases/tag/v0.1.0

@@ -57,6 +57,10 @@ cat "${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 4. With the reader in the user settings file, check the current project's
    `.claude/settings.json` and `.claude/settings.local.json`: a `statusLine` there replaces the
    user's in that project. If one exists, tell the person; change it only if they ask.
+   With the reader in a project's `.claude/settings.local.json`, check the user settings file for
+   a VArgus reader (as Remove step 1 recognises one), left by an earlier setup: it blanks the row
+   in every other project. If there is one, offer to remove it, putting back the entry kept in
+   `statusLine.before-vargus.json` if there is one and the person wants it.
 5. Tell the person the line shows from the next status-line run, within about two seconds of the
    next reply. A folder whose workspace trust is not yet accepted shows no status line.
 
