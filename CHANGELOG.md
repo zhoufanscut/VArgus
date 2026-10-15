@@ -9,7 +9,8 @@ Notable changes to this project. The format follows
 ### Fixed
 
 - Each session's folder in the plugin's data folder is removed when the session ends (`/exit`,
-  `/clear`, a resume, a closed terminal); they were all left behind.
+  `/clear`, a resume, a closed terminal); they were all left behind. A folder left by a session
+  that crashed is removed by a later session once it has been idle 14 days.
 
 ## [0.1.2] - 2026-10-15
 

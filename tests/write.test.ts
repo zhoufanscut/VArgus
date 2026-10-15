@@ -22,18 +22,23 @@ type World = {
   mv: number | 'throw'
   // a cwd function, to change the text between ticks
   cwd: () => string
-  // hold each fs.write, and each rm, this long on the mock clock
+  // hold each fs.write, each rm and each fs.list this long on the mock clock
   holdMs: number
   rmHoldMs: number
+  listHoldMs: number
   inFlight: number
   maxInFlight: number
   started: unknown[]
+  // the data folder as fs.list and fs.stat see it: entries by folder path,
+  // and a folder's own time
+  tree: Record<string, { name: string; kind: 'file' | 'dir' | 'other'; mtimeMs: number; isLink?: boolean }[]>
+  dirTimes: Record<string, number>
 }
 
 function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '/home/u', NO_COLOR: '1' }): World {
   const w: World = {
     writes: [], runs: [], id: 'S1', mv: 0, cwd: () => '/home/u/proj/x',
-    holdMs: 0, rmHoldMs: 0, inFlight: 0, maxInFlight: 0, started: [],
+    holdMs: 0, rmHoldMs: 0, listHoldMs: 0, inFlight: 0, maxInFlight: 0, started: [], tree: {}, dirTimes: {},
   }
   mock.env(on, env)
   // Calls on `$` are answered `{ value }`; session.start needs a bottom too.
@@ -51,6 +56,17 @@ function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '
     w.inFlight -= 1
     w.writes.push({ path: e.path, text: e.text })
     return { value: undefined }
+  })
+  on('fs.list', async ($, e) => {
+    if (w.listHoldMs) await clock.sleep(w.listHoldMs)
+    const entries = w.tree[e.path ?? '']
+    if (!entries) throw new Error('ENOENT')
+    return { value: entries.map(x => ({ size: 0, isLink: false, ...x, mtimeMs: x.kind === 'file' ? x.mtimeMs : 0 })) }
+  })
+  on('fs.stat', async ($, e) => {
+    const t = w.dirTimes[e.path]
+    if (t === undefined) throw new Error('ENOENT')
+    return { value: { kind: 'dir' as const, size: 0, mtimeMs: t, isLink: false } }
   })
   on('process.run', async ($, e) => {
     w.runs.push([...e.argv])
@@ -260,5 +276,96 @@ describe('the session folder at session.end', () => {
     await $.session.start({ ...start, surface: null, isInteractive: false })
     await $.session.end(end('prompt_input_exit'))
     expect(w.runs).toEqual([])
+  })
+})
+
+describe('the age prune at session.start', () => {
+  const DAY = 24 * 3_600_000
+  const NOW = 100 * DAY
+  const removed = (w: World) => w.runs.filter(r => r[0] === 'rm').map(r => r[3])
+  const file = (name: string, daysAgo: number) => ({ name, kind: 'file' as const, mtimeMs: NOW - daysAgo * DAY })
+  const dir = (name: string, extra: { isLink?: boolean; kind?: 'dir' | 'other' } = {}) =>
+    ({ name, kind: 'dir' as const, mtimeMs: 0, ...extra })
+
+  test('removes a folder idle 14 days, keeps a newer one and the current session', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const w = world(on, clock)
+    w.tree[DATA] = [dir('old'), dir('new'), dir('S1'), dir('tmpnew')]
+    w.tree[`${DATA}/old`] = [file('line', 15)]
+    w.tree[`${DATA}/new`] = [file('line', 13)]
+    w.tree[`${DATA}/S1`] = [file('line', 30)]
+    // an old line beside a newer temp file: idle by the newest
+    w.tree[`${DATA}/tmpnew`] = [file('line', 30), file('line.5.tmp', 2)]
+    await $.session.start(start)
+    await clock.settle()
+    expect(removed(w)).toEqual([`${DATA}/old`])
+  })
+
+  test('idle exactly 14 days is old enough', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const w = world(on, clock)
+    w.tree[DATA] = [dir('edge')]
+    w.tree[`${DATA}/edge`] = [file('line', 14)]
+    await $.session.start(start)
+    await clock.settle()
+    expect(removed(w)).toEqual([`${DATA}/edge`])
+  })
+
+  test('session.start does not wait for it', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const w = world(on, clock)
+    w.tree[DATA] = [dir('old')]
+    w.tree[`${DATA}/old`] = [file('line', 30)]
+    w.listHoldMs = 5000
+    let started = false
+    const starting = $.session.start(start).then(() => { started = true })
+    await clock.advance(10)
+    expect(started).toBe(true)
+    await clock.advance(10_000)
+    await starting
+    expect(removed(w)).toEqual([`${DATA}/old`])
+  })
+
+  test('only plain folders named like an id: not a link, a file or another name', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const w = world(on, clock)
+    w.tree[DATA] = [
+      dir('link', { isLink: true, kind: 'other' }), file('stray', 30), dir('a.b'), dir('ok'),
+    ]
+    for (const n of ['link', 'a.b', 'ok']) w.tree[`${DATA}/${n}`] = [file('line', 30)]
+    await $.session.start(start)
+    await clock.settle()
+    expect(removed(w)).toEqual([`${DATA}/ok`])
+  })
+
+  test('an empty folder goes by its own time', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const w = world(on, clock)
+    w.tree[DATA] = [dir('emptyold'), dir('emptynew')]
+    w.tree[`${DATA}/emptyold`] = []
+    w.tree[`${DATA}/emptynew`] = []
+    w.dirTimes[`${DATA}/emptyold`] = NOW - 20 * DAY
+    w.dirTimes[`${DATA}/emptynew`] = NOW - 1 * DAY
+    await $.session.start(start)
+    await clock.settle()
+    expect(removed(w)).toEqual([`${DATA}/emptyold`])
+  })
+
+  test('a relative CLAUDE_CONFIG_DIR: nothing pruned', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const w = world(on, clock, { HOME: '/home/u', CLAUDE_CONFIG_DIR: 'rel' })
+    w.tree['rel/plugins/data/vargus-vargus'] = [dir('old')]
+    w.tree['rel/plugins/data/vargus-vargus/old'] = [file('line', 30)]
+    await $.session.start(start)
+    await clock.settle()
+    expect(removed(w)).toEqual([])
+  })
+
+  test('no data folder yet: nothing removed', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const w = world(on, clock)
+    await $.session.start(start)
+    await clock.settle()
+    expect(removed(w)).toEqual([])
   })
 })

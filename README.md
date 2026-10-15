@@ -178,7 +178,8 @@ from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-
 - Data that only Claude Code's status-line input carries is not shown: lines changed, PR state,
   session name. `cache:` is not in 0.1.0.
 - A session that ends without its end event (a crash, `kill -9`) leaves its small folder in the
-  plugin's data folder; so does every session where an organization refuses the mod's processes.
+  plugin's data folder until a later session removes it, 14 days after its last write. Where an
+  organization refuses the mod's processes, every session's folder stays.
 - Labels are English only for now.
 - A line can lag the session by up to about two seconds. If the plugin stops (turned off, or a
   crash), the last line stays on screen with frozen numbers.

@@ -253,8 +253,7 @@ language touches no fragment.
   case is one older line put in place, which stays until the line's text next changes (within a
   minute while `session:` or a countdown is shown).
 - A temp file left by a copy replaced mid-write stays until the folder is removed at
-  `session.end`; one left by a crash stays with its folder ([Not in this
-  version](#not-in-this-version)).
+  `session.end`; one left by a crash goes with its folder in the age prune below.
 - If `mv` fails (an organization hook refuses the process, say), the mod writes `line` directly;
   a read can then catch a half-written line for one run.
 - Two Claude Code processes on one session (`claude --resume <id>` in a second window while the
@@ -274,8 +273,19 @@ language touches no fragment.
   from Python on the ext4 home, 2026-10-15). Measured (2.1.300,
   a session in tmux): the folder went at `/clear` (the old id's), `/exit`, a SIGHUP, and the
   exit of a `claude --resume` of an older session. Two processes on one session: the one that
-  ends removes the other's line until its text next changes. A session that ends without the
-  hook (a crash, SIGKILL) leaves its folder ([Not in this version](#not-in-this-version)).
+  ends removes the other's line until its text next changes.
+- A session that ends without the hook (a crash, SIGKILL) leaves its folder; at each interactive
+  `session.start` (a hot reload included), not awaited, the mod removes such folders once idle 14
+  days (VantageHUD's age, without its once-a-day throttle): idle by the newest file in the folder
+  (the line or a temp file), else the folder's own time. Only folders named like a session id (the
+  same plain-name rule), never through a link, never the current session's (under
+  `claude --resume <id>`, `$.session.id()` was already that id at `session.start`, measured once on
+  2.1.300, in a second window on a session another process still ran; `--continue` and the bare
+  picker not measured; an in-session `/resume` fires no `session.start`); VantageHUD guarded its
+  prune with a marker file, while this data folder is the plugin's own. A session left open whose
+  line has not changed for 14 days loses its file until its text next changes. Measured (2.1.300): a
+  session start removed a session-id-shaped folder whose `line` was 20 days old and kept one 13 days
+  old and the 9 real folders of that day.
 
 ## The reader
 
@@ -483,10 +493,10 @@ What the types and docs alone can't settle and no live session has settled yet; 
   it watches: start `claude --plugin-dir .` once per Claude Code release.
 - `claude plugin test .` runs the `*.test.ts` files: the renderer's output for given values and
   widths, the writer's file, and each rule in [Rules carried over from
-  VantageHUD](#rules-carried-over-from-vantagehud). A test has no files, network or processes:
-  the writer's tests drive the mod through `$.session.start` and answer its calls with hooks of
-  their own beneath it (`fs.write`, `process.run`, `session.id`), each returning `{ value }`, and
-  end it through `$.session.end` with a `session.end` hook beneath.
+  VantageHUD](#rules-carried-over-from-vantagehud). A test has no files, network or processes: the
+  writer's tests drive the mod through `$.session.start` and answer its calls with hooks of their
+  own beneath it (`fs.write`, `fs.list`, `fs.stat`, `process.run`, `session.id`), each returning
+  `{ value }`, and end it through `$.session.end` with a `session.end` hook beneath.
 - `sh tests/manifest.test.sh` checks that `userConfig` in plugin.json has the keys and defaults of
   `src/options.ts`.
 - `sh tests/reader.test.sh` runs the reader as `sh -c` and `bash -c` against line files it
@@ -520,9 +530,6 @@ What the types and docs alone can't settle and no live session has settled yet; 
 
 Later:
 
-- An age prune for folders a session left without `session.end`: 14 idle days by the `line`
-  file (VantageHUD's age), only folders whose names have the session-id shape (VantageHUD
-  guarded with a marker file; the data folder here is the plugin's own).
 - The reader showing nothing when the mod has stopped writing (a stale line stays today). Needs a
   heartbeat write, since the mod otherwise writes only when the text changes.
 - Custom themes, in a JSON file that a `file` option names (`userConfig` fields are flat, so

@@ -71,6 +71,31 @@ export async function endSession($: EngineInterface, w: Writer, id: string): Pro
   if (w.last?.id === id) w.last = null
 }
 
+// A folder whose newest file is older than this was left by a session that
+// ended without session.end (a crash, kill -9): VantageHUD's age.
+export const PRUNE_AFTER_MS = 14 * 24 * 3_600_000
+
+// At session.start: remove such folders. Only folders named like a session id,
+// never the current session's, never through a link. Idle by the newest file
+// in the folder (the line or a temp file), else the folder's own time. A
+// session still open whose line has not changed for 14 days loses its file
+// until its text next changes.
+export async function pruneOld($: EngineInterface, w: Writer, now: number): Promise<void> {
+  if (!w.dir) return
+  const current = await $.session.id()
+  const entries = await $.fs.list(w.dir).catch(() => [])
+  for (const e of entries) {
+    if (e.kind !== 'dir' || e.isLink || !SAFE_ID.test(e.name) || e.name === current) continue
+    const folder = `${w.dir}/${e.name}`
+    const files = await $.fs.list(folder).catch(() => null)
+    if (!files) continue
+    const newest = Math.max(0, ...files.filter(f => f.kind === 'file').map(f => f.mtimeMs))
+    const at = newest || (await $.fs.stat(folder).catch(() => null))?.mtimeMs
+    if (at === undefined || now - at < PRUNE_AFTER_MS) continue
+    await $.process.run(['rm', '-rf', '--', folder]).catch(() => {})
+  }
+}
+
 async function drain($: EngineInterface, w: Writer): Promise<void> {
   while (w.pending !== null) {
     const next = w.pending

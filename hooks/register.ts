@@ -10,7 +10,7 @@ import { resolveLabels } from '../src/i18n'
 import { resolveOptions, type Options } from '../src/options'
 import { render } from '../src/render'
 import { makeTheme } from '../src/theme'
-import { createWriter, endSession, writeLine, type Writer } from '../src/write'
+import { createWriter, endSession, pruneOld, writeLine, type Writer } from '../src/write'
 
 // Wiring only. Module values start over on a hot reload, which runs register
 // and session.start again (DESIGN, "The host"); what must survive one lives in
@@ -83,6 +83,8 @@ export const register: Register = (on, given) => {
       // Not awaited: the first session.start is awaited before the first
       // prompt, and a slow or refused write must not hold it.
       refresh($).catch(() => {})
+      const w = writer
+      $.clock.now().then(now => pruneOld($, w, now)).catch(() => {})
     }
     return next(e)
   })
