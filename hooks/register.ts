@@ -10,7 +10,7 @@ import { resolveLabels } from '../src/i18n'
 import { resolveOptions, type Options } from '../src/options'
 import { render } from '../src/render'
 import { makeTheme } from '../src/theme'
-import { createWriter, writeLine, type Writer } from '../src/write'
+import { createWriter, endSession, writeLine, type Writer } from '../src/write'
 
 // Wiring only. Module values start over on a hot reload, which runs register
 // and session.start again (DESIGN, "The host"); what must survive one lives in
@@ -112,6 +112,8 @@ export const register: Register = (on, given) => {
 
   on('session.end', async ($, e, next) => {
     sessionEnding($, e, values.session)
+    // a failed removal leaves the folder, as before
+    if (writer) await endSession($, writer, e.sessionId).catch(() => {})
     return next(e)
   })
 

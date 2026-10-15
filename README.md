@@ -177,7 +177,8 @@ from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-
 - Teammates that run in their own tmux pane are not seen.
 - Data that only Claude Code's status-line input carries is not shown: lines changed, PR state,
   session name. `cache:` is not in 0.1.0.
-- One small folder per session is left in the plugin's data folder after the session ends.
+- A session that ends without its end event (a crash, `kill -9`) leaves its small folder in the
+  plugin's data folder; so does every session where an organization refuses the mod's processes.
 - Labels are English only for now.
 - A line can lag the session by up to about two seconds. If the plugin stops (turned off, or a
   crash), the last line stays on screen with frozen numbers.

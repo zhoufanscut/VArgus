@@ -128,10 +128,10 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
 
 - Collectors update values as events arrive; the mod renders on each `$.clock.every(1000)` tick
   and writes the file only when the text or the session id differs from what it last wrote (the
-  id because after a resume the id can change a moment after the text did, [The line
-  file](#the-line-file)). Why: the reader runs every second anyway, and most ticks change
-  nothing. So the shown line can lag the mod's values by up to about two seconds: up to one for
-  the tick, and up to one for the reader's next run.
+  id because after a resume the id can change a moment after the text did), and never for a
+  session that ended ([The line file](#the-line-file)). Why: the reader runs every second
+  anyway, and most ticks change nothing. So the shown line can lag the mod's values by up to
+  about two seconds: up to one for the tick, and up to one for the reader's next run.
 - The first write is started, not awaited, in `session.start`: the engine awaits the first
   `session.start` before the first prompt, and a slow or refused write must not hold it.
 - Only an interactive session writes (`session.start`'s `isInteractive`). Why: `claude -p` and
@@ -230,11 +230,11 @@ language touches no fragment.
   in-session `/resume`. In the one resume measured, `$.session.id()` still gave the cleared
   session's id at the new session's start event; the mod's 1 s tick saw the change 0.75 s later, and
   the reader's first run under the new id came 0.56 s after the start event. A write between the
-  start event and the tick lands in a folder no reader reads any more, and the next write goes to
-  the new id's folder because the id changed ([When the line is
-  written](#when-the-line-is-written)). The mod's env has no `CLAUDE_CODE_SESSION_ID`. Why it
-  matters: VantageHUD once keyed its cache on a variable Claude Code doesn't export, so concurrent
-  sessions shared one file and `ctx:` dropped to 0%.
+  start event and the tick is skipped, since the id is the ended session's (the `session.end`
+  bullet below), and the next write goes to the new id's folder because the id changed ([When
+  the line is written](#when-the-line-is-written)). The mod's env has no
+  `CLAUDE_CODE_SESSION_ID`. Why it matters: VantageHUD once keyed its cache on a variable
+  Claude Code doesn't export, so concurrent sessions shared one file and `ctx:` dropped to 0%.
 - Each write goes to `line.<t>.tmp` in the same folder, then `$.process.run(['mv', '-f', <tmp>,
   <line>])` puts it in place. `<t>` is `$.clock.now()` taken at `session.start`, so each loaded copy
   of the mod (after a hot reload, or a second process on the session) has its own temp file. Why:
@@ -252,8 +252,9 @@ language touches no fragment.
   replaced by a hot reload may still have a write in flight; with its own temp file, the worst
   case is one older line put in place, which stays until the line's text next changes (within a
   minute while `session:` or a countdown is shown).
-- A temp file left by a crash, or by a copy replaced mid-write, stays until the folder is
-  removed ([Not in this version](#not-in-this-version)).
+- A temp file left by a copy replaced mid-write stays until the folder is removed at
+  `session.end`; one left by a crash stays with its folder ([Not in this
+  version](#not-in-this-version)).
 - If `mv` fails (an organization hook refuses the process, say), the mod writes `line` directly;
   a read can then catch a half-written line for one run.
 - Two Claude Code processes on one session (`claude --resume <id>` in a second window while the
@@ -263,9 +264,18 @@ language touches no fragment.
   the second's (`session:0m`, no `token:`). Left so: the reader has only the session id to key on.
 - `mv` on the real data folder's disk (ext4) against tmpfs, in one run from Python (300 each,
   2026-10-15): median 1.28 against 1.26 ms, 95th percentile 2.11 against 1.57 ms.
-- The folder is left behind when the session ends: `$.fs` has no delete. Later: remove it at
-  `session.end`, plus an age prune for sessions that were killed ([Not in this
-  version](#not-in-this-version)).
+- At `session.end` (any reason) the mod removes the ending session's folder with
+  `$.process.run(['rm', '-rf', '--', <data>/<id>])`, since `$.fs` has no delete: after a write
+  in flight finishes, and only for an id that is a plain name (letters, digits, `_`, `-`) and
+  a data folder that is an absolute path. It writes no more for that id until another session
+  ends in this process: after a resume `$.session.id()` can still give it (0.75 s in the one
+  resume measured). The hook's bound is 1.5 s by default for every hook and core (types,
+  `SessionEndInput`); `rm` of a session folder took 0.96 ms median, 4.0 ms at most (300 runs
+  from Python on the ext4 home, 2026-10-15). Measured (2.1.300,
+  a session in tmux): the folder went at `/clear` (the old id's), `/exit`, a SIGHUP, and the
+  exit of a `claude --resume` of an older session. Two processes on one session: the one that
+  ends removes the other's line until its text next changes. A session that ends without the
+  hook (a crash, SIGKILL) leaves its folder ([Not in this version](#not-in-this-version)).
 
 ## The reader
 
@@ -475,7 +485,8 @@ What the types and docs alone can't settle and no live session has settled yet; 
   widths, the writer's file, and each rule in [Rules carried over from
   VantageHUD](#rules-carried-over-from-vantagehud). A test has no files, network or processes:
   the writer's tests drive the mod through `$.session.start` and answer its calls with hooks of
-  their own beneath it (`fs.write`, `process.run`, `session.id`), each returning `{ value }`.
+  their own beneath it (`fs.write`, `process.run`, `session.id`), each returning `{ value }`, and
+  end it through `$.session.end` with a `session.end` hook beneath.
 - `sh tests/manifest.test.sh` checks that `userConfig` in plugin.json has the keys and defaults of
   `src/options.ts`.
 - `sh tests/reader.test.sh` runs the reader as `sh -c` and `bash -c` against line files it
@@ -509,9 +520,9 @@ What the types and docs alone can't settle and no live session has settled yet; 
 
 Later:
 
-- Removing a session's folder at `session.end` (`$.process.run(['rm', '-r', <folder>])`, guarded
-  to the data folder), plus an age prune for killed sessions, only inside a folder that carries
-  VArgus's marker file (VantageHUD's prune rule: 14 idle days, marker-guarded).
+- An age prune for folders a session left without `session.end`: 14 idle days by the `line`
+  file (VantageHUD's age), only folders whose names have the session-id shape (VantageHUD
+  guarded with a marker file; the data folder here is the plugin's own).
 - The reader showing nothing when the mod has stopped writing (a stale line stays today). Needs a
   heartbeat write, since the mod otherwise writes only when the text changes.
 - Custom themes, in a JSON file that a `file` option names (`userConfig` fields are flat, so

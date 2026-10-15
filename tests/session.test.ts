@@ -22,16 +22,19 @@ type World = {
   // what the mod last saved to $.state, and what a state read answers
   saved: unknown
   restore: unknown
+  // the session id; an ended session's id is written no more, so a test
+  // moves it on as /clear and a resume do
+  id: string
 }
 
 function world(on: On, clock: MockClock): World {
   const w: World = {
-    lines: [], model: 'claude-opus-5-5[1m]', startedAt: 0, percent: 20, usageRefused: false, usageCalls: 0, saved: undefined, restore: undefined,
+    lines: [], model: 'claude-opus-5-5[1m]', startedAt: 0, percent: 20, usageRefused: false, usageCalls: 0, saved: undefined, restore: undefined, id: 'S1',
     usage: { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 90000, cache_creation_input_tokens: 7000 },
   }
   mock.env(on, { HOME: '/home/u', NO_COLOR: '1' })
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
-  on('session.id', async () => ({ value: 'S1' }))
+  on('session.id', async () => ({ value: w.id }))
   on('session.cwd', async () => ({ value: '/home/u/x' }))
   on('session.model', async () => ({ value: w.model }))
   on('session.usage', async () => {
@@ -145,8 +148,12 @@ describe('session collector', () => {
     await $.session.start(start)
     await step($)
     await $.session.end({ reason: 'logout', sessionId: 'S1', resume: { id: 'S1' } })
+    // the logout ended S1, which is written no more; a new id stands in only so
+    // the line, and the counts kept, can be read
+    w.id = 'S2'
     expect(await line(clock, w)).toContain('token:1.5k')
-    await $.session.end({ reason: 'clear', sessionId: 'S1', resume: { id: 'S1' } })
+    await $.session.end({ reason: 'clear', sessionId: 'S2', resume: { id: 'S2' } })
+    w.id = 'S3'
     await clock.settle()
     expect(w.saved).toEqual({ tokens: 0, tools: 0, agents: 0, skills: 0, workflows: 0 })
     // context and start read again on the next tick (usage() starts over)
@@ -164,6 +171,7 @@ describe('session collector', () => {
     w.percent = 64
     w.startedAt = 7 * 3_600_000
     await $.session.end({ reason: 'resume', sessionId: 'S1', resume: { id: 'S2' } })
+    w.id = 'S2'
     expect(await line(clock, w)).toBe('opus | ctx:64% | session:3h0m')
     // each answer taken until the next turn's measure: a first answer that
     // still described the session left is corrected on the next tick
@@ -184,6 +192,7 @@ describe('session collector', () => {
     expect(await line(clock, w)).toBe('opus | ctx:20% | session:0m')
     w.usageRefused = true
     await $.session.end({ reason: 'clear', sessionId: 'S1', resume: { id: 'S1' } })
+    w.id = 'S2'
     expect(await line(clock, w)).toBe('opus | ctx:0%')
   })
 
