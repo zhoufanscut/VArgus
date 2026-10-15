@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { render } from '../src/render'
 import { cleanText, shortenHome } from '../src/render/text'
 
 describe('text', () => {
@@ -15,9 +14,5 @@ describe('text', () => {
     expect(shortenHome('/home/user2/x', '/home/u')).toBe('/home/user2/x')
     expect(shortenHome('/x', '/')).toBe('/x')
     expect(shortenHome('/x', undefined)).toBe('/x')
-  })
-
-  test('render cleans what it shows', async () => {
-    expect(render({ cwd: '/home/u/a\x1bb', home: '/home/u' })).toBe('~/a?b')
   })
 })

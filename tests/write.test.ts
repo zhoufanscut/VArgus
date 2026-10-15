@@ -5,6 +5,15 @@ import type { On } from 'claude-code'
 
 const DATA = '/home/u/.claude/plugins/data/vargus-vargus'
 
+// The folder alone, uncoloured, so the line's text is known; the fragments
+// have tests of their own.
+const FOLDER_ONLY = {
+  options: {
+    model: false, rateLimits: false, context: false, tokens: false, session: false,
+    callCounts: false, repo: false, branch: false, status: false,
+  },
+}
+
 type World = {
   writes: { path: string; text: string }[]
   runs: string[][]
@@ -20,7 +29,7 @@ type World = {
   started: unknown[]
 }
 
-function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '/home/u' }): World {
+function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '/home/u', NO_COLOR: '1' }): World {
   const w: World = {
     writes: [], runs: [], id: 'S1', mv: 0, cwd: () => '/home/u/proj/x',
     holdMs: 0, inFlight: 0, maxInFlight: 0, started: [],
@@ -52,7 +61,7 @@ function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '
 const start = { cwd: '/home/u/proj/x', surface: 'terminal', isInteractive: true } as const
 
 describe('line file', () => {
-  test('writes a temp file, then mv puts it in place; session.start passes on unchanged', async ($, on) => {
+  test('writes a temp file, then mv puts it in place; session.start passes on unchanged', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 42 })
     const w = world(on, clock)
     await $.session.start(start)
@@ -62,7 +71,7 @@ describe('line file', () => {
     expect(w.runs).toEqual([['mv', '-f', `${DATA}/S1/line.42.tmp`, `${DATA}/S1/line`]])
   })
 
-  test('a tick with the same text and id writes nothing; a new id writes again', async ($, on) => {
+  test('a tick with the same text and id writes nothing; a new id writes again', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 1 })
     const w = world(on, clock)
     await $.session.start(start)
@@ -73,7 +82,7 @@ describe('line file', () => {
     expect(w.writes.map(x => x.path)).toEqual([`${DATA}/S1/line.1.tmp`, `${DATA}/S2/line.1.tmp`])
   })
 
-  test('when mv fails the line is written directly, and counts as written', async ($, on) => {
+  test('when mv fails the line is written directly, and counts as written', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 7 })
     const w = world(on, clock)
     w.mv = 1
@@ -82,7 +91,7 @@ describe('line file', () => {
     expect(w.writes.map(x => x.path)).toEqual([`${DATA}/S1/line.7.tmp`, `${DATA}/S1/line`])
   })
 
-  test('when mv is refused (throws) the line is written directly', async ($, on) => {
+  test('when mv is refused (throws) the line is written directly', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 7 })
     const w = world(on, clock)
     w.mv = 'throw'
@@ -91,7 +100,7 @@ describe('line file', () => {
     expect(w.writes.map(x => x.path)).toEqual([`${DATA}/S1/line.7.tmp`, `${DATA}/S1/line`])
   })
 
-  test('one write at a time; the newest waiting text wins', async ($, on) => {
+  test('one write at a time; the newest waiting text wins', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     let n = 0
@@ -107,7 +116,7 @@ describe('line file', () => {
     expect(texts).toContain('~/p3')
   })
 
-  test('CLAUDE_CONFIG_DIR picks the data folder', async ($, on) => {
+  test('CLAUDE_CONFIG_DIR picks the data folder', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
     const w = world(on, clock, { HOME: '/home/u', CLAUDE_CONFIG_DIR: '/cfg' })
     await $.session.start(start)
@@ -115,7 +124,7 @@ describe('line file', () => {
     expect(w.writes[0]?.path).toBe('/cfg/plugins/data/vargus-vargus/S1/line.3.tmp')
   })
 
-  test('a relative CLAUDE_CONFIG_DIR: nothing written', async ($, on) => {
+  test('a relative CLAUDE_CONFIG_DIR: nothing written', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
     const w = world(on, clock, { HOME: '/home/u', CLAUDE_CONFIG_DIR: 'rel' })
     await $.session.start(start)
@@ -123,7 +132,7 @@ describe('line file', () => {
     expect(w.writes).toEqual([])
   })
 
-  test('nothing is written outside an interactive session', async ($, on) => {
+  test('nothing is written outside an interactive session', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
     const w = world(on, clock)
     await $.session.start({ ...start, surface: null, isInteractive: false })
@@ -131,7 +140,7 @@ describe('line file', () => {
     expect(w.writes).toEqual([])
   })
 
-  test('no HOME and no CLAUDE_CONFIG_DIR: nothing written', async ($, on) => {
+  test('no HOME and no CLAUDE_CONFIG_DIR: nothing written', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
     const w = world(on, clock, {})
     await $.session.start(start)
@@ -139,7 +148,7 @@ describe('line file', () => {
     expect(w.writes).toEqual([])
   })
 
-  test('an empty session id: nothing written', async ($, on) => {
+  test('an empty session id: nothing written', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
     const w = world(on, clock)
     w.id = ''

@@ -22,7 +22,8 @@ cat "${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 1. The user settings file is `$CLAUDE_CONFIG_DIR/settings.json`, or `~/.claude/settings.json`
    when `CLAUDE_CONFIG_DIR` is unset. Read it; it may not exist yet.
 2. If its `statusLine` command is already the reader command above, say so and stop. If it has
-   another `statusLine` entry (an older VArgus reader with another folder included), show it to the person and ask before replacing it. Offer to keep
+   another `statusLine` entry (an older VArgus reader with another folder included), show it to
+   the person and ask before replacing it. Offer to keep
    a copy in `statusLine.before-vargus.json` beside the settings file, so it can be put back
    later (not in the data folder: uninstalling deletes that).
 3. Set `statusLine` to the entry below, changing nothing else in the file. In JSON the
@@ -39,7 +40,7 @@ cat "${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 4. Check the current project's `.claude/settings.json` and `.claude/settings.local.json`: a
    `statusLine` there replaces the user's in that project. If one exists, tell the person; change
    it only if they ask.
-5. Tell the person the line shows from the next status-line run, within about a second of the
+5. Tell the person the line shows from the next status-line run, within about two seconds of the
    next reply. A folder whose workspace trust is not yet accepted shows no status line.
 
 ## Remove (before uninstalling)
@@ -50,7 +51,8 @@ cat "${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
    the current project's `.claude/settings.json` and `.claude/settings.local.json`.
 2. Remove the `statusLine` entry from the user settings file and from
    `.claude/settings.local.json`, changing nothing else. Ask before changing the project's
-   `.claude/settings.json`: it is usually committed and shared. In the user settings file, put back the entry kept in `statusLine.before-vargus.json` if there is one and
+   `.claude/settings.json`: it is usually committed and shared. In the user settings file, put
+   back the entry kept in `statusLine.before-vargus.json` if there is one and
    the person wants it.
 3. Tell the person they can now uninstall (`claude plugin uninstall vargus`). Uninstalling
    deletes the plugin's data folder, so a reader left in settings would show a blank row.

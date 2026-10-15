@@ -90,10 +90,15 @@ own tmux pane, code shared with VantageHUD.
 .claude-plugin/marketplace.json the repo as its own marketplace
 hooks/hooks.json                { "modules": ["./register.ts"] }
 hooks/register.ts               wiring only
-src/collect/*.ts                events → values
-src/render/*.ts                 pure: values + options + width → the line's text
+src/core/types.ts               the contract: Values, Theme, Fragment
+src/options.ts                  the options and their defaults (= userConfig)
+src/collect/*.ts                events → values: session, limits, vcs, each with its installer
+src/render/index.ts             the composer: order, options, width
+src/render/fragments/*.ts       pure: one fragment each, values + options + labels + theme → text
 src/render/text.ts              cleanText, the `~` for home
-src/theme/*.ts                  palettes, resolvePalette, ANSI
+src/render/format.ts            durations (`4h37m`)
+src/render/width.ts             the wide-character count
+src/theme/*.ts                  palettes, makeTheme, ANSI
 src/i18n/en.ts                  the English labels; the `Labels` type is taken from it
 src/i18n/index.ts               the language registry, resolveLabels
 src/write.ts                    the line file
@@ -101,6 +106,7 @@ types/index.d.ts                the `$.state` contract (`PluginState`), named by
 skills/vargus-setup/SKILL.md    how the agent sets up the reader
 tests/*.test.ts                 `claude plugin test .`
 tests/reader.test.sh            the reader, run by `sh`
+tests/manifest.test.sh          userConfig against src/options.ts
 tsconfig.json                   for `tsc -p .`
 ```
 
@@ -111,24 +117,24 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
 
 | Data | Source | Basis |
 |---|---|---|
-| Tokens per request, per agent (subagents; workflow agents and teammates: [Unsettled](#unsettled) 2), counted from when this process loaded the mod or from the last clear/resume; a resumed session's earlier history is not in them, while `$.session.usage()` counts from its first launch | `turn.step` result `usage` ("as the API reported it"), `e.agentId` | types; a subagent's steps measured (2.1.300); workflow agents unverified |
-| Context %, cost, session start, `five_hour`/`seven_day`/`spend_limit` | `$.session.usage()`; pushed by `session.measure` after each main-thread turn and when a limit window moves a whole point | types |
-| Folder, model, effort | `$.session.cwd()`, `$.session.model()`, `effort` on `turn.step`'s input | types |
-| Tool / agent / skill / workflow counts | `tool.call`, `agent.spawn` | types |
+| Tokens per request, per agent (subagents; workflow agents and teammates: [Unsettled](#unsettled) 2), counted from when this process loaded the mod or from the last clear/resume; a resumed session's earlier history is not in them, while `$.session.usage()` counts from its first launch | `turn.step` result `usage` ("as the API reported it"), `e.agentId`; `token:` sums `input_tokens + output_tokens`, main loop and subagents, as VantageHUD did (cache reads and writes left out: `ctx:` is the cache-inclusive gauge; `input_tokens` is the part neither read from nor written to the cache, so nothing counts twice) | types; a subagent's steps measured (2.1.300); workflow agents unverified |
+| Context %, cost, session start, `five_hour`/`seven_day`/`spend_limit` | `$.session.usage()`; pushed by `session.measure` after each main-thread turn and when a limit window moves a whole point. After `/clear` or a resume nothing pushes the context and start until the next main-thread turn, so the tick reads `$.session.usage()` again (free without a breakdown) until that turn's `session.measure`, taking each answer: a first answer that still described the session left is corrected on the next tick. VantageHUD avoided `ctx:0%` on a resumed conversation by working the percent out from the transcript; whether the host has a percent right after a resume is not measured | types |
+| Folder, model, effort | `$.session.cwd()` and `$.session.model()` on each tick (a `/model` switch raises no event but the classic `PostModelSwitch`, and classic hooks don't run where an organization manages Claude Code), `effort` on the main loop's `turn.step` input | types |
+| Tool / agent / skill / workflow counts | the main loop's `tool.call` (no `e.agentId`): every call, `Agent`, `Skill`, and `Workflow` other than a resume; counted when the call is asked for, a refused one included, as VantageHUD counted the transcript's tool_use blocks. Not `agent.spawn`: it fires for each workflow agent too | types |
 | Live agents (running, done), for the row after 0.1.0 | `agent.spawn`, `turn.start` / `turn.complete` with `e.agentId` (subagents' turns since 2.1.299) | types, CHANGELOG 2.1.299 |
-| Per-model weekly (`sn:`/`op:`/others), `extra:` | OAuth usage API via `$.http.fetch` + `$.session.authorize()`, cached in `$.store` | measured: HTTP 200 on the dev machine, where the API answers only through `HTTPS_PROXY` (2.1.300) |
-| git | `$.session.repo()`, `$.process.run` (no shell; git runs with repo hooks off) | types |
-| svn | `$.process.run(['svn', 'status', '--xml', ...])` | types |
+| Per-model weekly (`sn:`/`op:`/others), `extra:` | OAuth usage API via `$.http.fetch` + `$.session.authorize()`, cached in `$.store` per config folder (`CLAUDE_CONFIG_DIR`, which picks the login); the store is checked every 15 s and the API read when the cache's retry time has passed (90 s after a success, 2 min after a network or auth failure, the larger of the backoff and `Retry-After` after a 429). No read, and no cached numbers shown, when `authorize()` gives null or an API key (the endpoint is OAuth-only; checked before the cache, so another login's numbers can't show), or with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` set (the engine refuses a plugin's request carrying `auth`). Whether another process's `$.store.set` is seen here is not measured: if not, each session reads on its own | measured: HTTP 200 on the dev machine, where the API answers only through `HTTPS_PROXY` (2.1.300) |
+| git | `$.session.repo()` (in a repo or not, and the remote URL: the push URL when one is set, where VantageHUD read the fetch URL), then `git rev-parse --absolute-git-dir` and `git status --porcelain=v2 --branch` with `GIT_OPTIONAL_LOCKS=0` (no `index.lock` against the person's own git) and `-c core.fsmonitor=false` (a repo's config could start a hook program or a daemon); the host runs git with repo hooks off. Detached-HEAD naming and the operation are read from files, the naming only with the `detachedHead` option on. Read at session start, after a file-changing tool (`Bash`, `Edit`, `Write`, `NotebookEdit`, `EnterWorktree`, `ExitWorktree`) returns, and every 5 s otherwise; each walk holds off the next for 10× its length (VantageHUD did so for walks of 1 s or more). `git status` took a median 2.7 ms on this repo (17 files) and 75.9 ms on a 9,227-file repo (git 2.47.3, 2026-10-15), so the 5 s poll costs about 1.5 % of a core on the larger | types; timing measured |
+| svn | `svn --non-interactive info --xml` and `status --xml` (no `-u`), only when the folder is not in a git worktree; the working copy found by `.svn` upward from the resolved folder. Same 5 s poll and hold-off as git, where VantageHUD kept a 30 s memo checked against `wc.db`: a 510 ms walk (VantageHUD's figure for a 96k-file checkout) would cost about 9 % of a core | types; no svn on the dev machine: the XML in the tests is written to svn's documented shape, never run |
 | Clock-driven fragments (countdowns, session time) | `$.clock.every(1000)`, which keeps running between turns (mods/api: "keeps running between turns and doesn't start one") | docs |
 
 ### When the line is written
 
-- The mod renders on each change of a value and on each `$.clock.every(1000)` tick, and writes the
-  file only when the text or the session id differs from what it last wrote (the id because after
-  a resume the id can change a moment after the text did, [The line file](#the-line-file)).
-  Why: the reader runs every second, and
-  most ticks change nothing. So the shown line can lag the mod's values by up to about a second:
-  an event-triggered reader run can come before the mod's write.
+- Collectors update values as events arrive; the mod renders on each `$.clock.every(1000)` tick
+  and writes the file only when the text or the session id differs from what it last wrote (the
+  id because after a resume the id can change a moment after the text did, [The line
+  file](#the-line-file)). Why: the reader runs every second anyway, and most ticks change
+  nothing. So the shown line can lag the mod's values by up to about two seconds: up to one for
+  the tick, and up to one for the reader's next run.
 - The first write is started, not awaited, in `session.start`: the engine awaits the first
   `session.start` before the first prompt, and a slow or refused write must not hold it.
 - Only an interactive session writes (`session.start`'s `isInteractive`). Why: `claude -p` and
@@ -379,12 +385,14 @@ for it, not the code.
   measurements are not carried over ([Colours](#colours)).
 - **Usage API** (`src/hud/usage-api.js`): never refresh OAuth tokens — refresh tokens are
   single-use, so a refresh revokes Claude Code's own token and forces a re-login
-  (anthropics/claude-code#42603, closed "not planned"); 401 → `auth` error with a fingerprint of
-  the rejected token; 403 is `network` (region block), not auth; 429 honours a numeric
-  `Retry-After` (capped at 1 h); per-model weekly caps come from `limits[]` entries of kind
-  `weekly_scoped` (the flat `seven_day_opus`/`seven_day_sonnet` are null); skip the call when
-  `ANTHROPIC_BASE_URL` is a non-Anthropic gateway or Bedrock/Vertex/Foundry is on. Only per-model
-  weekly and `extra:` need this API; the engine gives the rest.
+  (anthropics/claude-code#42603, closed "not planned"); 401 → `auth` error (VantageHUD kept a
+  fingerprint of the rejected token so a new login retried at once; a mod never sees the token, so
+  VArgus retries after 2 min, and `[API auth]` can outlast a re-login by up to 2 min 15 s); 403 is
+  `network` (region block), not auth; 429 honours a numeric `Retry-After` (capped at 1 h); per-model
+  weekly caps come from `limits[]` entries of kind `weekly_scoped` (the flat
+  `seven_day_opus`/`seven_day_sonnet` are null); skip the call when `ANTHROPIC_BASE_URL` is a
+  non-Anthropic gateway or Bedrock/Vertex/Foundry is on. Only per-model weekly and `extra:` need
+  this API; the engine gives the rest.
 - **Usage cache and staleness** (`src/hud/usage-api.js`, AGENTS.md "Usage/rate-limit data"): one
   cache per account (keyed by `CLAUDE_CONFIG_DIR`, which picks the credentials), because one shared
   file once showed one account's numbers in another account's session; after a failed refresh the
@@ -397,8 +405,9 @@ for it, not the code.
   the `item` and `props` columns (mapping in AGENTS.md); a large status needs the output limit in
   mind (`$.process.run` keeps 4 MiB).
 - **git** (`src/hud/elements/git.js`, `src/lib/worktree-paths.js`): detached-HEAD naming read from
-  files (`getDetachedHead`), the symlinked-cwd root spelling (`onGivenPath`). Check how much of
-  this `$.session.repo()` already does.
+  files (`getDetachedHead`), the symlinked-cwd root spelling (`onGivenPath`). `$.session.repo()`
+  answers whether the folder is in a repo and the remote URL; its `root` is the main working
+  tree's even in a linked worktree, so git still runs for the worktree and the branch.
 - **Width** (`src/lib/string-width.js`): a wide (East Asian) character or an emoji takes two
   columns; fit the line by that count, not by string length.
 - **Cost**: the old payload's cost was non-zero on a Max plan: it is the list-price equivalent,
@@ -422,6 +431,12 @@ for it, not the code.
   could work it out from `$.settings.read()` (`promptCacheTtl`, CHANGELOG 2.1.243), the env
   (`ENABLE_PROMPT_CACHING_1H`, `FORCE_PROMPT_CACHING_5M`, 2.1.108) and the plan (1 h for
   subscribers, CHANGELOG 2.1.108), but that copies the engine's rule, which can change.
+- From the usage API, VantageHUD also read `extra:` in its `used_credits`/`monthly_limit` form,
+  off an Enterprise plan only; a mod can't read the plan (`$.session.identity()` answers only a
+  mod that managed settings install), so VArgus reads the `limit_usd`/`spent_usd` form alone,
+  and shows no `extra:` when `used_credits` is present (VantageHUD's rule for an unknown plan).
+  `5h:`/`7d:` come only from the engine: until its first reading in a session they are absent,
+  where VantageHUD fell back to the API.
 - Teammates running in their own tmux pane: each "runs no loop here", so their requests are not
   seen.
 - The old payload's `cost.total_cost_usd` included teammates; whether `$.session.usage().cost`
@@ -450,6 +465,8 @@ What the types and docs alone can't settle and no live session has settled yet; 
   VantageHUD](#rules-carried-over-from-vantagehud). A test has no files, network or processes:
   the writer's tests drive the mod through `$.session.start` and answer its calls with hooks of
   their own beneath it (`fs.write`, `process.run`, `session.id`), each returning `{ value }`.
+- `sh tests/manifest.test.sh` checks that `userConfig` in plugin.json has the keys and defaults of
+  `src/options.ts`.
 - `sh tests/reader.test.sh` runs the reader as `sh -c` and `bash -c` against line files it
   writes (present, missing, empty id), and checks that the setup skill and README.md carry the
   same command.
@@ -465,6 +482,9 @@ What the types and docs alone can't settle and no live session has settled yet; 
 - Import only the mod's own files, by relative path, and `claude-code`: the engine refuses
   anything else.
 - Hooks observe: a hook on an engine event passes it on with `next(e)` and changes nothing.
+- `hooks/register.ts` holds every hook, one per event, and calls each area's exported functions
+  from it: `claude plugin validate` refuses a second `on('<event>')` without a matcher anywhere in
+  the module ("registered twice without a matcher", 2.1.300).
 - The renderer is pure; all I/O (`$.process`, `$.fs`, `$.http`) happens in collectors and the
   writer. A throwing fragment is left out, never the line.
 - Run programs with `$.process.run` and an argument list; never a shell.

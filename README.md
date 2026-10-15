@@ -116,8 +116,8 @@ default config folder (`~/.claude`); with `CLAUDE_CONFIG_DIR` set, let the skill
 
 ## Verify it works
 
-Start a session and send one prompt. The line shows under the prompt within a second of the
-reply. If the row stays empty:
+Start a session and send one prompt. The line shows under the prompt within about two seconds
+of the reply. If the row stays empty:
 
 - the mod hasn't written the line yet: check that the plugin is enabled in `/plugin`;
 - the folder isn't trusted yet: the status line stays blank until you accept the workspace trust
@@ -130,7 +130,7 @@ default, so an update never changes your line without you asking.
 
 - **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only the usage
   colours carry hue). All but `daylight` assume a dark terminal.
-- **Colours off**: set `NO_COLOR` (to any value) in the environment you start Claude Code from.
+- **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.
   Other programs Claude Code starts see it too.
 
 ## Update
@@ -155,7 +155,7 @@ Then run `/reload-plugins`. Your `statusLine` entry doesn't change between versi
   session name. `cache:` is not in 0.1.0.
 - One small folder per session is left in the plugin's data folder after the session ends.
 - Labels are English only for now.
-- A line can lag the session by up to about a second. If the plugin stops (turned off, or a
+- A line can lag the session by up to about two seconds. If the plugin stops (turned off, or a
   crash), the last line stays on screen with frozen numbers.
 
 ## Development
@@ -164,4 +164,4 @@ Then run `/reload-plugins`. Your `statusLine` entry doesn't change between versi
   checked.
 - [AGENTS.md](AGENTS.md): working rules for coding agents in this repo.
 - Checks: `claude plugin validate .`, `tsc -p .`, `claude plugin test .`,
-  `sh tests/reader.test.sh` (DESIGN.md "Tests" has the details).
+  `sh tests/reader.test.sh`, `sh tests/manifest.test.sh` (DESIGN.md "Tests" has the details).

@@ -2,6 +2,114 @@
   "name": "vargus",
   "version": "0.0.0",
   "description": "A Claude Code status line fed by a mod: context, limits, tokens, git, written by the mod and printed by a one-line statusLine command",
-  "author": { "name": "zhoufanscut" },
-  "repository": "https://github.com/zhoufanscut/VArgus"
+  "author": {
+    "name": "zhoufanscut"
+  },
+  "repository": "https://github.com/zhoufanscut/VArgus",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "folder": {
+      "type": "boolean",
+      "title": "Folder",
+      "description": "Show the working folder (~/proj/x)",
+      "default": true
+    },
+    "model": {
+      "type": "boolean",
+      "title": "Model",
+      "description": "Show the model (opus)",
+      "default": true
+    },
+    "effort": {
+      "type": "boolean",
+      "title": "Model: effort",
+      "description": "Add the effort level to the model (opus:high)",
+      "default": true
+    },
+    "rateLimits": {
+      "type": "boolean",
+      "title": "Rate limits",
+      "description": "Show the 5-hour and 7-day limits with time to reset (5h:4%(4h37m))",
+      "default": true
+    },
+    "spendLimit": {
+      "type": "boolean",
+      "title": "Rate limits: spend limit",
+      "description": "Add a gateway's spend limit (spend:63%(25d3h))",
+      "default": false
+    },
+    "otherModelWeekly": {
+      "type": "boolean",
+      "title": "Rate limits: other models' weekly",
+      "description": "Add weekly limits of models other than Sonnet and Opus",
+      "default": false
+    },
+    "context": {
+      "type": "boolean",
+      "title": "Context",
+      "description": "Show how full the context window is (ctx:20%)",
+      "default": true
+    },
+    "tokens": {
+      "type": "boolean",
+      "title": "Tokens",
+      "description": "Show tokens since the mod loaded, the last /clear or resume (token:69.5k)",
+      "default": true
+    },
+    "session": {
+      "type": "boolean",
+      "title": "Session time",
+      "description": "Show time since the session started (session:24m)",
+      "default": true
+    },
+    "callCounts": {
+      "type": "boolean",
+      "title": "Call counts",
+      "description": "Show tool calls, agents and skills (🔧73 🤖2 ⚡1)",
+      "default": true
+    },
+    "workflowRuns": {
+      "type": "boolean",
+      "title": "Call counts: workflow runs",
+      "description": "Add workflow runs to the call counts",
+      "default": false
+    },
+    "repo": {
+      "type": "boolean",
+      "title": "Repository",
+      "description": "Show the repository name (repo:VArgus)",
+      "default": true
+    },
+    "branch": {
+      "type": "boolean",
+      "title": "Branch",
+      "description": "Show the branch (branch:main)",
+      "default": true
+    },
+    "detachedHead": {
+      "type": "boolean",
+      "title": "Branch: detached HEAD",
+      "description": "On a detached HEAD, name its commit or tag instead of hiding the branch",
+      "default": false
+    },
+    "status": {
+      "type": "boolean",
+      "title": "Working-tree status",
+      "description": "Show staged, modified, untracked and other counts (?4)",
+      "default": true
+    },
+    "theme": {
+      "type": "string",
+      "title": "Theme",
+      "description": "Colour theme",
+      "default": "graphite",
+      "options": [
+        "aurora",
+        "ember",
+        "nebula",
+        "graphite",
+        "daylight"
+      ]
+    }
+  }
 }
