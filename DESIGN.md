@@ -12,8 +12,9 @@ goes in CHANGELOG.md, why one change was made in its commit message.
 
 No code exists yet, so until the first release this file is the intended design. A point that a
 live session still has to settle is marked **Unsettled** and listed in [Unsettled](#unsettled).
-The mod API is early access: each fact about it here was read from the types and docs of the
-Claude Code version named in [Scope](#scope), and is re-checked on each new release.
+The mod API is early access: each fact about it here was read from the types and docs, or
+measured, on the Claude Code version named in [Scope](#scope) or beside the fact, and is
+re-checked on each new release.
 
 Code comments cite this file by section name: `(DESIGN, "The line file")`.
 
@@ -33,7 +34,8 @@ Code comments cite this file by section name: `(DESIGN, "The line file")`.
 ## Scope
 
 - Claude Code 2.1.299 or later: mods are on by default from 2.1.287, and the facts below were
-  checked on 2.1.299 (older versions are untested). The live-agents row planned after 0.1.0 needs
+  checked on 2.1.299 and re-checked on 2.1.300; a measured fact names its version (older versions
+  are untested). The live-agents row planned after 0.1.0 needs
   2.1.299 too: that is where `turn.start` began to hear subagents' turns.
 - The line shows wherever Claude Code shows a `statusLine`: `claude` in a terminal, an editor's
   integrated terminal included. Where the status line is not drawn (the VS Code extension's chat
@@ -48,7 +50,7 @@ own tmux pane, code shared with VantageHUD.
 
 | decision | why |
 |---|---|
-| 0.1.0 shows VantageHUD's fragments in VantageHUD's order, each on or off by default as there ([Fragments](#fragments)); none is added or removed before 0.1.0 | The first release replaces VantageHUD like for like, so the two can be compared fragment by fragment; which fragments to add or remove is decided after 0.1.0 |
+| 0.1.0 shows VantageHUD's fragments in VantageHUD's order, each on or off by default as there ([Fragments](#fragments)); none is added or removed before 0.1.0, except `cache:` (off by default there), left out by the maintainer's choice ([What VArgus cannot show](#what-vargus-cannot-show)) | The first release replaces VantageHUD like for like, so the two can be compared fragment by fragment; which fragments to add or remove is decided after 0.1.0 |
 | English only in 0.1.0, through one labels table per language ([Languages](#languages)) | One language to test; a second is then one file and one registry line, with no change to the fragments |
 | The mod collects and renders; the `statusLine` command only prints | The status-line row is where the person wants the HUD, and no mod can draw there or set `statusLine`. A mod can do everything else: it stays loaded, hears each request's usage, keeps state in memory and runs a clock while the session is idle. So the work moves into the mod and the command shrinks to a `cat` |
 | The reader is one `cat`, never Node | VantageHUD starts Node for every frame; a bare Node start alone costs 37 ms, against 2-3 ms for one `cat` as Claude Code runs it, in a shell (1.7 ms under dash, 2.7 ms under bash; measured 2026-10-14 on the dev machine). Cheap enough to run every second |
@@ -105,13 +107,12 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
 
 | Data | Source | Basis |
 |---|---|---|
-| Tokens per request, per agent (subagents; workflow agents and teammates: [Unsettled](#unsettled) 5), counted from when this process loaded the mod or from the last clear/resume; a resumed session's earlier history is not in them, while `$.session.usage()` counts from its first launch | `turn.step` result `usage` ("as the API reported it"), `e.agentId` | types; workflow agents unverified |
+| Tokens per request, per agent (subagents; workflow agents and teammates: [Unsettled](#unsettled) 2), counted from when this process loaded the mod or from the last clear/resume; a resumed session's earlier history is not in them, while `$.session.usage()` counts from its first launch | `turn.step` result `usage` ("as the API reported it"), `e.agentId` | types; a subagent's steps measured (2.1.300); workflow agents unverified |
 | Context %, cost, session start, `five_hour`/`seven_day`/`spend_limit` | `$.session.usage()`; pushed by `session.measure` after each main-thread turn and when a limit window moves a whole point | types |
-| `cache:` warm or cold | `turn.step` usage of the main loop's requests (`cache_read_input_tokens`, `cache_creation_input_tokens`) and when the last one ended; the cache's lifetime is not in it | **unsettled**: [Unsettled](#unsettled) 9 |
 | Folder, model, effort | `$.session.cwd()`, `$.session.model()`, `effort` on `turn.step`'s input | types |
 | Tool / agent / skill / workflow counts | `tool.call`, `agent.spawn` | types |
 | Live agents (running, done), for the row after 0.1.0 | `agent.spawn`, `turn.start` / `turn.complete` with `e.agentId` (subagents' turns since 2.1.299) | types, CHANGELOG 2.1.299 |
-| Per-model weekly (`sn:`/`op:`/others), `extra:` | OAuth usage API via `$.http.fetch` + `$.session.authorize()`, cached in `$.store` | **unverified**: [Unsettled](#unsettled) 6 |
+| Per-model weekly (`sn:`/`op:`/others), `extra:` | OAuth usage API via `$.http.fetch` + `$.session.authorize()`, cached in `$.store` | measured: HTTP 200 on the dev machine, where the API answers only through `HTTPS_PROXY` (2.1.300) |
 | git | `$.session.repo()`, `$.process.run` (no shell; git runs with repo hooks off) | types |
 | svn | `$.process.run(['svn', 'status', '--xml', ...])` | types |
 | Clock-driven fragments (countdowns, session time) | `$.clock.every(1000)`, which keeps running between turns (mods/api: "keeps running between turns and doesn't start one") | docs |
@@ -119,12 +120,18 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
 ### When the line is written
 
 - The mod renders on each change of a value and on each `$.clock.every(1000)` tick, and writes the
-  file only when the text differs from what it last wrote. Why: the reader runs every second, and
+  file only when the text or the session id differs from what it last wrote (the id because after
+  a resume the id can change a moment after the text did, [The line file](#the-line-file)).
+  Why: the reader runs every second, and
   most ticks change nothing. So the shown line can lag the mod's values by up to about a second:
   an event-triggered reader run can come before the mod's write.
 - Only an interactive session writes (`session.start`'s `isInteractive`). Why: `claude -p` and
   SDK runs load plugins too, show no status line, and would each leave a folder behind.
-- The width comes from [Unsettled](#unsettled) 4. Fragments are dropped from the end, whole,
+- The width is `e.viewport.columns` read by a `ui.render` hook on `PromptHint` that only
+  observes (it returns `next(e)`): the host gives a width only to `ui.render` hooks. Measured
+  (2.1.300): the hook ran on each resize, and its width matched the reader's `COLUMNS` at 80 and
+  133 columns (both in fullscreen mode; the main screen is not measured). Until the first width
+  arrives nothing is dropped. Fragments are dropped from the end, whole,
   when the row is too narrow. 0.1.0 uses one row; a second row is for the live agents, after
   0.1.0. Claude Code's own
   notifications share the right side of the row (statusline docs), so the usable width is less
@@ -136,7 +143,8 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
 ## Fragments
 
 0.1.0 shows VantageHUD 0.6.0's fragments in its order (`DEFAULT_ELEMENT_ORDER.main` in
-`src/hud/types.js`), joined by ` | `, each on or off by default as there. Each fragment and each
+`src/hud/types.js`), joined by ` | `, each on or off by default as there, except `cache:`
+(row 5). Each fragment and each
 sub-option is a `userConfig` boolean.
 
 | # | fragment | example | default | sub-options (default) |
@@ -145,7 +153,7 @@ sub-option is a `userConfig` boolean.
 | 2 | model | `opus:high` | on | effort (on) |
 | 3 | rate limits | `5h:4%(4h37m) 7d:39%(5d6h)` | on | spend limit (off), other models' weekly (off) |
 | 4 | context | `ctx:20%` | on | |
-| 5 | prompt cache | `cache:warm(14:30)` | off | |
+| 5 | prompt cache | `cache:warm(14:30)` | not in 0.1.0 | |
 | 6 | tokens | `token:69.5k` | on | |
 | 7 | session time | `session:24m` | on | |
 | 8 | call counts | `🔧73 🤖2 ⚡1` | on | workflow runs (off) |
@@ -155,7 +163,8 @@ sub-option is a `userConfig` boolean.
 
 - Where VantageHUD read a value from the status-line payload, VArgus takes it from the host
   ([Data sources](#data-sources)). The spend limit loses its dollars ([What VArgus cannot
-  show](#what-vargus-cannot-show)); `cache:` waits on [Unsettled](#unsettled) 9.
+  show](#what-vargus-cannot-show)). `cache:` is left out (off by default in VantageHUD, so the
+  default line is unchanged).
 - git or svn fills 9-11, as in VantageHUD.
 
 ## Languages
@@ -189,25 +198,35 @@ language touches no fragment.
 ## The line file
 
 - One folder per session: `<data>/<session id>/line`, where `<data>` is the plugin's data folder,
-  `~/.claude/plugins/data/vargus-<marketplace>/` in the docs. Why: that folder survives plugin
-  updates, while the plugin's install folder changes with each version (plugins/components docs).
-  The mod builds the path as `$CLAUDE_CONFIG_DIR`, else `$HOME/.claude`, then
-  `/plugins/data/vargus-<marketplace>`, reading both with `$.env.get` (`$.fs` does not expand
-  `~`). `$.plugin` gives only `name` and `root`, and `<marketplace>` is the `name` in the repo's
-  own `marketplace.json`, so the rest is constants. Whether Claude Code puts the folder under
-  `CLAUDE_CONFIG_DIR` is not documented: if the mod's path and the skill's `${CLAUDE_PLUGIN_DATA}`
-  differ, the row stays blank. Under `--plugin-dir` the plugin is
-  `vargus@inline`, so its folder is likely `vargus-inline`: a reader set up for the installed
-  plugin shows nothing while developing. **Unsettled** 3.
+  `vargus-vargus` (plugin `vargus` from marketplace `vargus`, the `name` in the repo's own
+  `marketplace.json`). Why: that folder survives plugin updates, while the plugin's install folder
+  changes with each version (plugins/components docs). The mod builds the path as
+  `$CLAUDE_CONFIG_DIR`, else `$HOME/.claude`, then `/plugins/data/vargus-vargus`, reading both with
+  `$.env.get` (`$.fs` does not expand `~`; the mod's env has no `CLAUDE_PLUGIN_DATA`). Measured
+  (2.1.300, a throwaway plugin installed from a local directory marketplace): the skill's
+  `${CLAUDE_PLUGIN_DATA}` named the path the mod built, with and without `CLAUDE_CONFIG_DIR` set;
+  the folder did not exist until the mod's first `$.fs.write`, which created it and the session
+  folder beneath; uninstalling deleted it. Under `--plugin-dir` the skill's
+  `${CLAUDE_PLUGIN_DATA}` named `<plugin>-inline` (measured, 2.1.300), so a reader set up for the
+  installed plugin shows nothing while developing against the folder.
 - The session id is re-read with `$.session.id()` on every write, never kept from the start. Why:
   `/clear` and an in-session resume go on under a new session id with no `session.start` (types,
   `SessionEndInput`). At `session.end` with reason `clear` or `resume` ("another took its place")
-  the mod also starts its own counts over, as `$.session.usage()` does at `/clear`. The counts
-  live in `$.state`, so a hot reload keeps them (the types say so; a lost worker is not stated,
-  [Unsettled](#unsettled) 8). The reader keys on
-  `CLAUDE_CODE_SESSION_ID`; both sides use the id as given, and the mod writes nothing for an
-  empty id. **Unsettled** 1. Why it matters: VantageHUD once keyed its cache on a variable Claude
-  Code doesn't export, so concurrent sessions shared one file and `ctx:` dropped to 0%.
+  the mod also starts its own counts over, as `$.session.usage()` does at `/clear`. The counts live
+  in `$.state`, so a hot reload keeps them (the types say so; a lost worker is not stated,
+  [Unsettled](#unsettled) 4). The reader keys on `CLAUDE_CODE_SESSION_ID`; both sides use the id as
+  given, and the mod writes nothing for an empty id. Measured (2.1.300, a second session driven in
+  tmux): the reader's `CLAUDE_CODE_SESSION_ID` and the payload's `session_id` agreed in all 618
+  reader runs (212 of them the two probe sessions', 148 of those the one with the `/clear` and
+  `/resume`), and the mod's `$.session.id()` moved to the same ids at the start, a `/clear` and an
+  in-session `/resume`. In the one resume measured, `$.session.id()` still gave the cleared
+  session's id at the new session's start event; the mod's 1 s tick saw the change 0.75 s later, and
+  the reader's first run under the new id came 0.56 s after the start event. A write between the
+  start event and the tick lands in a folder no reader reads any more, and the next write goes to
+  the new id's folder because the id changed ([When the line is
+  written](#when-the-line-is-written)). The mod's env has no `CLAUDE_CODE_SESSION_ID`. Why it
+  matters: VantageHUD once keyed its cache on a variable Claude Code doesn't export, so concurrent
+  sessions shared one file and `ctx:` dropped to 0%.
 - Each write goes to `line.<t>.tmp` in the same folder, then `$.process.run(['mv', '-f', <tmp>,
   <line>])` puts it in place. `<t>` is `$.clock.now()` taken at `session.start`, so each loaded copy
   of the mod (after a hot reload, or a second process on the session) has its own temp file. Why:
@@ -229,7 +248,9 @@ language touches no fragment.
   removed ([Not in this version](#not-in-this-version)).
 - If `mv` fails (an organization hook refuses the process, say), the mod writes `line` directly;
   a read can then catch a half-written line for one run.
-- Whether two Claude Code processes can write one session's file is not known. **Unsettled** 2.
+- Whether two Claude Code processes can write one session's file is not known. **Unsettled** 1.
+  `mv` on the real data folder's disk (ext4) against tmpfs, in one run from Python (300 each,
+  2026-10-15): median 1.28 against 1.26 ms, 95th percentile 2.11 against 1.57 ms.
 - The folder is left behind when the session ends: `$.fs` has no delete. Later: remove it at
   `session.end`, plus an age prune for sessions that were killed ([Not in this
   version](#not-in-this-version)).
@@ -251,8 +272,8 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
   blank for that run. A mod that wrote and then stopped (turned off, a lost worker) leaves its last
   line on screen with frozen numbers: the reader can't tell; see [Not in this
   version](#not-in-this-version).
-- It never reads stdin: the payload is not used. Fallback if [Unsettled](#unsettled) 1 fails:
-  take `session_id` from stdin with one `sed`, as VantageHUD's `statusline.sh` did.
+- It never reads stdin: the payload is not used ([The line file](#the-line-file) measured
+  `CLAUDE_CODE_SESSION_ID` against it).
 
 ## Setup
 
@@ -262,6 +283,10 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
   The same skill removes the entry before an uninstall.
 - Uninstalling deletes the plugin's data folder by default (plugins/manifest-reference), so a
   reader left in settings shows a blank row from then on: the `statusLine` entry goes first.
+- A project's `statusLine` replaces the person's: measured on 2.1.300 for
+  `.claude/settings.local.json`, where a session already running switched to the project's entry;
+  project settings outrank user settings, so `.claude/settings.json` does too. The skill checks
+  both and says so when it finds one.
 - README.md holds the same steps for doing it by hand.
 
 ## The host
@@ -269,9 +294,11 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 - **Lifecycle**: module variables are shared by the module's hooks but lost on hot reload (and on
   a lost worker), so in-memory values start over; `$.state` (session) survives a reload,
   `$.store` (cross-session JSON, 4 MiB) too. A reload runs `register` and `session.start` again.
-- **Develop against the folder** (`--plugin-dir`, or the mods folder with hot reload): an
-  installed plugin is a cached copy keyed by version, so edits reach it only after a version
-  bump.
+- **Develop against the folder** (`--plugin-dir`, or the mods folder with hot reload): a plugin
+  installed from a git marketplace is a cached copy keyed by version, so edits reach it only after
+  a version bump. One installed from a local directory marketplace runs from that folder
+  (`$.plugin.root`, measured on 2.1.300); whether edits reach it without a restart is not
+  measured.
 - **`userConfig`**: flat fields, `type` one of `string`, `number`, `boolean`, `directory`,
   `file`; `options` gives a picker (≥ 2.1.271; older versions can't load the plugin at all);
   each option is a `/config` row (≥ 2.1.269) except `sensitive` and `multiple`; unknown keys fail
@@ -289,6 +316,15 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 - **Modules**: `.ts`, `.tsx`, `.jsx`, `.js`, `.mjs`, `.cjs`, `.mts` or `.cts`, ES modules; imports
   only the mod's own files and `claude-code` (probed with `claude plugin validate` on 2.1.296 and
   2.1.299).
+- **How `claude plugin validate` reads a module** (2.1.300): "$ is always spelled
+  $.noun.event(...) at the call site, on is always on("<event>", hook)". So it refuses an `on()`
+  whose event is not a string literal, `const s = $.session`, `const { session } = $`, `$[k]`,
+  `const p = $.plugin` (`$.plugin.name` and `.root` pass), and `$` passed to a function that is
+  neither top-level in the module nor imported from the mod's own files. A `turn.step` hook must
+  be an async generator (`async function* ($, e, next)`, `yield* next(e)`), since `turn.step`
+  streams.
+- **Classic hook events** (`classic.<Event>`) do not run in a plugin a person installs where an
+  organization manages Claude Code (`claude plugin validate`, 2.1.300). VArgus hooks none.
 - **Marketplace**: `.claude-plugin/marketplace.json` with `source: "./"` makes the repo its own
   marketplace.
 
@@ -367,50 +403,34 @@ for it, not the code.
 
 ## What VArgus cannot show
 
-- Data only the status-line payload carries: `prompt_cache` as the payload gives it (VantageHUD's
-  `cache:` fragment, which VArgus rebuilds from `turn.step` usage if [Unsettled](#unsettled) 9
-  allows), lines added and removed, PR state, `session_name`, `workspace`, API and wall
+- Data only the status-line payload carries: `prompt_cache` as the payload gives it, lines added
+  and removed, PR state, `session_name`, `workspace`, API and wall
   durations, and the spend limit's dollars (`$.session.usage()` rate limits carry only `kind`,
   `percentUsed`, `resetsAt`). Dropped in 0.1.0; re-check what mod events carry before calling any
   of these lost (`turn.step` usage has the cache read and write tokens per request).
+- `cache:` (VantageHUD's prompt-cache fragment), left out of 0.1.0 by the maintainer's choice.
+  `turn.step` usage has the cache read and write tokens, but saying when the cache goes cold
+  needs its lifetime (5 min or 1 h). No mod event reports it outside a model switch
+  (`classic.PreModelSwitch`'s `cache_ttl`, `1h` on the dev machine on 2.1.300); `ModelUsage` has
+  no lifetime split (2.1.300 added one to the OpenTelemetry `api_request` event only). A mod
+  could work it out from `$.settings.read()` (`promptCacheTtl`, CHANGELOG 2.1.243), the env
+  (`ENABLE_PROMPT_CACHING_1H`, `FORCE_PROMPT_CACHING_5M`, 2.1.108) and the plan (1 h for
+  subscribers, CHANGELOG 2.1.108), but that copies the engine's rule, which can change.
 - Teammates running in their own tmux pane: each "runs no loop here", so their requests are not
   seen.
 - The old payload's `cost.total_cost_usd` included teammates; whether `$.session.usage().cost`
-  does is unverified ([Unsettled](#unsettled) 7).
+  does is unverified ([Unsettled](#unsettled) 3).
 
 ## Unsettled
 
-What the types and docs alone can't settle; a throwaway mod run in a live session settles it.
+What the types and docs alone can't settle and no live session has settled yet; none blocks
+0.1.0's line. A throwaway mod run in a live session settles each.
 
-1. `$.session.id()`, the payload's `session_id` and `CLAUDE_CODE_SESSION_ID` in the reader's env
-   are the same value, at the start, after `/clear` and after an in-session resume
-   ([The line file](#the-line-file)).
-2. Whether two Claude Code processes can write one session's line file (the same session resumed
-   in a second window), and whether `mv` costs the same on the real data folder's disk as on the
-   tmpfs it was measured on ([The line file](#the-line-file)).
-3. The mod can write to the plugin's data folder; the folder's real name (`<id>` is the plugin id
-   with every character other than letters, digits, `_` and `-` replaced by `-`); where it is when
-   `CLAUDE_CONFIG_DIR` is set; and what `${CLAUDE_PLUGIN_DATA}` expands to in the setup skill.
-4. How the mod learns the width. The host gives a width only to `ui.render` hooks
-   (`e.viewport`); a hook on `PromptHint` that reads it and passes on with `next(e)` would observe
-   without drawing. The reader's `COLUMNS` (set since 2.1.153 per the CHANGELOG) can only serve
-   to check it: the mod can't see the reader's env.
-5. `turn.step` carries usage for workflow (`ultracode`) agents and Agent-tool teammates.
-6. `$.http.fetch` + `authorize()` reaches `/api/oauth/usage`, and does so through `HTTPS_PROXY`
-   (on the dev machine the API is reachable only via the proxy). The engine sets the credential
-   header "only for a first-party host"; no docs page mentions a proxy for mods, and the types'
-   "no proxy" is said of `socketPath` only. If not: `$.process.run` of a small fetch script
-   (children inherit the env, so the proxy vars), or drop per-model weekly.
-7. Whether `$.session.usage().cost` includes teammates.
-8. Whether `$.state` survives a lost worker, as it survives a hot reload.
-9. Whether the mod can learn the prompt cache's lifetime (5 min or 1 h), which `cache:` needs to
-   say when the cache goes cold. `turn.step`'s `ModelUsage` has the cache read and write tokens but
-   no lifetime; a split by lifetime (`cache_creation.ephemeral_5m_input_tokens`,
-   `ephemeral_1h_input_tokens`) is declared only on the Agent tool's result. Lead: a mod can hear
-   classic hook events as `classic.<Event>`; `classic.PreModelSwitch` and
-   `classic.PostModelSwitch` carry `cache_ttl: '5m' | '1h'`, and `classic.SessionStart` on a
-   resume carries `prompt_cache_likely_expired`. Check whether one of them, or a setting they
-   reflect, gives the lifetime outside a switch. If not, 0.1.0 ships without `cache:`.
+1. Whether two Claude Code processes can write one session's line file (the same session resumed
+   in a second window) ([The line file](#the-line-file)).
+2. `turn.step` carries usage for workflow (`ultracode`) agents and Agent-tool teammates.
+3. Whether `$.session.usage().cost` includes teammates.
+4. Whether `$.state` survives a lost worker, as it survives a hot reload.
 
 ## Tests
 

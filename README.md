@@ -28,7 +28,7 @@ A planned line (numbers made up):
 |---|---|
 | `~/proj/VArgus` | the working folder |
 | `opus:high` | the model and effort level |
-| `5h:` `7d:` | rate-limit windows, used percent and time until each resets; a spend limit (off by default); per-model weekly limits if the usage API works from a plugin (to be confirmed) |
+| `5h:` `7d:` | rate-limit windows, used percent and time until each resets; a spend limit (off by default); per-model weekly limits (`sn:` from 80 %, `op:`; other models off by default) |
 | `ctx:` | how full the context window is |
 | `token:` | tokens since the mod loaded or the last `/clear` or resume, from each API request, the main conversation and subagents together |
 | `session:` | time since the session started |
@@ -37,8 +37,9 @@ A planned line (numbers made up):
 | `?4` | working-tree status: staged `+`, modified `!`, untracked `?`, conflicts `✗`, ahead `⇡`, behind `⇣` |
 
 These are VantageHUD's fragments, in its order. Each has an option in `/config`; the ones off by
-default are the spend limit, other models' weekly limits, prompt cache (`cache:`), workflow runs
-and naming a detached HEAD.
+default are the spend limit, other models' weekly limits, workflow runs and naming a detached
+HEAD. VantageHUD's `cache:` (off by default there) is not in 0.1.0: outside a model switch no
+event tells the mod how long the prompt cache lasts.
 
 ## How it works
 
@@ -66,7 +67,7 @@ VArgus has two parts:
 | While idle or while subagents work | the line can freeze | refreshes every second |
 | Token counts | rebuilt from transcript files, a lower bound (`token:~`) | from each API request, per agent, since the mod loaded (or the last `/clear` or resume) |
 | Colours | detects colour depth, converts to 256 or 16 colours | 24-bit colour; `NO_COLOR` turns it off |
-| Not shown any more | | the spend limit's dollars; `cache:` if the mod can't learn the cache's lifetime (to be checked) |
+| Not shown any more | | the spend limit's dollars; `cache:` |
 
 ## Requirements
 
@@ -108,13 +109,10 @@ default config folder (`~/.claude`); with `CLAUDE_CONFIG_DIR` set, let the skill
 ```json
 "statusLine": {
   "type": "command",
-  "command": "cat \"$HOME/.claude/plugins/data/vargus-<marketplace>/$CLAUDE_CODE_SESSION_ID/line\" 2>/dev/null",
+  "command": "cat \"$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line\" 2>/dev/null",
   "refreshInterval": 1
 }
 ```
-
-The exact folder name (`vargus-<marketplace>`) is settled before the first release; the skill
-fills in the real path for you.
 
 ## Verify it works
 
@@ -154,7 +152,7 @@ Then run `/reload-plugins`. Your `statusLine` entry doesn't change between versi
 
 - Teammates that run in their own tmux pane are not seen.
 - Data that only Claude Code's status-line input carries is not shown: lines changed, PR state,
-  session name; `cache:` only if the mod can learn the cache's lifetime.
+  session name. `cache:` is not in 0.1.0.
 - One small folder per session is left in the plugin's data folder after the session ends.
 - Labels are English only for now.
 - A line can lag the session by up to about a second. If the plugin stops (turned off, or a
