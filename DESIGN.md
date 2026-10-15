@@ -292,12 +292,21 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
   follows it: show the current `statusLine` entry, if any, and ask before replacing it; write the
   reader with `refreshInterval: 1`; tell the person the line shows from the next status-line run.
   The same skill removes the entry before an uninstall.
+- The reader goes where the plugin runs. Installed at user scope, the skill writes it into the user
+  settings. Installed only at project or local scope (scope and project from `claude plugin list
+  --json`), the mod writes no line elsewhere, so a reader in the user settings would leave the row
+  blank in every other project (the same mechanism as on 2026-10-15, when a project-local reader
+  blanked a session that hadn't loaded the plugin): the skill offers a user-scope install or the
+  reader in that project's `.claude/settings.local.json`, never the committed
+  `.claude/settings.json`, since the reader names a folder in one person's home. The mod's folder is
+  fixed at `vargus-vargus`, so installed from a marketplace with another name the reader would name
+  a folder the mod never writes: the skill says so and stops.
 - Uninstalling deletes the plugin's data folder by default (plugins/manifest-reference), so a
   reader left in settings shows a blank row from then on: the `statusLine` entry goes first.
 - A project's `statusLine` replaces the person's: measured on 2.1.300 for
   `.claude/settings.local.json`, where a session already running switched to the project's entry;
-  project settings outrank user settings, so `.claude/settings.json` does too. The skill checks
-  both and says so when it finds one.
+  project settings outrank user settings, so `.claude/settings.json` does too. When it writes the
+  user settings, the skill checks both and says so when it finds one.
 - README.md holds the same steps for doing it by hand.
 
 ## The host
@@ -308,8 +317,9 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 - **Develop against the folder** (`--plugin-dir`, or the mods folder with hot reload): a plugin
   installed from a git marketplace is a cached copy keyed by version, so edits reach it only after
   a version bump. One installed from a local directory marketplace runs from that folder
-  (`$.plugin.root`); an edit reaches a running session at `/reload-plugins`, not before
-  (measured on 2.1.300).
+  (`$.plugin.root`); an edit reaches a running session at `/reload-plugins`, not before, and a new
+  session runs the folder's code also after its version moved past the installed one (recorded
+  0.1.0, folder 0.1.1; measured on 2.1.300).
 - **`userConfig`**: flat fields, `type` one of `string`, `number`, `boolean`, `directory`,
   `file`; `options` gives a picker (≥ 2.1.271; older versions can't load the plugin at all);
   each option is a `/config` row (≥ 2.1.269) except `sensitive` and `multiple`; unknown keys fail

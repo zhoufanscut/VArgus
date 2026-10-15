@@ -84,8 +84,28 @@ In Claude Code:
 /plugin install vargus --marketplace zhoufanscut/VArgus
 ```
 
-Answer `y` to add the marketplace, then pick a scope. From a shell instead:
-`claude plugin install vargus --marketplace zhoufanscut/VArgus`.
+Answer `y` to add the marketplace, then pick the **user** scope, so the line shows in every
+project. From a shell instead: `claude plugin install vargus --marketplace zhoufanscut/VArgus`
+(user scope is the default). Installed for one project only, the mod runs only there: the setup
+skill then offers a user-scope install, or puts the status-line command in that project's
+`.claude/settings.local.json`, since in your user settings it would leave the row blank in every
+other project.
+
+#### Or from a clone, updated with `git pull`
+
+```sh
+git clone https://github.com/zhoufanscut/VArgus ~/.claude/VArgus   # any folder works
+claude plugin marketplace add ~/.claude/VArgus
+claude plugin install vargus@vargus                                # user scope by default
+```
+
+Claude Code reads a plugin from a folder marketplace straight from that folder (`claude plugin
+list` shows `Read from: <folder>`), so `git -C ~/.claude/VArgus pull` updates it, no reinstall:
+a new session runs the pulled code, also across a version change, and `/reload-plugins` brings it
+into an open one. You then follow `main`, every commit as soon as you pull. To stay on a release
+instead, `git -C ~/.claude/VArgus checkout v0.1.1`; to update, `git -C ~/.claude/VArgus fetch
+--tags` and check out the newer tag (`pull` doesn't work on a checked-out tag). Add only one of
+the two marketplaces: both are named `vargus`.
 
 ### 2. Load it
 
@@ -102,7 +122,8 @@ entry if you have one, asks before replacing it, and adds the VArgus one.
 
 #### By hand
 
-Add this to `~/.claude/settings.json`, replacing any `statusLine` entry you have. It assumes the
+Add this to `~/.claude/settings.json` (or, for a plugin installed for one project only, to that
+project's `.claude/settings.local.json`), replacing any `statusLine` entry you have. It assumes the
 default config folder (`~/.claude`); with `CLAUDE_CONFIG_DIR` set, let the skill do it.
 
 ```json
@@ -138,14 +159,18 @@ default, so an update never changes your line without you asking.
 /plugin update vargus
 ```
 
-Then run `/reload-plugins`. Your `statusLine` entry doesn't change between versions.
+Then run `/reload-plugins`. Your `statusLine` entry doesn't change between versions. Installed
+from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-plugins`.
 
 ## Uninstall
 
-1. Remove the `statusLine` entry from `~/.claude/settings.json`, or ask Claude to. Do this first:
+1. Remove the `statusLine` entry from `~/.claude/settings.json` (or, for a one-project install,
+   that project's `.claude/settings.local.json`), or ask Claude to. Do this first:
    uninstalling deletes the plugin's data folder, and a status-line command left behind shows a
    blank row.
-2. `claude plugin uninstall vargus` from a shell, or remove it in `/plugin` under **Installed**.
+2. `claude plugin uninstall vargus@vargus --scope <scope>` from a shell (the scope you installed
+   at; `user` is the default), or remove it in `/plugin` under **Installed**. From a clone, also
+   `claude plugin marketplace remove vargus`.
 
 ## Limits
 

@@ -19,13 +19,30 @@ cat "${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 
 ## Set up
 
-1. The user settings file is `$CLAUDE_CONFIG_DIR/settings.json`, or `~/.claude/settings.json`
-   when `CLAUDE_CONFIG_DIR` is unset. Read it; it may not exist yet.
+1. Pick the settings file by how the plugin is installed. Run `claude plugin list --json` and
+   read the `vargus@...` entries' `scope` and `projectPath` (the list also shows local installs
+   of other projects; the one for this project has `enabled: true`).
+   - Installed from a marketplace not named `vargus` (the id is not `vargus@vargus`): the mod
+     writes its line under `vargus-vargus` while the reader below would name another folder, so
+     the row would stay blank. Tell the person to install from this repo's own marketplace
+     (`zhoufanscut/VArgus`, or a clone of it), and stop.
+   - Installed at `user` scope: the reader goes in the user settings file,
+     `$CLAUDE_CONFIG_DIR/settings.json`, or `~/.claude/settings.json` when `CLAUDE_CONFIG_DIR` is
+     unset. The line then shows in every project.
+   - Installed only at `project` or `local` scope: the mod runs only in that project, so a reader
+     in the user settings file would leave the status line blank in every other project. Tell
+     the person so, and offer two ways: install at user scope (`claude plugin install
+     vargus@vargus --scope user`, then this step again), or put the reader in
+     `<projectPath>/.claude/settings.local.json` (per person and not committed, also for a
+     `project` install, since the reader names a folder in this person's home). Go on with the
+     file they pick.
+
+   Read the chosen file; it may not exist yet.
 2. If its `statusLine` command is already the reader command above, say so and stop. If it has
    another `statusLine` entry (an older VArgus reader with another folder included), show it to
-   the person and ask before replacing it. Offer to keep
-   a copy in `statusLine.before-vargus.json` beside the settings file, so it can be put back
-   later (not in the data folder: uninstalling deletes that).
+   the person and ask before replacing it. When the chosen file is the user settings file, offer
+   to keep a copy in `statusLine.before-vargus.json` beside it, so it can be put back later (not
+   in the data folder: uninstalling deletes that).
 3. Set `statusLine` to the entry below, changing nothing else in the file. In JSON the
    command's inner quotes are escaped:
 
@@ -37,9 +54,9 @@ cat "${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
    }
    ```
 
-4. Check the current project's `.claude/settings.json` and `.claude/settings.local.json`: a
-   `statusLine` there replaces the user's in that project. If one exists, tell the person; change
-   it only if they ask.
+4. With the reader in the user settings file, check the current project's
+   `.claude/settings.json` and `.claude/settings.local.json`: a `statusLine` there replaces the
+   user's in that project. If one exists, tell the person; change it only if they ask.
 5. Tell the person the line shows from the next status-line run, within about two seconds of the
    next reply. A folder whose workspace trust is not yet accepted shows no status line.
 
@@ -54,5 +71,7 @@ cat "${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
    `.claude/settings.json`: it is usually committed and shared. In the user settings file, put
    back the entry kept in `statusLine.before-vargus.json` if there is one and
    the person wants it.
-3. Tell the person they can now uninstall (`claude plugin uninstall vargus`). Uninstalling
-   deletes the plugin's data folder, so a reader left in settings would show a blank row.
+3. Tell the person they can now uninstall: `claude plugin uninstall vargus@vargus --scope
+   <scope>` for each scope `claude plugin list --json` shows (the command's default is `user`),
+   or remove it in `/plugin` under **Installed**. Uninstalling deletes the plugin's data folder,
+   so a reader left in settings would show a blank row.
