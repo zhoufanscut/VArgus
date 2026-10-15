@@ -10,8 +10,7 @@ This file is how VArgus works: each rule, with the reason for it. It is edited i
 rule changes, in the same commit as the code. It holds no history: what shipped in which version
 goes in CHANGELOG.md, why one change was made in its commit message.
 
-Until the first release this file is the intended design, and the code covers only part of it. A
-point that a live session still has to settle is marked **Unsettled** and listed in
+A point that a live session still has to settle is marked **Unsettled** and listed in
 [Unsettled](#unsettled). The mod API is early access: each fact about it here was read from the
 types and docs, or measured, on the Claude Code version named in [Scope](#scope) or beside the fact,
 and is re-checked on each new release.

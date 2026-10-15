@@ -1,11 +1,12 @@
 {
   "name": "vargus",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A Claude Code status line fed by a mod: context, limits, tokens, git, written by the mod and printed by a one-line statusLine command",
   "author": {
     "name": "zhoufanscut"
   },
   "repository": "https://github.com/zhoufanscut/VArgus",
+  "license": "MIT",
   "types": "./types/index.d.ts",
   "userConfig": {
     "folder": {

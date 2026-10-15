@@ -4,9 +4,8 @@ A status line for [Claude Code](https://code.claude.com/docs/en/overview) that k
 session: context, rate limits with live countdowns, token counts from each API request (subagents
 included) and git, in the status-line row under the prompt.
 
-> **Status: in development.** Nothing is released yet; the design is [DESIGN.md](DESIGN.md).
-> Until 0.1.0, use [VantageHUD](https://github.com/zhoufanscut/VantageHUD), which VArgus
-> replaces.
+VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD). How it works, rule by
+rule, is in [DESIGN.md](DESIGN.md); what changed in each version, in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contents
 
