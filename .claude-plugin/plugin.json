@@ -1,6 +1,6 @@
 {
   "name": "vargus",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A Claude Code status line fed by a mod: context, limits, tokens, git, written by the mod and printed by a one-line statusLine command",
   "author": {
     "name": "zhoufanscut"
