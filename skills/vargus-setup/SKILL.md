@@ -15,7 +15,15 @@ The reader command for this install, with this plugin's data folder already fill
 cat "${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 ```
 
-`$CLAUDE_CODE_SESSION_ID` stays as written: Claude Code sets it when it runs the command.
+With the plugin's `blankStopped` option on, the reader instead prints the file only while it is
+under two minutes old, so the row goes blank when the plugin stops mid-session:
+
+```sh
+f="${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line"; [ -n "$(find "$f" -mmin -2 2>/dev/null)" ] && cat "$f"
+```
+
+`$CLAUDE_CODE_SESSION_ID` and `$f` stay as written: the shell fills them in when Claude Code runs
+the command.
 
 ## Set up
 
@@ -37,19 +45,34 @@ cat "${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
      `project` install, since the reader names a folder in this person's home). Go on with the
      file they pick.
 
-   Read the chosen file; it may not exist yet.
-2. If its `statusLine` command is already the reader command above, say so and stop. If it has
-   another `statusLine` entry (an older VArgus reader with another folder included), show it to
-   the person and ask before replacing it. When the chosen file is the user settings file, offer
-   to keep a copy in `statusLine.before-vargus.json` beside it, so it can be put back later (not
-   in the data folder: uninstalling deletes that).
-3. Set `statusLine` to the entry below, changing nothing else in the file. In JSON the
-   command's inner quotes are escaped:
+   Read the chosen file; it may not exist yet. Pick the reader: the second one when
+   `pluginConfigs["vargus@vargus"].options.blankStopped` is `true` in the user settings file,
+   else the first (the option is off by default).
+2. If its `statusLine` command is already the picked reader, say so and stop. If it is another
+   VArgus reader (as Remove step 1 recognises one: the other reader, or another folder), replace
+   it without asking and keep no copy. If it has any other `statusLine` entry, show it to the
+   person and ask before replacing it; when the chosen file is the user settings file, offer to
+   keep a copy in `statusLine.before-vargus.json` beside it, so it can be put back later (not in
+   the data folder: uninstalling deletes that). Never overwrite an existing
+   `statusLine.before-vargus.json`: it holds the entry from before VArgus; keep the copy under a
+   new name instead (`statusLine.before-vargus.2.json`) and tell the person where it is.
+3. Set `statusLine` to the entry below for the picked reader, changing nothing else in the
+   file. In JSON the command's inner quotes are escaped:
 
    ```json
    "statusLine": {
      "type": "command",
      "command": "cat \"${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line\" 2>/dev/null",
+     "refreshInterval": 1
+   }
+   ```
+
+   With `blankStopped` on:
+
+   ```json
+   "statusLine": {
+     "type": "command",
+     "command": "f=\"${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line\"; [ -n \"$(find \"$f\" -mmin -2 2>/dev/null)\" ] && cat \"$f\"",
      "refreshInterval": 1
    }
    ```
@@ -66,10 +89,11 @@ cat "${CLAUDE_PLUGIN_DATA}/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 
 ## Remove (before uninstalling)
 
-1. A VArgus reader is a `statusLine` whose command `cat`s
-   `.../vargus-vargus/$CLAUDE_CODE_SESSION_ID/line`, whatever the folder before it is spelled as
-   (the README's by-hand entry writes `$HOME/.claude/...`). Look in the user settings file and in
-   the current project's `.claude/settings.json` and `.claude/settings.local.json`.
+1. A VArgus reader is a `statusLine` whose command names
+   `.../vargus-vargus/$CLAUDE_CODE_SESSION_ID/line` (either reader above), whatever the folder
+   before it is spelled as (the README's by-hand entries write `$HOME/.claude/...`). Look in the
+   user settings file and in the current project's `.claude/settings.json` and
+   `.claude/settings.local.json`.
 2. Remove the `statusLine` entry from the user settings file and from
    `.claude/settings.local.json`, changing nothing else. Ask before changing the project's
    `.claude/settings.json`: it is usually committed and shared. In the user settings file, put

@@ -6,6 +6,12 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Blank a stopped line** option (`blankStopped`, off by default): if the plugin stops
+  mid-session, the status line goes blank within about two minutes instead of showing frozen
+  numbers. After turning it on or off, ask Claude to set up the VArgus status line again.
+
 ### Fixed
 
 - Each session's folder in the plugin's data folder is removed when the session ends (`/exit`,

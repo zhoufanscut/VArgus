@@ -134,6 +134,16 @@ default config folder (`~/.claude`); with `CLAUDE_CONFIG_DIR` set, let the skill
 }
 ```
 
+With the **Blank a stopped line** option on ([Configure](#configure)), use this entry instead:
+
+```json
+"statusLine": {
+  "type": "command",
+  "command": "f=\"$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line\"; [ -n \"$(find \"$f\" -mmin -2 2>/dev/null)\" ] && cat \"$f\"",
+  "refreshInterval": 1
+}
+```
+
 ## Verify it works
 
 Start a session and send one prompt. The line shows under the prompt within about two seconds
@@ -150,6 +160,13 @@ default, so an update never changes your line without you asking.
 
 - **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only the usage
   colours carry hue). All but `daylight` assume a dark terminal.
+- **Blank a stopped line** (off by default): if the plugin stops mid-session (its module fails
+  to load at `/reload-plugins`; turning it off is expected to do the same, not tested), the row
+  goes blank within about two minutes instead of showing frozen numbers. After turning it on or
+  off in `/config`, ask Claude to set up the VArgus status line again: the status-line command
+  changes to one that checks the file's age (about 3.4 ms a run instead of 1.9 ms), or back. The
+  plugin rewrites the line every 30 s while it is on. Left with that command after turning the
+  option off, the row goes blank whenever the line has not changed for two minutes.
 - **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.
   Other programs Claude Code starts see it too.
 
@@ -182,7 +199,8 @@ from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-
   organization refuses the mod's processes, every session's folder stays.
 - Labels are English only for now.
 - A line can lag the session by up to about two seconds. If the plugin stops (turned off, or a
-  crash), the last line stays on screen with frozen numbers.
+  crash), the last line stays on screen with frozen numbers, unless **Blank a stopped line** is
+  on.
 
 ## Development
 

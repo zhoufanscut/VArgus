@@ -369,3 +369,39 @@ describe('the age prune at session.start', () => {
     expect(removed(w)).toEqual([])
   })
 })
+
+describe('blankStopped: the heartbeat write', () => {
+  const HEART = { options: { ...FOLDER_ONLY.options, blankStopped: true } }
+
+  test('an unchanged line is written again every 30 s', HEART, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    await clock.settle()
+    await clock.advance(29_000)
+    expect(w.writes).toHaveLength(1)
+    await clock.advance(1_000)
+    expect(w.writes).toHaveLength(2)
+    expect(w.writes[1]).toEqual({ path: `${DATA}/S1/line.0.tmp`, text: '~/proj/x' })
+    await clock.advance(30_000)
+    expect(w.writes).toHaveLength(3)
+  })
+
+  test('off: an unchanged line is never written again', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    await clock.advance(120_000)
+    expect(w.writes).toHaveLength(1)
+  })
+
+  test('not for an ended session', HEART, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    await clock.settle()
+    await $.session.end({ reason: 'prompt_input_exit', sessionId: 'S1', resume: { id: 'S1' } })
+    await clock.advance(120_000)
+    expect(w.writes).toHaveLength(1)
+  })
+})

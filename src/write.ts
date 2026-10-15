@@ -14,7 +14,10 @@ export type Writer = {
   dir: string | null
   // line.<t>.tmp: one temp file per loaded copy of the mod.
   tmpName: string
-  last: { id: string; text: string } | null
+  last: { id: string; text: string; at: number } | null
+  // with blankStopped: rewrite an unchanged line this often, so the reader
+  // can tell a stopped mod by the file's age; null: only on a change
+  heartbeatMs: number | null
   // the write loop while it runs
   running: Promise<void> | null
   pending: string | null
@@ -36,6 +39,7 @@ export async function createWriter($: EngineInterface): Promise<Writer> {
     dir: base.startsWith('/') ? `${base}/plugins/data/${DATA_FOLDER}` : null,
     tmpName: `line.${await $.clock.now()}.tmp`,
     last: null,
+    heartbeatMs: null,
     running: null,
     pending: null,
     ended: null,
@@ -101,7 +105,10 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
     const next = w.pending
     w.pending = null
     const id = await $.session.id()
-    if (!w.dir || !id || id === w.ended || (w.last?.id === id && w.last.text === next)) continue
+    if (!w.dir || !id || id === w.ended) continue
+    const now = w.heartbeatMs === null ? 0 : await $.clock.now()
+    const same = w.last?.id === id && w.last.text === next
+    if (same && (w.heartbeatMs === null || now - w.last!.at < w.heartbeatMs)) continue
     const folder = `${w.dir}/${id}`
     const line = `${folder}/line`
     const tmp = `${folder}/${w.tmpName}`
@@ -114,6 +121,6 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
     }
     // Not atomic: a read can catch a half-written line for one run.
     if (!moved) await $.fs.write(line, next)
-    w.last = { id, text: next }
+    w.last = { id, text: next, at: now }
   }
 }

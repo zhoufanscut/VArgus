@@ -301,9 +301,33 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 - One `cat`: 2-3 ms a run as Claude Code runs it, in a shell.
 - The mod replaces the file whole ([The line file](#the-line-file)), so a read shows a whole line,
   except in the direct-write fallback there. When the file is missing `cat` exits 1 and the row is
-  blank for that run. A mod that wrote and then stopped (turned off, a lost worker) leaves its last
-  line on screen with frozen numbers: the reader can't tell; see [Not in this
-  version](#not-in-this-version).
+  blank for that run.
+- A mod that wrote and then stopped leaves its last line on screen with frozen numbers. Measured
+  (2.1.300, a renamed dev copy under `--plugin-dir` with the installed plugin off for that
+  session): a broken module picked up by hot reload left the old copy running ("reload failed,
+  the previous version stays loaded"), but `/reload-plugins` dropped it ("hooks module did not
+  load", 0 hooks); the file's time stopped and three minutes later the row still read
+  `session:2m` with the `5h:` countdown stuck. Turning the plugin off mid-session is expected to
+  do the same (not measured); a lost worker is [Unsettled](#unsettled) 1.
+- The `blankStopped` option (off by default) handles it: the mod rewrites an unchanged line every
+  30 s, and setup writes a second reader that prints the file only while it is under two minutes
+  old:
+
+  ```sh
+  f="<data>/$CLAUDE_CODE_SESSION_ID/line"; [ -n "$(find "$f" -mmin -2 2>/dev/null)" ] && cat "$f"
+  ```
+
+  Why `find -mmin`: not POSIX, but GNU, BSD and busybox `find` all have it, where reading a file's
+  time differs (`stat -c` against `stat -f`) and a time inside the file would show as a second row
+  under the plain `cat`. GNU find compares the exact age (measured: shown at 110 s, blank at 125 s);
+  BSD find rounds it up to whole minutes, so there the cutoff is one minute (its man page, not run),
+  still twice the heartbeat. Cost (dash, 200 runs each, 2026-10-15): 3.41 ms median against 1.88 ms
+  for the plain `cat`; bash 5.00 against 2.66 ms. The flag on with the plain reader still installed
+  costs one `mv` every 30 s and blanks nothing; the reverse, the option off with this reader left,
+  blanks a live line once it has not changed for two minutes (with `session:` and the countdowns
+  hidden), so turning it off also means setting up again. The skill picks the reader from
+  `pluginConfigs["vargus@vargus"].options.blankStopped` in the user settings, where Claude Code
+  stores the option (an option set in managed settings is not seen there).
 - It never reads stdin: the payload is not used ([The line file](#the-line-file) measured
   `CLAUDE_CODE_SESSION_ID` against it).
 
@@ -377,6 +401,8 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 - 0.1.0's options: one boolean per fragment and sub-option ([Fragments](#fragments)), and
   `theme`, a picker (`options`) of VantageHUD's five palettes (`aurora`, `ember`, `nebula`,
   `graphite`, `daylight`), default `graphite`.
+- `blankStopped` (0.1.3, off): the heartbeat write and the second reader
+  ([The reader](#the-reader)).
 - Built in at VantageHUD's defaults: the short model name (`opus`); call counts as emoji (`🔧73`), as
   text (`T:73`) on WSL, as VantageHUD's `auto` did (WSL: `WSLENV` set, or `/proc/version` containing
   "microsoft", read with `$.env.get` and `$.fs.read`); the context thresholds 70 / 80 / 85 % and the
@@ -530,8 +556,6 @@ What the types and docs alone can't settle and no live session has settled yet; 
 
 Later:
 
-- The reader showing nothing when the mod has stopped writing (a stale line stays today). Needs a
-  heartbeat write, since the mod otherwise writes only when the text changes.
 - Custom themes, in a JSON file that a `file` option names (`userConfig` fields are flat, so
   nested themes can't live there); bar gauges (`useBars`); VantageHUD's other options, built in
   for 0.1.0 ([Config](#config)).

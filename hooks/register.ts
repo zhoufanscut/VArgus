@@ -71,6 +71,8 @@ export const register: Register = (on, given) => {
     // Only an interactive session shows a status line (DESIGN, "When the line is written").
     if (e.isInteractive) {
       writer = await createWriter($)
+      // DESIGN, "The reader": the file's age tells the reader the mod stopped
+      writer.heartbeatMs = options?.blankStopped ? 30_000 : null
       startVcs($, values.vcs, e, options?.detachedHead ?? false)
       startLimits($, values.limits, e)
       values.core.home = await $.env.get('HOME')
