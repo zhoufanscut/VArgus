@@ -85,6 +85,12 @@ describe('view: limits', () => {
     expect(narrow.endsWith('5h20m')).toBe(true)
   })
 
+  test('under 6 cells of room no gauge: the percent is kept, the countdown cut', () => {
+    const row = text(card(viewModel(input({ limits: FULL_LIMITS, columns: 20 })).cards, 'Limits').rows[0]!)
+    expect(row).toContain('31%')
+    expect(row).not.toContain('━')
+  })
+
   test('a window past its reset is left out; nothing at all reads as waiting', () => {
     const past = { engine: [{ kind: 'five_hour', percentUsed: 99, resetsAt: iso(NOW - 1) }] }
     expect(card(viewModel(input({ limits: past })).cards, 'Limits').rows.map(text)).toEqual(['waiting for the first reading'])
