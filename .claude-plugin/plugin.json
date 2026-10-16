@@ -117,6 +117,12 @@
       "title": "Blank a stopped line",
       "description": "Rewrite the line every 30 s so the status line can go blank when the plugin stops mid-session; after turning it on or off, ask Claude to set up the VArgus status line again",
       "default": false
+    },
+    "detailView": {
+      "type": "boolean",
+      "title": "Detail view",
+      "description": "The /vargus command: a live pane with every rate limit, the context window, tokens by agent and git or svn detail",
+      "default": false
     }
   }
 }

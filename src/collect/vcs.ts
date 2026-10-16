@@ -21,6 +21,15 @@ export type VcsCounts = {
   behind: number
 }
 
+// A changed path for the detail view: its kinds (staged and modified can go
+// together) and the path as git or svn prints it, relative to the repository
+// root (git) or the working folder (svn).
+export type VcsFileKind = 'conflicted' | 'staged' | 'modified' | 'untracked'
+export type VcsFile = { kinds: VcsFileKind[]; path: string }
+
+// The detail view lists this many changed paths; the counts give the rest.
+export const MAX_FILES = 8
+
 export type VcsValues = {
   // Chosen once per refresh, and every field below assigned together, so the
   // three fragments never mix git and svn (VantageHUD's render.js rule).
@@ -36,10 +45,17 @@ export type VcsValues = {
   revision: string | null
   // null until read, or when the read failed
   counts: VcsCounts | null
+  // the first MAX_FILES changed paths in git's or svn's order and how many
+  // there are, for the detail view; read beside the counts, never changing them
+  files: VcsFile[]
+  fileCount: number
 }
 
 export function initialVcs(): VcsValues {
-  return { kind: null, repo: null, branch: null, detached: null, worktree: null, revision: null, counts: null }
+  return {
+    kind: null, repo: null, branch: null, detached: null, worktree: null, revision: null, counts: null, files: [],
+    fileCount: 0,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +200,7 @@ async function readGit($: EngineInterface, remote: string | null, detachedHead: 
   // bound (the branch headers come first, so ahead/behind stay whole).
   const status = parseGitStatus(run.stdout)
   out.counts = status.counts
+  Object.assign(out, parseGitFiles(run.stdout))
   if (status.head === '(detached)') {
     out.detached = gitDir && detachedHead ? await readDetachedHead($, gitDir) : null
   } else {
@@ -232,6 +249,34 @@ export function parseGitStatus(output: string): { head: string | null; counts: V
     }
   }
   return { head, counts }
+}
+
+// The first MAX_FILES changed paths of the same output, with parseGitStatus's
+// kinds. The path is the line's last field (`1`: after 8 fields, `2`: after 9,
+// the new path before the tab, `u`: after 10, `?`: after 1), as git prints it:
+// a path with unusual characters stays in git's C-style quotes.
+export function parseGitFiles(output: string): { files: VcsFile[]; fileCount: number } {
+  const files: VcsFile[] = []
+  let fileCount = 0
+  for (const line of output.split('\n')) {
+    const kind = line[0]
+    if (line[1] !== ' ') continue
+    const fields = kind === '1' ? 8 : kind === '2' ? 9 : kind === 'u' ? 10 : kind === '?' ? 1 : 0
+    if (fields === 0) continue
+    const path = line.split(' ').slice(fields).join(' ').split('\t')[0]!
+    if (path === '') continue
+    fileCount += 1
+    if (files.length >= MAX_FILES) continue
+    const kinds: VcsFileKind[] = []
+    if (kind === '?') kinds.push('untracked')
+    else if (kind === 'u') kinds.push('conflicted')
+    else {
+      if (line[2] !== '.') kinds.push('staged')
+      if (line[3] !== '.') kinds.push('modified')
+    }
+    files.push({ kinds, path })
+  }
+  return { files, fileCount }
 }
 
 // The operations that leave files in the git dir, in git-prompt.sh's order
@@ -400,7 +445,10 @@ async function readSvn($: EngineInterface): Promise<VcsValues> {
   const status = await $.process.run([...SVN, 'status', '--xml'])
   // Past 4 MiB (`isStdoutTruncated`, ~90 bytes an unversioned path) the
   // counts are those of the entries read whole, a lower bound.
-  if (status.exitCode === 0) out.counts = parseSvnStatusXml(status.stdout)
+  if (status.exitCode === 0) {
+    out.counts = parseSvnStatusXml(status.stdout)
+    Object.assign(out, parseSvnFiles(status.stdout))
+  }
   return out
 }
 
@@ -488,6 +536,23 @@ export function parseSvnStatusXml(xml: string): VcsCounts {
 }
 
 type SvnBucket = 'conflicted' | 'staged' | 'modified' | 'untracked'
+
+// The first MAX_FILES changed entries of the same XML, each in
+// parseSvnStatusXml's bucket: `<entry path="…">` and the `<wc-status>` inside
+// it, the path's five entities read once.
+export function parseSvnFiles(xml: string): { files: VcsFile[]; fileCount: number } {
+  const files: VcsFile[] = []
+  let fileCount = 0
+  for (const [, rawPath, attrs] of xml.matchAll(/<entry\b[^>]*\bpath="([^"]*)"[^>]*>\s*<wc-status\b([^>]*)>/g)) {
+    const bucket = svnBucket(attrs!)
+    if (!bucket) continue
+    fileCount += 1
+    if (files.length >= MAX_FILES) continue
+    const path = rawPath!.replace(/&(lt|gt|quot|apos|amp);/g, (_, name: string) => XML_ENTITIES.get(name)!)
+    files.push({ kinds: [bucket], path })
+  }
+  return { files, fileCount }
+}
 
 // The `item` values that place an entry, whatever its props say.
 const SVN_ITEM_BUCKET = new Map<string, SvnBucket>([

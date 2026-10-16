@@ -45,6 +45,7 @@ export function makeTheme(name: string, noColor: boolean): Theme {
   const stops = [rgb.gradLow, rgb.gradMid, rgb.gradHigh] as const
   return {
     name: palette.name,
+    noColor,
     rgb,
     // NO_COLOR: the text unchanged, no escape at all (no-color.org).
     paint: (color, text) => {

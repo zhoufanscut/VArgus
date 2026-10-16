@@ -1,7 +1,7 @@
 import type { PluginOptions } from 'claude-code'
 
 // The options (DESIGN, "Config"): one boolean per fragment and sub-option, the
-// theme, and blankStopped. Keys and defaults match `userConfig` in plugin.json.
+// theme, blankStopped and detailView. Keys and defaults match `userConfig` in plugin.json.
 export const DEFAULTS = {
   folder: true,
   model: true,
@@ -20,6 +20,7 @@ export const DEFAULTS = {
   status: true,
   theme: 'graphite',
   blankStopped: false,
+  detailView: false,
 }
 
 export type Options = typeof DEFAULTS

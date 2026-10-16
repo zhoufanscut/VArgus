@@ -1,8 +1,9 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
+import { agentSpawned, agentStep, agentsEnding, initialAgents, startAgents } from '../src/collect/agents'
 import { initialLimits, measuredLimits, startLimits } from '../src/collect/limits'
 import {
-  initialSession, measured, sessionEnding, startSession, stepDone, stepStarting, toolCalled,
+  initialSession, measured, sessionEnding, setContext, startSession, stepDone, stepStarting, toolCalled,
 } from '../src/collect/session'
 import { initialVcs, startVcs, toolCalledVcs } from '../src/collect/vcs'
 import type { Theme, Values } from '../src/core/types'
@@ -10,6 +11,8 @@ import { resolveLabels } from '../src/i18n'
 import { resolveOptions, type Options } from '../src/options'
 import { render } from '../src/render'
 import { makeTheme } from '../src/theme'
+import { viewModel } from '../src/view/model'
+import { drawView } from '../src/view/pane'
 import { createWriter, endSession, pruneOld, writeLine, type Writer } from '../src/write'
 
 // Wiring only. Module values start over on a hot reload, which runs register
@@ -26,6 +29,10 @@ const values: Values = {
   limits: initialLimits(),
   vcs: initialVcs(),
 }
+// The detail view (DESIGN, "The detail view"), with the detailView option on.
+const PANE = 'vargus'
+const agents = initialAgents()
+let paneOpen = false
 
 async function refresh($: EngineInterface): Promise<void> {
   if (!writer || !theme || !options) return
@@ -45,7 +52,7 @@ async function refresh($: EngineInterface): Promise<void> {
   if (s.rereading) {
     const usage = await $.session.usage().catch(() => null)
     if (usage) {
-      s.contextPercent = usage.context.percent
+      setContext(s, usage.context)
       s.startedAt = usage.startedAt
     }
   }
@@ -78,9 +85,19 @@ export const register: Register = (on, given) => {
       values.core.home = await $.env.get('HOME')
       values.core.isWsl = await isWsl($)
       theme = makeTheme(options?.theme ?? 'graphite', !!(await $.env.get('NO_COLOR')))
+      if (options?.detailView) {
+        // A refused call costs the view, never the line: the tick below
+        // must still start.
+        await startAgents($, agents)
+        await $.command.register({ name: PANE, description: labels.viewCommand }).catch(() => {})
+        // a hot reload keeps the pane up: the engine's record says so
+        paneOpen = (await $.ui.panes().catch(() => [])).some(p => p.id === PANE)
+      }
       tick?.cancel()
       tick = $.clock.every(1000, () => {
         refresh($).catch(() => {})
+        // the open pane redraws with the line, once a second
+        if (paneOpen) $.ui.invalidate('ui.render')
       })
       // Not awaited: the first session.start is awaited before the first
       // prompt, and a slow or refused write must not hold it.
@@ -103,6 +120,7 @@ export const register: Register = (on, given) => {
     stepStarting(e, values.session)
     const r = yield* next(e)
     stepDone($, r, values.session)
+    if (options?.detailView) agentStep($, agents, e, r)
     return r
   })
 
@@ -116,10 +134,47 @@ export const register: Register = (on, given) => {
 
   on('session.end', async ($, e, next) => {
     sessionEnding($, e, values.session)
+    if (options?.detailView) agentsEnding($, agents, e)
     // a failed removal leaves the folder, as before
     if (writer) await endSession($, writer, e.sessionId).catch(() => {})
     return next(e)
   })
+
+  if (options.detailView) {
+    // Names for the tokens by agent; observes, as every hook here.
+    on('agent.spawn', async ($, e, next) => {
+      const r = await next(e)
+      agentSpawned($, agents, e, r)
+      return r
+    })
+
+    // /vargus opens the pane, or closes it when it is up. No text: the pane
+    // is the answer, and a text row would also reach the model.
+    on('command.run', { command: PANE }, async $ => {
+      if ((await $.ui.panes()).some(p => p.id === PANE)) {
+        await $.ui.close({ id: PANE })
+      } else {
+        // an unplaced pane waits for room and is drawn once it has it, so
+        // the redraws start either way
+        await $.ui.open({ id: PANE, title: labels.viewTitle, closeOnEscape: true })
+        paneOpen = true
+      }
+      return {}
+    })
+
+    // Every close (this call, Esc, the close mark, an unload) ends the redraws.
+    on('ui.close', { id: PANE }, async ($, e, next) => {
+      paneOpen = false
+      return next(e)
+    })
+
+    on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+      if (!theme || !options) return next(e)
+      const now = await $.clock.now()
+      const m = viewModel({ v: values, o: options, l: labels, t: theme, now, agents, columns: e.props.bodyColumns })
+      return drawView($.ui.resolve(e), m)
+    })
+  }
 
   // The width: observe the prompt-hint row's viewport, draw nothing
   // (DESIGN, "When the line is written").

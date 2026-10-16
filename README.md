@@ -167,6 +167,11 @@ default, so an update never changes your line without you asking.
   changes to one that checks the file's age (about 3.4 ms a run instead of 1.9 ms), or back. The
   plugin rewrites the line every 30 s while it is on. Left with that command after turning the
   option off, the row goes blank whenever the line has not changed for two minutes.
+- **Detail view** (off by default): turn on `detailView` in `/config`, then run `/vargus` to open
+  a live pane beside the conversation (above the prompt on a narrow terminal) with every rate
+  limit and its reset time, the context window in tokens, tokens by agent (main conversation and
+  each subagent: input, output, cache read and write) and the branch with the changed files.
+  `/vargus` again or Esc closes it.
 - **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.
   Other programs Claude Code starts see it too.
 

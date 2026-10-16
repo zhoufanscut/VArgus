@@ -21,7 +21,7 @@ Code comments cite this file by section name: `(DESIGN, "The line file")`.
 
 - [Scope](#scope), [Decisions](#decisions), [Terms](#terms)
 - [How it works](#how-it-works): layout, data sources, when the line is written
-- [Fragments](#fragments), [Languages](#languages)
+- [Fragments](#fragments), [Languages](#languages), [The detail view](#the-detail-view)
 - [The line file](#the-line-file), [The reader](#the-reader), [Setup](#setup)
 - [The host](#the-host): what the mod API gives and what it holds VArgus to
 - [Config](#config), [Colours](#colours)
@@ -40,7 +40,8 @@ Code comments cite this file by section name: `(DESIGN, "The line file")`.
   panel, `claude -p`, the Agent SDK, cloud sessions) VArgus shows nothing, as VantageHUD did.
 - Linux and macOS. The reader is POSIX `sh`; Windows is not covered.
 
-Not in scope: the band above the prompt and other mod-drawn UI, data that only the status-line
+Not in scope: the band above the prompt and other mod-drawn UI (the `/vargus` pane, opened only
+when asked, aside), data that only the status-line
 payload carries ([What VArgus cannot show](#what-vargus-cannot-show)), teammates running in their
 own tmux pane, code shared with VantageHUD.
 
@@ -99,6 +100,9 @@ src/render/width.ts             the wide-character count
 src/theme/*.ts                  palettes, makeTheme, ANSI
 src/i18n/en.ts                  the English labels; the `Labels` type is taken from it
 src/i18n/index.ts               the language registry, resolveLabels
+src/collect/agents.ts           tokens by agent, for the detail view
+src/view/model.ts               pure: the detail view's cards, values + options + labels + theme → runs
+src/view/pane.tsx               the cards as Box and Text elements
 src/write.ts                    the line file
 types/index.d.ts                the `$.state` contract (`PluginState`), named by `types` in plugin.json
 skills/vargus-setup/SKILL.md    how the agent sets up the reader
@@ -202,6 +206,61 @@ language touches no fragment.
   VantageHUD](#rules-carried-over-from-vantagehud), Width).
 - Test: every fragment rendered with a test table whose labels are `⟦<key>⟧` must show only those
   for its words, which catches a word written straight into a fragment.
+
+## The detail view
+
+`/vargus` opens a pane with what does not fit the line, and closes it again. Off by default: the
+`detailView` option registers the command and every hook below.
+
+- **A pane, opened by the person.** `$.ui.open({ id: 'vargus', closeOnEscape: true })` from the
+  command; `/vargus` again, Esc (with the pane focused, or at an idle empty prompt) or the
+  engine's close mark closes it. The engine places it: docked beside the transcript in the
+  fullscreen layout from 110 columns, else inline above the prompt (measured, 2.1.301: docked at
+  160 columns with 71 body columns, inline at 80). Why on request only: the band above the prompt
+  was turned down as always-on UI (2026-10-14); a pane opened by a command shows only while
+  wanted. The command answers no text: a text row would also reach the model.
+- **Live.** While the pane is open, the mod's 1 s tick calls `$.ui.invalidate('ui.render')`; a
+  `ui.close` hook (every close passes it: the command's, Esc, the mark, an unload) stops that.
+  Measured (a throwaway pane, 2.1.301): its render counter rose about once a second (4, then 13
+  at a capture about 9 s later). A hot reload finds the pane in
+  `$.ui.panes()` and keeps redrawing it.
+- **Cards.** Round-bordered boxes in the theme's `sep` colour, each row one `Text` of coloured
+  runs cut at the card's edge (`wrap: 'truncate-end'`), sized to the pane's `bodyColumns`:
+  - header (no card): folder, model and effort, session time, call counts, as on the line;
+  - **Limits**: every window the engine and the usage API give, without the line's thresholds
+    and switches (`sn:` under 80 %, other models' weekly, the spend limit unclamped, `extra:`
+    with its dollars); a gauge, the percent in its tier colour, the reset as local clock time
+    (`14:20` today, `Sat 21:00` within a week, `10-30 00:00` beyond; the mod's `Date` is the
+    machine's local time, measured UTC+8 on the dev machine, 2.1.301) and the countdown. Narrow,
+    the reset column drops `resets`, then the clock, before the gauge goes under 12 cells. A
+    stale API read: `*` and a note with its age; past 15 min the line's error mark;
+  - **Context**: a gauge whose track is tinted from 80 % (`COMPRESS?`) and 85 % (`CRITICAL`), so
+    the thresholds show before the fill reaches them; the tokens in use over the window (the host's
+    `context.tokens` and `window`); before the first response 0 % over the window, as the line's
+    `ctx:0%`;
+  - **Tokens**: one row per agent, the main loop first, then by input + output, largest first,
+    six at most and `+n more`; uncached in, out, cache read, cache write (the last two dropped
+    in a card under 64 columns); a total row. The same `turn.step` usage as `token:`, so the total's in +
+    out is the line's count. Names from `agent.spawn`: the call's `name`, the teammate's name,
+    else the agent type, with the call's description dimmed; an agent started before the mod
+    loaded shows as `?`. Past 64 agents the rest sum into one `others` row. Kept in `$.state`
+    with the counts, so a hot reload keeps it; `/clear` and a resume start it over;
+  - **Git** or **SVN**: the branch (worktree, detached-HEAD naming and ahead/behind as on the
+    line), the counts in words (`clean` when none), the first 8 changed paths with their marks
+    (the path's end kept when it is cut) and `+n more`. Read from the same `git status` and `svn
+    status --xml` output as the counts, by a second pass that never changes them; git prints a
+    path with unusual characters in C-style quotes, and it is shown so.
+  - Side by side, Context and Tokens from 100 body columns, which the docked pane does not reach
+    at 240 terminal columns (89 measured): an inline pane or the main screen gets it.
+- **Colours** from the theme as `#rrggbb`, which the terminal converts (`tmux-256color` gave
+  256-colour codes); with `NO_COLOR` no colour prop at all. Every word comes from the labels.
+- **The hooks**: `agent.spawn` and `ui.close` only observe; `command.run` answers its own command;
+  the `Pane` render hook draws only its own pane. `claude plugin validate` lists `command.run` and
+  `ui.close` as gating hooks without `.catch`: neither guards anything, and a throwing one is
+  skipped, which leaves the engine's own behaviour (the close goes ahead).
+- Turning the option on or off in `/config` reloads the module (reference.md: "a change there
+  reloads the module with the new `options`"); what a reload does to an open pane is not
+  measured.
 
 ## The line file
 
@@ -403,6 +462,7 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
   `graphite`, `daylight`), default `graphite`.
 - `blankStopped` (0.1.3, off): the heartbeat write and the second reader
   ([The reader](#the-reader)).
+- `detailView` (off): the `/vargus` pane ([The detail view](#the-detail-view)).
 - Built in at VantageHUD's defaults: the short model name (`opus`); call counts as emoji (`🔧73`), as
   text (`T:73`) on WSL, as VantageHUD's `auto` did (WSL: `WSLENV` set, or `/proc/version` containing
   "microsoft", read with `$.env.get` and `$.fs.read`); the context thresholds 70 / 80 / 85 % and the
@@ -533,6 +593,10 @@ What the types and docs alone can't settle and no live session has settled yet; 
   folder, so `/reload-plugins` picks up edits, and the data folder is the real `vargus-vargus`.
   The reader goes in `.claude/settings.local.json` (gitignored).
 - The fragment order and each fragment's default match [Fragments](#fragments).
+- The detail view: `tests/view.test.ts` checks the cards from given values (every row within its
+  card at 40, 76 and 140 columns, no colour with `NO_COLOR`, every word from the labels) and the
+  changed-path parsers; `tests/view-register.test.ts` drives the wiring (off: no command; on:
+  `/vargus` opens and closes the pane, redraws each second while open, agents' tokens reach it).
 - The labels test in [Languages](#languages).
 
 ## Rules for the code
@@ -559,11 +623,11 @@ Later:
 - Custom themes, in a JSON file that a `file` option names (`userConfig` fields are flat, so
   nested themes can't live there); bar gauges (`useBars`); VantageHUD's other options, built in
   for 0.1.0 ([Config](#config)).
-- A detail view (`/vargus` opening a pane, or answering in text) for what does not fit the line.
 - Languages other than English (VantageHUD had zh-CN), and per-label overrides (VantageHUD's
   `labels` config).
 
-Not planned: payload-only data in the line; drawing anywhere but the status-line row; seeing
+Not planned: payload-only data in the line; drawing anywhere but the status-line row and the
+`/vargus` pane; seeing
 teammates that run in their own tmux pane; a live-agents row (`agents: reviewer running 1m17s
 8.2k | Explore done 9.2k`), since Claude Code lists each running agent under the prompt with what
 it is doing, its time and its tokens (seen on 2.1.300: `◯ Explore  Grepping labels.test.ts for

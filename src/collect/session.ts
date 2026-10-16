@@ -1,5 +1,6 @@
 import type {
-  EngineInterface, SessionEndInput, SessionMeasureInput, ToolCallInput, TurnStepInput, TurnStepResult,
+  EngineInterface, SessionContextUsage, SessionEndInput, SessionMeasureInput, ToolCallInput, TurnStepInput,
+  TurnStepResult,
 } from 'claude-code'
 
 import type { VargusCounts } from '../../types'
@@ -36,6 +37,10 @@ export type SessionValues = {
   effort: string | number | undefined
   // $.session.usage() context percent, 0-100; undefined before a reading
   contextPercent: number | undefined
+  // the same reading's tokens in use and window size, for the detail view;
+  // undefined before a reading (tokens also before the first response)
+  contextTokens: number | undefined
+  contextWindow: number | undefined
   // $.session.usage().startedAt, in $.clock.now() ms; undefined until read
   startedAt: number | undefined
   // after /clear or a resume, until the next session.measure: the tick reads
@@ -52,7 +57,8 @@ function zero(): VargusCounts {
 
 export function initialSession(): SessionValues {
   return {
-    model: undefined, effort: undefined, contextPercent: undefined, startedAt: undefined, rereading: false,
+    model: undefined, effort: undefined, contextPercent: undefined, contextTokens: undefined,
+    contextWindow: undefined, startedAt: undefined, rereading: false,
     counts: zero(),
   }
 }
@@ -77,7 +83,7 @@ async function readSession($: EngineInterface, values: SessionValues, withContex
   try {
     const usage = await $.session.usage()
     values.startedAt = usage.startedAt
-    if (withContext) values.contextPercent = usage.context.percent
+    if (withContext) setContext(values, usage.context)
   } catch {
     // keep the last
   }
@@ -99,13 +105,20 @@ export async function startSession($: EngineInterface, values: SessionValues): P
   readSession($, values, true).catch(() => {})
 }
 
+// The context as the host gives it: percent, tokens and window together.
+export function setContext(values: SessionValues, context: SessionContextUsage): void {
+  values.contextPercent = context.percent
+  values.contextTokens = context.tokens
+  values.contextWindow = context.window
+}
+
 // One function per event, so another collector hooking the same event can be
 // called from one shared hook instead.
 
 // Pushed after each main-thread turn: the context, and a fresh read of the
 // model and session start (which /clear and a resume move).
 export function measured($: EngineInterface, e: SessionMeasureInput, values: SessionValues): void {
-  values.contextPercent = e.context.percent
+  setContext(values, e.context)
   values.rereading = false
   readSession($, values, false).catch(() => {})
 }
@@ -137,6 +150,8 @@ export function sessionEnding($: EngineInterface, e: SessionEndInput, values: Se
   if (e.reason !== 'clear' && e.reason !== 'resume') return
   values.counts = zero()
   values.contextPercent = undefined
+  values.contextTokens = undefined
+  values.contextWindow = undefined
   values.startedAt = undefined
   values.rereading = true
   save($, values)
