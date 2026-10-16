@@ -58,11 +58,15 @@ function save($: EngineInterface, values: AgentsValues): void {
   saving = saving.then(() => $.state.set(AGENTS, values.list.map(a => ({ ...a })))).catch(() => {})
 }
 
-// From session.start: a hot reload keeps the list in $.state.
-export async function startAgents($: EngineInterface, values: AgentsValues): Promise<void> {
+// From session.start, after the counts are restored: a hot reload keeps the
+// list in $.state. Taken back only when its in + out is the restored token
+// count: with the option off the list is neither kept nor cleared, so after
+// an off-then-on reload it may hold an earlier conversation's agents.
+export async function startAgents($: EngineInterface, values: AgentsValues, tokens: number): Promise<void> {
+  values.list = []
   try {
     const saved = (await $.state.get(AGENTS)).value
-    if (saved) values.list = saved.map(a => ({ ...a }))
+    if (saved && saved.reduce((n, a) => n + a.input + a.output, 0) === tokens) values.list = saved.map(a => ({ ...a }))
   } catch {
     // nothing saved
   }

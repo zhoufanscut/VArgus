@@ -8,10 +8,10 @@ import type { On, TurnStepInput } from 'claude-code'
 // (the command's, Esc's, the close mark's); the kit's engine `$` cannot raise
 // a person's close, so the command's stands for them.
 
-type Calls = { writes: number; refuseRegister: boolean; registered: unknown[]; opened: unknown[]; closed: unknown[]; invalidated: number; panes: { id: string }[] }
+type Calls = { writes: number; refuseRegister: boolean; refusePanes: boolean; spawn: Record<string, unknown>; registered: unknown[]; opened: unknown[]; closed: unknown[]; invalidated: number; panes: { id: string }[] }
 
 function world(on: On, clock: MockClock): Calls {
-  const c: Calls = { writes: 0, refuseRegister: false, registered: [], opened: [], closed: [], invalidated: 0, panes: [] }
+  const c: Calls = { writes: 0, refuseRegister: false, refusePanes: false, spawn: { model: 'haiku', agentId: 'a1' }, registered: [], opened: [], closed: [], invalidated: 0, panes: [] }
   mock.env(on, { HOME: '/home/u', NO_COLOR: '1' })
   on('session.start', async () => ({ cwd: '/home/u/x' }))
   on('session.id', async () => ({ value: 'S1' }))
@@ -28,7 +28,10 @@ function world(on: On, clock: MockClock): Calls {
     c.registered.push(e)
     return { value: { command: 'vargus' } }
   })
-  on('ui.panes', async () => ({ value: c.panes.map(p => ({ ...p, title: 'VArgus', isShown: true, isFocused: false, isPlaced: true })) }) as never)
+  on('ui.panes', async () => {
+    if (c.refusePanes) throw new Error('refused')
+    return { value: c.panes.map(p => ({ ...p, title: 'VArgus', isShown: true, isFocused: false, isPlaced: true })) } as never
+  })
   on('ui.open', async ($, e) => {
     c.opened.push(e)
     c.panes = [{ id: e.id }]
@@ -44,7 +47,7 @@ function world(on: On, clock: MockClock): Calls {
     return { value: undefined }
   })
   on('ui.render', async () => ({ type: 'Text', children: ['sentinel'] }) as never)
-  on('agent.spawn', async () => ({ model: 'haiku', agentId: 'a1' }))
+  on('agent.spawn', async () => c.spawn as never)
   on('turn.step', async function* ($, e) {
     return {
       answer: '', toolUses: [], stopReason: 'end_turn', turnId: e.turnId, index: e.index,
@@ -65,11 +68,11 @@ async function step($: Engine, e: Partial<TurnStepInput> = {}) {
   while (!r.done) r = await s.next()
 }
 
-async function pane($: Engine): Promise<string> {
+async function pane($: Engine, bodyColumns = 76): Promise<string> {
   const tree = await $.ui.render({
     surface: 'terminal', component: 'Pane', requestId: 'vargus',
     viewport: { columns: 80, rows: 40, isFullscreen: false },
-    props: { title: 'VArgus', isFocused: false, bodyColumns: 76, placement: 'inline' },
+    props: { title: 'VArgus', isFocused: false, bodyColumns, placement: 'inline' },
   } as never)
   return JSON.stringify(tree)
 }
@@ -102,6 +105,43 @@ describe('detail view: on', () => {
     const before = c.writes
     await clock.advance(1000)
     expect(c.writes).toBeGreaterThan(before)
+  })
+
+  test('a refused ui.panes costs the view, never the line', ON, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const c = world(on, clock)
+    c.refusePanes = true
+    await $.session.start(start)
+    const before = c.writes
+    await clock.advance(1000)
+    expect(c.writes).toBeGreaterThan(before)
+  })
+
+  test('an agent is named by the call\'s name, else the teammate\'s, else its type', ON, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const c = world(on, clock)
+    await $.session.start(start)
+    const spawn = { prompt: 'p', description: 'd', subagentType: 'Explore', background: false, fork: false }
+    c.spawn = { model: 'haiku', agentId: 'a1' }
+    await $.agent.spawn({ ...spawn, name: 'scout' } as never)
+    c.spawn = { model: 'haiku', agentId: 'a2', teammateId: 'mate@team' }
+    await $.agent.spawn(spawn as never)
+    c.spawn = { model: 'haiku', agentId: 'a3' }
+    await $.agent.spawn(spawn as never)
+    for (const id of ['a1', 'a2', 'a3']) await step($, { agentId: id })
+    const drawn = await pane($, 120)
+    for (const name of ['scout', 'mate', 'Explore']) expect([name, drawn.includes(name)]).toEqual([name, true])
+  })
+
+  test('the pane is sized to its bodyColumns', ON, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    world(on, clock)
+    await $.session.start(start)
+    await clock.advance(1000)
+    // a 30-column body drops the tokens' cache columns, 120 keeps them
+    await step($)
+    expect(await pane($, 30)).not.toContain('cache read')
+    expect(await pane($, 120)).toContain('cache read')
   })
 
   test('the open pane redraws each second; /vargus again closes it and the redraws stop', ON, async ($, on) => {

@@ -6,6 +6,7 @@ import type { VcsFileKind } from '../collect/vcs'
 import type { FragmentInput, Rgb, Theme, TokenName } from '../core/types'
 import type { Labels } from '../i18n'
 import { formatDuration } from '../render/format'
+import { COMPACT, CRITICAL, WARNING } from '../render/fragments/context'
 import { effortColor, shortModelName } from '../render/fragments/model'
 import { formatTokenCount } from '../render/fragments/tokens'
 import { cleanText, shortenHome } from '../render/text'
@@ -28,8 +29,10 @@ export type ViewModel = { header: Row; cards: Card[][]; footer: Row; border?: st
 
 export type ViewInput = FragmentInput & { agents: AgentsValues; columns: number }
 
-// From this many body columns, Context and Tokens sit side by side.
+// From this many body columns, Context and Tokens sit side by side: Tokens
+// at least TOKENS_SIDE wide (its four columns fit), Context the rest, 34 or more.
 export const SIDE_BY_SIDE = 100
+const TOKENS_SIDE = 66
 // The rows the tokens card lists before `+n more`.
 export const MAX_AGENT_ROWS = 6
 // A card's frame and padding: two border columns and one space each side.
@@ -78,6 +81,26 @@ export function cut(text: string, n: number, fromEnd = false): string {
   return fromEnd ? '…' + out : out + '…'
 }
 
+// A row cut to `n` columns: the run that crosses the edge is cut with `…`,
+// the runs after it dropped. Every row passes it, so none relies on the
+// surface's own truncation.
+export function fitRow(row: Row, n: number): Row {
+  const out: Row = []
+  let used = 0
+  for (const s of row) {
+    const w = stringWidth(s.text)
+    if (used + w <= n) {
+      out.push(s)
+      used += w
+      continue
+    }
+    const text = cut(s.text, n - used)
+    if (text) out.push({ ...s, text })
+    break
+  }
+  return out
+}
+
 // A gauge `n` cells wide: the used part in its tier colour, the rest as track.
 // `zones` colour the track from a percent on, so a threshold shows before the
 // fill reaches it.
@@ -109,20 +132,23 @@ function two(n: number): string {
   return String(n).padStart(2, '0')
 }
 
-// `14:20` today, `Sat 14:20` within a week, `10-23 14:20` beyond.
+// `14:20` today, `Sat 14:20` within six days (so a weekday never names a day
+// a week out, which would read as today's), `10-23 14:20` beyond.
 export function clockTime(l: Labels, at: number, now: number): string {
   const d = new Date(at)
   const today = new Date(now)
   const hm = `${two(d.getHours())}:${two(d.getMinutes())}`
   if (d.toDateString() === today.toDateString()) return hm
-  if (at - now < 7 * 86_400_000) return `${l.viewWeekdays.split(' ')[d.getDay()] ?? ''} ${hm}`.trim()
+  if (at - now < 6 * 86_400_000) return `${l.viewWeekdays.split(' ')[d.getDay()] ?? ''} ${hm}`.trim()
   return `${two(d.getMonth() + 1)}-${two(d.getDate())} ${hm}`
 }
 
 // ---------------------------------------------------------------------------
 // Header and footer.
 
-function header(f: ViewInput): Row {
+// The header for `n` columns: whole parts dropped from the end, as the line
+// drops fragments, then the folder cut if it alone is too wide.
+function header(f: ViewInput, n: number): Row {
   const { v, o, l, t, now } = f
   const parts: Row[] = []
   if (v.core.cwd) parts.push([seg(t, cleanText(shortenHome(v.core.cwd, v.core.home)), 'text', true)])
@@ -148,7 +174,9 @@ function header(f: ViewInput): Row {
       seg(t, (i ? ' ' : '') + (v.core.isWsl ? `${mark}:` : icon)), seg(t, String(n), 'label'),
     ]))
   }
-  return parts.flatMap((p, i) => (i ? [seg(t, '  ·  ', 'sep'), ...p] : p))
+  const join = (list: Row[]) => list.flatMap((p, i) => (i ? [seg(t, '  ·  ', 'sep'), ...p] : p))
+  while (parts.length > 1 && width(join(parts)) > n) parts.pop()
+  return fitRow(join(parts), n)
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +246,7 @@ function limitsCard(f: ViewInput, inner: number): Card {
     resetW = w
     if (inner - fixed - w >= 12) break
   }
-  const g = Math.max(6, Math.min(40, inner - fixed - resetW))
+  const g = Math.max(6, Math.min(60, inner - fixed - resetW))
   const rows = list.map(w => {
     const rounded = Math.max(0, Math.round(w.percent))
     const pct = w.unclamped ? rounded : Math.min(100, rounded)
@@ -237,10 +265,6 @@ function limitsCard(f: ViewInput, inner: number): Card {
 // ---------------------------------------------------------------------------
 // Context: the gauge with the line's thresholds as zones on its track.
 
-// The line's context thresholds (src/render/fragments/context.ts).
-const WARNING = 70
-const COMPACT = 80
-const CRITICAL = 85
 
 function contextCard(f: ViewInput, inner: number): Card {
   const { v, l, t } = f
@@ -286,15 +310,18 @@ function tokensCard(f: ViewInput, inner: number): Card {
     ...list.filter(a => a.id === OTHERS),
   ]
   const heads = [l.viewIn, l.viewOut, l.viewCacheRead, l.viewCacheWrite]
-  const numW = Math.max(7, ...heads.map(h => stringWidth(h) + 1))
-  const columns = inner >= 12 + 4 * numW ? 4 : 2
+  const numW = Math.max(7, ...heads.map(h => stringWidth(h) + 2))
+  const columns = inner >= 10 + 4 * numW ? 4 : 2
   const nameW = Math.max(4, inner - columns * numW)
   const nums = (a: Pick<VargusAgent, 'input' | 'output' | 'cacheRead' | 'cacheWrite'>) =>
     [a.input, a.output, a.cacheRead, a.cacheWrite].slice(0, columns).map(n => pad(formatTokenCount(n), numW, true))
   const rows: Row[] = [[
     seg(t, pad('', nameW)), ...heads.slice(0, columns).map(h => seg(t, pad(h, numW, true), 'faint')),
   ]]
-  const shown = sorted.slice(0, MAX_AGENT_ROWS)
+  // the others row, once there is one, keeps its place at the end
+  const others = sorted.filter(a => a.id === OTHERS)
+  const named = sorted.filter(a => a.id !== OTHERS)
+  const shown = [...named.slice(0, MAX_AGENT_ROWS - others.length), ...others]
   for (const a of shown) {
     const name = agentName(l, a)
     const detail = a.detail && a.id !== MAIN ? ` ${cleanText(a.detail)}` : ''
@@ -336,7 +363,11 @@ function vcsCard(f: ViewInput, inner: number): Card | null {
   if (vcs.repo) title.push(seg(t, '  ·  ', 'sep'), seg(t, cleanText(vcs.repo), 'text', true))
   const rows: Row[] = []
 
+  const c = vcs.counts
+  // ahead/behind first: a long branch is cut at the row's end, never them
   const head: Row = []
+  if (c && c.ahead > 0) head.push(seg(t, `${l.ahead}${c.ahead}  `, 'add'))
+  if (c && c.behind > 0) head.push(seg(t, `${l.behind}${c.behind}  `, 'del'))
   if (vcs.branch) head.push(seg(t, cleanText(vcs.branch), 'gradLow', true))
   if (vcs.kind === 'svn' && vcs.revision) head.push(seg(t, l.detachedAt, 'label'), seg(t, cleanText(vcs.revision), 'gradLow'))
   const d = vcs.detached
@@ -346,9 +377,6 @@ function vcsCard(f: ViewInput, inner: number): Card | null {
     if (d.operation) head.push(seg(t, ` (${cleanText(l[d.operation])}${d.progress ? ` ${d.progress}` : ''})`, 'gradMid'))
   }
   if (vcs.kind === 'git' && vcs.worktree) head.push(seg(t, ` ${l.worktree}`, 'label'), seg(t, cleanText(vcs.worktree), 'gradLow'), seg(t, ')', 'label'))
-  const c = vcs.counts
-  if (c && c.ahead > 0) head.push(seg(t, `  ${l.ahead}${c.ahead}`, 'add'))
-  if (c && c.behind > 0) head.push(seg(t, `  ${l.behind}${c.behind}`, 'del'))
   if (head.length) rows.push(head)
 
   if (!c) {
@@ -360,11 +388,19 @@ function vcsCard(f: ViewInput, inner: number): Card | null {
     ['modified', l.modified, l.viewModified, c.modified], ['untracked', l.untracked, l.viewUntracked, c.untracked],
   ]
   const counts = words.filter(([, , , n]) => n > 0)
-  rows.push(counts.length === 0
-    ? [seg(t, l.viewClean, 'add')]
-    : counts.flatMap(([kind, mark, word, n], i) => [
-        seg(t, `${i ? '   ' : ''}${mark}${n}`, KIND_COLOR[kind], true), seg(t, ` ${word}`, 'faint'),
-      ]))
+  if (counts.length === 0) rows.push([seg(t, l.viewClean, 'add')])
+  // as many counts to a row as fit, the rest on the next
+  let line: Row = []
+  for (const [kind, mark, word, n] of counts) {
+    const item = [seg(t, `${mark}${n}`, KIND_COLOR[kind], true), seg(t, ` ${word}`, 'faint')]
+    const gap = line.length ? [seg(t, '   ')] : []
+    if (line.length && width([...line, ...gap, ...item]) > inner) {
+      rows.push(line)
+      line = []
+    }
+    line.push(...(line.length ? gap : []), ...item)
+  }
+  if (line.length) rows.push(line)
 
   for (const file of vcs.files) {
     const marks = file.kinds.map(k => seg(t, k === 'conflicted' ? l.conflict : l[k], KIND_COLOR[k], true))
@@ -396,15 +432,22 @@ export function viewModel(f: ViewInput): ViewModel {
   const { l, t } = f
   const columns = Math.max(20, f.columns)
   const full = columns - FRAME
-  const left = Math.floor(columns / 2)
+  const left = columns - Math.max(TOKENS_SIDE, Math.ceil(columns / 2))
   const side = columns >= SIDE_BY_SIDE
   const context = safe(() => (side ? { ...contextCard(f, left - FRAME), width: left } : contextCard(f, full)))
   const tokens = safe(() => (side ? { ...tokensCard(f, columns - left - FRAME), width: columns - left } : tokensCard(f, full)))
   const rows: (Card | null)[][] = [
     [safe(() => limitsCard(f, full))], ...(side ? [[context, tokens]] : [[context], [tokens]]), [safe(() => vcsCard(f, full))],
   ]
-  const cards = rows.map(r => r.filter((c): c is Card => c !== null)).filter(r => r.length > 0)
-  const m: ViewModel = { header: safe(() => header(f)) ?? [], cards, footer: [seg(t, l.viewClose, 'faint')] }
+  const fit = (c: Card): Card => {
+    const inner = (c.width ?? columns) - FRAME
+    return { ...c, title: fitRow(c.title, inner), rows: c.rows.map(r => fitRow(r, inner)) }
+  }
+  const cards = rows.map(r => r.filter((c): c is Card => c !== null).map(fit)).filter(r => r.length > 0)
+  // the header and footer sit in a Box padded one column each side
+  const m: ViewModel = {
+    header: safe(() => header(f, columns - 2)) ?? [], cards, footer: fitRow([seg(t, l.viewClose, 'faint')], columns - 2),
+  }
   const border = hex(t, 'sep')
   if (border) m.border = border
   return m

@@ -88,8 +88,10 @@ export const register: Register = (on, given) => {
       if (options?.detailView) {
         // A refused call costs the view, never the line: the tick below
         // must still start.
-        await startAgents($, agents)
-        await $.command.register({ name: PANE, description: labels.viewCommand }).catch(() => {})
+        await startAgents($, agents, values.session.counts.tokens)
+        // the name a literal, as the matcher's: the validator then knows the
+        // command.run hook answers its own command
+        await $.command.register({ name: 'vargus', description: labels.viewCommand }).catch(() => {})
         // a hot reload keeps the pane up: the engine's record says so
         paneOpen = (await $.ui.panes().catch(() => [])).some(p => p.id === PANE)
       }
@@ -150,7 +152,7 @@ export const register: Register = (on, given) => {
 
     // /vargus opens the pane, or closes it when it is up. No text: the pane
     // is the answer, and a text row would also reach the model.
-    on('command.run', { command: PANE }, async $ => {
+    on('command.run', { command: 'vargus' }, async $ => {
       if ((await $.ui.panes()).some(p => p.id === PANE)) {
         await $.ui.close({ id: PANE })
       } else {

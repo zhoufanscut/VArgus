@@ -4,9 +4,10 @@ import type { Fragment } from '../../core/types'
 // with its default thresholds, built in per DESIGN "Config").
 // The colour moves at WARNING and CRITICAL (gradLow / gradMid / gradHigh), so
 // it flips in step with the CRITICAL word; COMPRESS? shows from COMPACT.
-const WARNING = 70
-const COMPACT = 80
-const CRITICAL = 85
+// Shared with the detail view's Context card (src/view/model.ts).
+export const WARNING = 70
+export const COMPACT = 80
+export const CRITICAL = 85
 
 // Before the first reading the percent is unknown and shows as 0 %, as
 // VantageHUD's did (its getContextPercent fell back to 0).

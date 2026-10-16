@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { initialAgents, MAIN, OTHERS, type AgentsValues } from '../src/collect/agents'
+import { initialAgents, MAIN, OTHERS, startAgents, type AgentsValues } from '../src/collect/agents'
 import { initialLimits } from '../src/collect/limits'
 import { initialSession } from '../src/collect/session'
 import { initialVcs, MAX_FILES, parseGitFiles, parseSvnFiles } from '../src/collect/vcs'
@@ -152,12 +152,33 @@ describe('view: tokens by agent', () => {
     expect(text(card(viewModel(input({ agents: { list }, columns: 40 })).cards, 'Tokens').rows[0]!)).not.toContain('cache')
   })
 
-  test('past six rows `+n more`; the others row last; none yet says so', () => {
+  test('past six rows `+n more`; the others row shown last; none yet says so', () => {
     const many = [agent(MAIN, '', 1, 1), ...Array.from({ length: 8 }, (_, i) => agent(`a${i}`, `t${i}`, 10 + i, 0)),
-      { ...agent(OTHERS, '', 1, 1), kind: 'others' as const }]
+      { ...agent(OTHERS, '', 99_999, 1), kind: 'others' as const }]
     const rows = card(viewModel(input({ agents: { list: many } })).cards, 'Tokens').rows.map(text)
+    // main, four named, others: six rows; four named left out
+    expect(rows.slice(1, 7).map(r => r.split(/\s+/)[0])).toEqual(['main', 't7', 't6', 't5', 't4', 'others'])
+    expect(rows[6]).toContain('100.0k')
     expect(rows.filter(r => /^\+\d+ more$/.test(r))).toEqual(['+4 more'])
     expect(card(viewModel(input()).cards, 'Tokens').rows.map(text)).toEqual(['no requests yet'])
+  })
+})
+
+describe('agents: the list taken back at session.start', () => {
+  // a stand-in for the host's $.state, answering one saved list
+  const saved = (list: VargusAgent[]) => ({ state: { get: async () => ({ value: list }) } }) as never
+  const list = [agent(MAIN, '', 100, 20), agent('a1', 'Explore', 5, 5)]
+
+  test('kept when its in + out is the restored token count (a hot reload)', async () => {
+    const values = initialAgents()
+    await startAgents(saved(list), values, 130)
+    expect(values.list.map(a => a.id)).toEqual([MAIN, 'a1'])
+  })
+
+  test('dropped when it is not (the option was off across a /clear, then on again)', async () => {
+    const values = { list: [agent('old', 'x', 1, 1)] }
+    await startAgents(saved(list), values, 0)
+    expect(values.list).toEqual([])
   })
 })
 
@@ -172,7 +193,7 @@ describe('view: git and svn', () => {
     const c = card(viewModel(input({ vcs })).cards, 'Git')
     expect(text(c.title)).toBe('Git  ·  VArgus')
     expect(c.rows.map(text)).toEqual([
-      'main (wt:wt1)  ⇡2', '+1 staged   !1 modified   ?3 untracked', '  +! src/a.ts', '  ?  notes.md', '  +2 more',
+      '⇡2  main (wt:wt1)', '+1 staged   !1 modified   ?3 untracked', '  +! src/a.ts', '  ?  notes.md', '  +2 more',
     ])
   })
 
@@ -191,26 +212,53 @@ describe('view: git and svn', () => {
 })
 
 describe('view: layout and colour', () => {
-  test(`side by side from ${SIDE_BY_SIDE} columns, the two widths making the row`, () => {
+  test(`side by side from ${SIDE_BY_SIDE} columns, Tokens wide enough for its four columns`, () => {
     expect(viewModel(input({ columns: SIDE_BY_SIDE - 1 })).cards.map(r => r.length)).toEqual([1, 1, 1])
-    const wide = viewModel(input({ columns: 121 })).cards
-    expect(wide.map(r => r.length)).toEqual([1, 2])
-    expect(wide[1]!.map(c => c.width)).toEqual([60, 61])
+    const at = (columns: number) => viewModel(input({ columns, agents: { list: [agent(MAIN, '', 1, 1)] } })).cards
+    expect(at(SIDE_BY_SIDE).map(r => r.length)).toEqual([1, 2])
+    expect(at(SIDE_BY_SIDE)[1]!.map(c => c.width)).toEqual([34, 66])
+    expect(at(141)[1]!.map(c => c.width)).toEqual([70, 71])
+    expect(text(card(at(SIDE_BY_SIDE), 'Tokens').rows[0]!)).toContain('cache write')
   })
 
-  test('every row fits its card at 40, 76 and 140 columns', () => {
-    const agents = { list: [agent(MAIN, '', 123_456, 7_890), agent('a1', 'a-very-long-agent-type-name', 1, 1, { detail: 'a long description of the task' })] }
-    const vcs = { kind: 'git' as const, branch: 'main', counts: { staged: 1, modified: 0, untracked: 0, conflicted: 0, ahead: 0, behind: 0 },
-      files: [{ kinds: ['staged' as const], path: 'a/very/long/path/that/does/not/fit/in/forty/columns.ts' }], fileCount: 1 }
-    for (const columns of [40, 76, 140]) {
-      const m = viewModel(input({ limits: FULL_LIMITS, session: { contextPercent: 50, contextTokens: 1, contextWindow: 2 }, agents, vcs, columns }))
+  test('every row, title and the header fit at 20, 40, 71, 76 and 140 columns', () => {
+    const agents = { list: [agent(MAIN, '', 123_456, 7_890), agent('a1', 'a-very-long-agent-type-name', 1_500_000_000, 1, { detail: 'a long description of the task' })] }
+    const vcs = {
+      kind: 'git' as const, repo: 'a-repository-with-a-long-name', branch: 'claude/feat-detail-view-tokens-by-agent-分支名',
+      worktree: 'VArgus-detail-view', counts: { staged: 1, modified: 1, untracked: 3, conflicted: 2, ahead: 3, behind: 1 },
+      files: [{ kinds: ['staged' as const], path: 'a/very/long/path/that/does/not/fit/in/forty/columns.ts' }], fileCount: 1,
+    }
+    const session = { contextPercent: 50, contextTokens: 1, contextWindow: 2, model: 'claude-opus-5-5', effort: 'xhigh', startedAt: NOW - 80 * 60_000,
+      counts: { tokens: 1, tools: 123, agents: 4, skills: 2, workflows: 1 } }
+    const core = { cwd: '/home/u/proj/VArgus-detail-view' }
+    for (const columns of [20, 40, 71, 76, 140]) {
+      const f = input({ limits: FULL_LIMITS, session, agents, vcs, columns })
+      f.v.core = { ...f.v.core, ...core }
+      const m = viewModel(f)
+      expect([columns, text(m.header), stringWidth(text(m.header)) <= columns - 2]).toEqual([columns, text(m.header), true])
       for (const row of m.cards) {
         for (const c of row) {
           const inner = (c.width ?? columns) - 4
-          for (const r of c.rows) expect([columns, text(r), stringWidth(text(r)) <= inner]).toEqual([columns, text(r), true])
+          for (const r of [c.title, ...c.rows]) expect([columns, text(r), stringWidth(text(r)) <= inner]).toEqual([columns, text(r), true])
         }
       }
     }
+  })
+
+  test('a long branch is cut at its end, ahead and behind kept first; counts wrap rather than cut', () => {
+    const vcs = { kind: 'git' as const, branch: 'claude/feat-detail-view-tokens-by-agent', worktree: 'VArgus-detail-view',
+      counts: { staged: 1, modified: 1, untracked: 3, conflicted: 0, ahead: 3, behind: 1 } }
+    const rows = card(viewModel(input({ vcs, columns: 40 })).cards, 'Git').rows.map(text)
+    expect(rows[0]!.startsWith('⇡3  ⇣1  claude/')).toBe(true)
+    expect(rows[0]!.endsWith('…')).toBe(true)
+    expect(rows.slice(1, 3)).toEqual(['+1 staged   !1 modified', '?3 untracked'])
+  })
+
+  test('the header drops whole parts from the end before cutting the folder', () => {
+    const f = input({ session: { model: 'claude-opus-5-5', effort: 'high', startedAt: NOW - 60_000 }, columns: 40 })
+    expect(text(viewModel(f).header)).toBe('~/proj  ·  opus:high  ·  session 1m')
+    f.columns = 20
+    expect(text(viewModel(f).header)).toBe('~/proj')
   })
 
   test('NO_COLOR: no colour on any run, no border colour', () => {
@@ -224,6 +272,8 @@ describe('view: layout and colour', () => {
   test('the clock: today, this week, beyond', () => {
     expect(clockTime(en, at(16, 23, 5), NOW)).toBe('23:05')
     expect(clockTime(en, at(20, 7, 0), NOW)).toBe('Tue 07:00')
+    // a week out falls on today's weekday: the date, not `Fri`
+    expect(clockTime(en, at(23, 8, 0), NOW)).toBe('10-23 08:00')
     expect(clockTime(en, at(30, 0, 0), NOW)).toBe('10-30 00:00')
   })
 })
