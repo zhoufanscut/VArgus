@@ -483,7 +483,7 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
   `graphite`, `daylight`), default `graphite`.
 - `blankStopped` (0.1.3, off): the heartbeat write and the second reader
   ([The reader](#the-reader)).
-- `detailView` (off): the `/vargus` pane ([The detail view](#the-detail-view)).
+- `detailView` (0.2.0, off): the `/vargus` pane ([The detail view](#the-detail-view)).
 - Built in at VantageHUD's defaults: the short model name (`opus`); call counts as emoji (`🔧73`), as
   text (`T:73`) on WSL, as VantageHUD's `auto` did (WSL: `WSLENV` set, or `/proc/version` containing
   "microsoft", read with `$.env.get` and `$.fs.read`); the context thresholds 70 / 80 / 85 % and the
