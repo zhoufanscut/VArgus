@@ -144,6 +144,27 @@ describe('detail view: on', () => {
     expect(await pane($, 120)).toContain('cache read')
   })
 
+  test('a hot reload keeps the agents of a list started mid-session', ON, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    world(on, clock)
+    // the host's $.state as a map, the counts already at 70,000 when the option came on
+    const state = new Map<string, unknown>([['counts', { tokens: 70_000, tools: 0, agents: 0, skills: 0, workflows: 0 }]])
+    on('state.set', async ($, e: any) => {
+      state.set(e.key, e.value)
+      return { value: undefined } as never
+    })
+    on('state.get', async ($, e: any) => ({ value: { value: state.get(e.key) ?? null, version: 1 } }) as never)
+    await $.session.start(start)
+    await step($)
+    await clock.advance(1000)
+    expect(await pane($)).toContain('main')
+    // a reload runs session.start again, taking both back from $.state
+    await $.session.start(start)
+    await clock.advance(1000)
+    const drawn = await pane($)
+    expect([drawn.includes('main'), drawn.includes('no requests yet')]).toEqual([true, false])
+  })
+
   test('the open pane redraws each second; /vargus again closes it and the redraws stop', ON, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const c = world(on, clock)

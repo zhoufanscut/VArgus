@@ -246,14 +246,16 @@ function limitsCard(f: ViewInput, inner: number): Card {
     resetW = w
     if (inner - fixed - w >= 12) break
   }
-  const g = Math.max(6, Math.min(60, inner - fixed - resetW))
+  // under 6 cells no gauge at all, so the percent is never what gets cut
+  const room = inner - fixed - resetW
+  const g = room >= 6 ? Math.min(60, room) : 0
   const rows = list.map(w => {
     const rounded = Math.max(0, Math.round(w.percent))
     const pct = w.unclamped ? rounded : Math.min(100, rounded)
     const tier = t.gradient(Math.min(100, pct))
     return [
       seg(t, pad(w.label, labelW), 'label'), seg(t, ' '),
-      ...gauge(t, pct, g, tier),
+      ...(g ? gauge(t, pct, g, tier) : []),
       seg(t, pad(`${pct}%`, 5, true), tier, true),
       seg(t, w.stale ? '*' : ' ', 'faint'),
       seg(t, w.resetsAt === null ? '' : `  ${form(w, w.resetsAt)}`, 'faint'),

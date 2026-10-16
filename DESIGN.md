@@ -250,10 +250,12 @@ language touches no fragment.
     call's `name`, the teammate's name, else the agent type, with the call's description dimmed;
     an agent started before the mod loaded shows as `?`. Past 64 agents the rest sum into one
     `others` row, which keeps the last shown place. Kept in `$.state` beside the counts, so a hot
-    reload keeps it; `/clear` and a resume start it over. At `session.start` the saved list is
-    taken back only when its in + out equals the restored token count: with the option off it is
-    neither kept nor cleared, so after a `/clear` with the option off it would be an earlier
-    conversation's (a reload between the two saves of one step also drops it, rarely);
+    reload keeps it; `/clear` and a resume start it over. Each save of the list carries the counts'
+    token count of that moment, and at `session.start` the list is taken back only when that
+    equals the restored count: with the option off the list is neither kept nor cleared, so after
+    a `/clear` with the option off it would be an earlier conversation's. A list started
+    mid-session is kept across reloads; a reload between the two saves of one step drops it,
+    rarely;
   - **Git** or **SVN**: ahead/behind first, then the branch (worktree and detached-HEAD naming
     as on the line), so a long branch is cut at the row's end and never them; the counts in words
     (`clean` when none), wrapped onto a second row rather than cut; the first 8 changed paths with their marks

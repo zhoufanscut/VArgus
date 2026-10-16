@@ -166,18 +166,24 @@ describe('view: tokens by agent', () => {
 
 describe('agents: the list taken back at session.start', () => {
   // a stand-in for the host's $.state, answering one saved list
-  const saved = (list: VargusAgent[]) => ({ state: { get: async () => ({ value: list }) } }) as never
+  const saved = (list: VargusAgent[], tokens: number) => ({ state: { get: async () => ({ value: { list, tokens } }) } }) as never
   const list = [agent(MAIN, '', 100, 20), agent('a1', 'Explore', 5, 5)]
 
-  test('kept when its in + out is the restored token count (a hot reload)', async () => {
+  test('kept when saved with the restored token count (a hot reload)', async () => {
     const values = initialAgents()
-    await startAgents(saved(list), values, 130)
+    await startAgents(saved(list, 130), values, 130)
     expect(values.list.map(a => a.id)).toEqual([MAIN, 'a1'])
   })
 
-  test('dropped when it is not (the option was off across a /clear, then on again)', async () => {
+  test('kept when the option started it mid-session: its sum below the count', async () => {
+    const values = initialAgents()
+    await startAgents(saved(list, 73_000), values, 73_000)
+    expect(values.list.map(a => a.id)).toEqual([MAIN, 'a1'])
+  })
+
+  test('dropped when saved with another count (the option was off across a /clear, then on again)', async () => {
     const values = { list: [agent('old', 'x', 1, 1)] }
-    await startAgents(saved(list), values, 0)
+    await startAgents(saved(list, 130), values, 40)
     expect(values.list).toEqual([])
   })
 })

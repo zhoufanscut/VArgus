@@ -11,7 +11,8 @@ export type VargusCounts = {
 }
 
 // One row of the detail view's tokens by agent (src/collect/agents.ts), over
-// the same span as the counts.
+// the same span as the counts; the list is saved with the counts' token count
+// of the same moment.
 export type VargusAgent = {
   // the engine's agentId; '' for the main loop, '*others' for the sum past the cap
   id: string
@@ -29,6 +30,6 @@ export type VargusAgent = {
 
 declare module 'claude-code' {
   interface PluginState {
-    vargus: { counts: VargusCounts | null; agents: VargusAgent[] | null }
+    vargus: { counts: VargusCounts | null; agents: { list: VargusAgent[]; tokens: number } | null }
   }
 }

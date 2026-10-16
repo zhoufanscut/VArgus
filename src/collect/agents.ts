@@ -16,6 +16,10 @@ import type { VargusAgent } from '../../types'
 
 export type AgentsValues = { list: VargusAgent[] }
 
+// What $.state keeps: the list and the token count of the counts it was saved
+// with, so a restore can tell the two were saved together.
+export type SavedAgents = { list: VargusAgent[]; tokens: number }
+
 // The main loop's id in the list; no engine agent id is empty.
 export const MAIN = ''
 // Past this many agents, the rest are summed into one row (a workflow run can
@@ -54,19 +58,22 @@ function row(values: AgentsValues, id: string): VargusAgent {
 // save holds the latest list.
 let saving: Promise<unknown> = Promise.resolve()
 
-function save($: EngineInterface, values: AgentsValues): void {
-  saving = saving.then(() => $.state.set(AGENTS, values.list.map(a => ({ ...a })))).catch(() => {})
+// `tokens`: the counts' token count at this save (session.ts).
+function save($: EngineInterface, values: AgentsValues, tokens: number): void {
+  const saved = { list: values.list.map(a => ({ ...a })), tokens }
+  saving = saving.then(() => $.state.set(AGENTS, saved)).catch(() => {})
 }
 
 // From session.start, after the counts are restored: a hot reload keeps the
-// list in $.state. Taken back only when its in + out is the restored token
+// list in $.state. Taken back only when it was saved with the restored token
 // count: with the option off the list is neither kept nor cleared, so after
-// an off-then-on reload it may hold an earlier conversation's agents.
+// an off-then-on reload it may hold an earlier conversation's agents. A list
+// the option started mid-session (its own sum below the count) is kept.
 export async function startAgents($: EngineInterface, values: AgentsValues, tokens: number): Promise<void> {
   values.list = []
   try {
     const saved = (await $.state.get(AGENTS)).value
-    if (saved && saved.reduce((n, a) => n + a.input + a.output, 0) === tokens) values.list = saved.map(a => ({ ...a }))
+    if (saved && saved.tokens === tokens) values.list = saved.list.map(a => ({ ...a }))
   } catch {
     // nothing saved
   }
@@ -74,18 +81,21 @@ export async function startAgents($: EngineInterface, values: AgentsValues, toke
 
 // From agent.spawn, after `next` answered: the started agent's name. A
 // refused spawn (no agentId) starts nothing.
-export function agentSpawned($: EngineInterface, values: AgentsValues, e: AgentSpawnInput, r: AgentSpawnResult): void {
+export function agentSpawned(
+  $: EngineInterface, values: AgentsValues, e: AgentSpawnInput, r: AgentSpawnResult, tokens: number,
+): void {
   if (!r.agentId) return
   const a = row(values, r.agentId)
   if (a.id === OTHERS) return
   a.kind = r.teammateId ? 'teammate' : e.workflow ? 'workflow' : 'subagent'
   a.name = e.name ?? r.teammateId?.split('@')[0] ?? e.subagentType
   a.detail = e.description
-  save($, values)
+  save($, values, tokens)
 }
 
-// From turn.step, after the step: its usage on its agent's row.
-export function agentStep($: EngineInterface, values: AgentsValues, e: TurnStepInput, r: TurnStepResult): void {
+// From turn.step, after the step and after session.ts counted it: its usage
+// on its agent's row.
+export function agentStep($: EngineInterface, values: AgentsValues, e: TurnStepInput, r: TurnStepResult, tokens: number): void {
   if (!r.usage) return
   const a = row(values, e.agentId ?? MAIN)
   a.input += r.usage.input_tokens
@@ -93,12 +103,13 @@ export function agentStep($: EngineInterface, values: AgentsValues, e: TurnStepI
   a.cacheRead += r.usage.cache_read_input_tokens
   a.cacheWrite += r.usage.cache_creation_input_tokens
   a.requests += 1
-  save($, values)
+  save($, values, tokens)
 }
 
-// /clear and a resume start the list over, as the counts do (session.ts).
-export function agentsEnding($: EngineInterface, values: AgentsValues, e: SessionEndInput): void {
+// /clear and a resume start the list over, as the counts do (session.ts,
+// which has zeroed them by now).
+export function agentsEnding($: EngineInterface, values: AgentsValues, e: SessionEndInput, tokens: number): void {
   if (e.reason !== 'clear' && e.reason !== 'resume') return
   values.list = []
-  save($, values)
+  save($, values, tokens)
 }

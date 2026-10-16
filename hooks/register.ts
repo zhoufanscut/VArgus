@@ -122,7 +122,7 @@ export const register: Register = (on, given) => {
     stepStarting(e, values.session)
     const r = yield* next(e)
     stepDone($, r, values.session)
-    if (options?.detailView) agentStep($, agents, e, r)
+    if (options?.detailView) agentStep($, agents, e, r, values.session.counts.tokens)
     return r
   })
 
@@ -136,7 +136,7 @@ export const register: Register = (on, given) => {
 
   on('session.end', async ($, e, next) => {
     sessionEnding($, e, values.session)
-    if (options?.detailView) agentsEnding($, agents, e)
+    if (options?.detailView) agentsEnding($, agents, e, values.session.counts.tokens)
     // a failed removal leaves the folder, as before
     if (writer) await endSession($, writer, e.sessionId).catch(() => {})
     return next(e)
@@ -146,7 +146,7 @@ export const register: Register = (on, given) => {
     // Names for the tokens by agent; observes, as every hook here.
     on('agent.spawn', async ($, e, next) => {
       const r = await next(e)
-      agentSpawned($, agents, e, r)
+      agentSpawned($, agents, e, r, values.session.counts.tokens)
       return r
     })
 
