@@ -33,8 +33,8 @@ Code comments cite this file by section name: `(DESIGN, "The line file")`.
 ## Scope
 
 - Claude Code 2.1.299 or later: mods are on by default from 2.1.287, and the facts below were
-  checked on 2.1.299 and re-checked on 2.1.300; a measured fact names its version (older versions
-  are untested).
+  checked on 2.1.299 and re-checked on 2.1.300 and 2.1.301; a measured fact names its version
+  (older versions are untested).
 - The line shows wherever Claude Code shows a `statusLine`: `claude` in a terminal, an editor's
   integrated terminal included. Where the status line is not drawn (the VS Code extension's chat
   panel, `claude -p`, the Agent SDK, cloud sessions) VArgus shows nothing, as VantageHUD did.
