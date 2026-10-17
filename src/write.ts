@@ -2,16 +2,23 @@ import type { EngineInterface } from 'claude-code'
 
 // The line file (DESIGN, "The line file"): <data>/<session id>/line, replaced
 // whole by a temp file and `mv`, so the reader's `cat` sees a whole line. The
-// session's folder is removed when the session ends.
+// session's folder is removed when the session ends. On Windows `move` and
+// `rmdir` through cmd.exe stand in for `mv` and `rm` (see moveArgv).
 
 // The plugin's data folder name: plugin `vargus` from marketplace `vargus`.
 export const DATA_FOLDER = 'vargus-vargus'
 
 export type Writer = {
-  // <data>, absolute; null when the config folder is not an absolute path
-  // (CLAUDE_CONFIG_DIR relative, or it and HOME unset), so nothing is
-  // written outside the data folder.
+  // <data>, absolute, with `/` separators; null when the config folder is
+  // not an absolute path (CLAUDE_CONFIG_DIR relative, or it, HOME and
+  // USERPROFILE unset), so nothing is written outside the data folder.
+  // Absolute is `/...`, or `C:\...` / `C:/...` on Windows (on Linux and
+  // macOS a drive path comes only from a CLAUDE_CONFIG_DIR or HOME set to
+  // one, or a drive-path USERPROFILE with HOME unset or not a `/` path).
   dir: string | null
+  // how the line is moved into place and folders removed: `mv` and `rm`, or
+  // on Windows (a drive-letter data folder) cmd.exe
+  tools: 'posix' | 'cmd'
   // line.<t>.tmp: one temp file per loaded copy of the mod.
   tmpName: string
   last: { id: string; text: string; at: number } | null
@@ -31,12 +38,33 @@ export type Writer = {
 // A session id as a folder name: no `/`, `.` or `..`.
 const SAFE_ID = /^[A-Za-z0-9_-]+$/
 
+const DRIVE_PATH = /^[A-Za-z]:[\\/]/
+
+// The home folder Claude Code keeps `.claude` in. On Windows that is
+// USERPROFILE whatever HOME says (measured with HOME set to another folder:
+// Claude Code read C:\Users\<name>\.claude, while a mod that took HOME wrote
+// where no reader looked). Windows here: USERPROFILE a drive path and HOME
+// not a `/` path, since WSL can pass the Windows USERPROFILE through
+// unchanged (WSLENV) beside its own HOME. Else HOME, then USERPROFILE.
+export function homeDir(home: string | undefined, profile: string | undefined): string | undefined {
+  const windows = !!profile && DRIVE_PATH.test(profile) && !home?.startsWith('/')
+  return (windows ? profile : home || profile) || undefined
+}
+
+// The data folder from CLAUDE_CONFIG_DIR, else <home>/.claude (Writer.dir).
+export function dataDir(config: string | undefined, home: string | undefined): string | null {
+  const base = config || (home ? `${DRIVE_PATH.test(home) ? home.replace(/[\\/]+$/, '') : home}/.claude` : '')
+  const drive = DRIVE_PATH.test(base)
+  if (!base.startsWith('/') && !drive) return null
+  return `${(drive ? base.replace(/\\/g, '/') : base).replace(/\/+$/, '')}/plugins/data/${DATA_FOLDER}`
+}
+
 export async function createWriter($: EngineInterface): Promise<Writer> {
   const config = await $.env.get('CLAUDE_CONFIG_DIR')
-  const home = await $.env.get('HOME')
-  const base = config || (home ? `${home}/.claude` : '')
+  const dir = dataDir(config, homeDir(await $.env.get('HOME'), await $.env.get('USERPROFILE')))
   return {
-    dir: base.startsWith('/') ? `${base}/plugins/data/${DATA_FOLDER}` : null,
+    dir,
+    tools: dir !== null && DRIVE_PATH.test(dir) ? 'cmd' : 'posix',
     tmpName: `line.${await $.clock.now()}.tmp`,
     last: null,
     heartbeatMs: null,
@@ -71,7 +99,8 @@ export async function endSession($: EngineInterface, w: Writer, id: string): Pro
   w.ended = id
   await w.running?.catch(() => {})
   if (!w.dir || !SAFE_ID.test(id)) return
-  await $.process.run(['rm', '-rf', '--', `${w.dir}/${id}`])
+  const argv = removeArgv(w, `${w.dir}/${id}`)
+  if (argv) await $.process.run(argv)
   if (w.last?.id === id) w.last = null
 }
 
@@ -96,8 +125,35 @@ export async function pruneOld($: EngineInterface, w: Writer, now: number): Prom
     const newest = Math.max(0, ...files.filter(f => f.kind === 'file').map(f => f.mtimeMs))
     const at = newest || (await $.fs.stat(folder).catch(() => null))?.mtimeMs
     if (at === undefined || now - at < PRUNE_AFTER_MS) continue
-    await $.process.run(['rm', '-rf', '--', folder]).catch(() => {})
+    const argv = removeArgv(w, folder)
+    if (argv) await $.process.run(argv).catch(() => {})
   }
+}
+
+// On Windows `mv` and `rm` are found only when Git's usr\bin is on the PATH
+// Claude Code started with: from Git Bash it is, from PowerShell it is not
+// (measured on Windows 11, Git 2.56.0: the line written in place, a .tmp left,
+// folders kept). cmd.exe is always there; `/d` skips its AutoRun commands, and
+// it takes `\` separators (about 20 ms a move, measured). cmd is never given
+// a path with a character it acts on: the runtime quotes only arguments with
+// a space, so cmd splits at `&` (measured: `a&b.tmp` ran `b.tmp` as a command)
+// and `rmdir /s /q D:\R&D\...` would remove D:\R; `,` `;` `=` separate its
+// arguments, `^` escapes, `%` and `!` expand. For such a path there is no
+// command (null): the line is written in place, nothing is removed.
+const CMD_UNSAFE = /[&^%!,;=()"<>|]/
+
+export function moveArgv(w: Pick<Writer, 'tools'>, from: string, to: string): string[] | null {
+  if (w.tools === 'posix') return ['mv', '-f', from, to]
+  return CMD_UNSAFE.test(from + to) ? null : ['cmd', '/d', '/c', 'move', '/y', backslash(from), backslash(to)]
+}
+
+export function removeArgv(w: Pick<Writer, 'tools'>, folder: string): string[] | null {
+  if (w.tools === 'posix') return ['rm', '-rf', '--', folder]
+  return CMD_UNSAFE.test(folder) ? null : ['cmd', '/d', '/c', 'rmdir', '/s', '/q', backslash(folder)]
+}
+
+function backslash(path: string): string {
+  return path.replace(/\//g, '\\')
 }
 
 async function drain($: EngineInterface, w: Writer): Promise<void> {
@@ -112,12 +168,16 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
     const folder = `${w.dir}/${id}`
     const line = `${folder}/line`
     const tmp = `${folder}/${w.tmpName}`
-    await $.fs.write(tmp, next)
+    const argv = moveArgv(w, tmp, line)
     let moved = false
-    try {
-      moved = (await $.process.run(['mv', '-f', tmp, line])).exitCode === 0
-    } catch {
-      // refused (an organization hook, say): fall back below
+    // no command to move with: no temp file either
+    if (argv) {
+      await $.fs.write(tmp, next)
+      try {
+        moved = (await $.process.run(argv)).exitCode === 0
+      } catch {
+        // refused (an organization hook, say): fall back below
+      }
     }
     // Not atomic: a read can catch a half-written line for one run.
     if (!moved) await $.fs.write(line, next)

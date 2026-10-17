@@ -1,6 +1,8 @@
 import { describe, expect, mock, test, type MockClock } from 'claude-code/testing'
 import type { On, SessionRepo } from 'claude-code'
 
+import { findSvnRoot, resolvePath } from '../src/collect/vcs'
+
 // The vcs collector driven through the mod's own hooks: the git-vs-svn
 // choice, the worktree and detached-HEAD reads from the git dir, and the
 // refresh policy (src/collect/vcs.ts, "When to refresh"). The rendered line
@@ -102,6 +104,28 @@ describe('vcs collector', () => {
     await $.session.start(start)
     await clock.advance(1000)
     expect(line(w)).toContain('branch:main (wt:wt1)')
+  })
+
+  test('Windows: folding a commondir keeps the drive', async () => {
+    expect(resolvePath('C:/r/.git/worktrees/w', '../..')).toBe('C:/r/.git')
+    expect(resolvePath('C:/r/.git/worktrees/w', 'D:\\x\\.git')).toBe('D:/x/.git')
+    expect(resolvePath('/r/.git/worktrees/w', '../..')).toBe('/r/.git')
+    // outside a drive path a \ is part of a name, as before
+    expect(resolvePath('/r/a\\b/w', '..')).toBe('/r/a\\b')
+    expect(resolvePath('C:/r/.git/worktrees/w', '\\x\\.git')).toBe('C:/x/.git')
+    expect(resolvePath('C:/r/.git/worktrees/w', '/x/.git')).toBe('C:/x/.git')
+  })
+
+  test('Windows: the svn walk goes up a drive path', async () => {
+    const seen: string[] = []
+    const $ = {
+      fs: {
+        stat: async () => { throw new Error('ENOENT') },
+        exists: async (p: string) => { seen.push(p); return p === 'C:\\a/.svn' },
+      },
+    }
+    expect(await findSvnRoot($ as never, 'C:\\a\\b')).toBe('C:\\a')
+    expect(seen).toEqual(['C:\\a\\b/.svn', 'C:\\a/.svn'])
   })
 
   test('git wins over svn: a git repo inside an svn working copy never runs svn', async ($, on) => {

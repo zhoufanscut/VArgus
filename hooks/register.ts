@@ -13,7 +13,7 @@ import { render } from '../src/render'
 import { makeTheme } from '../src/theme'
 import { viewModel } from '../src/view/model'
 import { drawView } from '../src/view/pane'
-import { createWriter, endSession, pruneOld, writeLine, type Writer } from '../src/write'
+import { createWriter, endSession, homeDir, pruneOld, writeLine, type Writer } from '../src/write'
 
 // Wiring only. Module values start over on a hot reload, which runs register
 // and session.start again (DESIGN, "The host"); what must survive one lives in
@@ -82,7 +82,7 @@ export const register: Register = (on, given) => {
       writer.heartbeatMs = options?.blankStopped ? 30_000 : null
       startVcs($, values.vcs, e, options?.detachedHead ?? false)
       startLimits($, values.limits, e)
-      values.core.home = await $.env.get('HOME')
+      values.core.home = homeDir(await $.env.get('HOME'), await $.env.get('USERPROFILE'))
       values.core.isWsl = await isWsl($)
       theme = makeTheme(options?.theme ?? 'graphite', !!(await $.env.get('NO_COLOR')))
       if (options?.detailView) {

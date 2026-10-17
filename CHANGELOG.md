@@ -4,6 +4,22 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Windows, with Git for Windows (no option: there was no Windows support to turn off). The mod
+  takes `C:\...` and `C:/...` paths and its home from `USERPROFILE`, where Claude Code keeps its
+  config even with `HOME` set to another folder; before, it wrote nothing there. It moves and
+  removes files through `cmd.exe`, since Git's `mv` and `rm` are not on the `PATH` of a Claude
+  Code started from PowerShell, and never hands cmd a path holding a character cmd acts on (`&`,
+  `,`, `^`, `%` and others). The setup skill stops, settings unchanged, when the session has no
+  Bash tool (no Git Bash: Claude Code would run the status line through PowerShell, where the
+  reader fails). On drive paths the folder shortens to `~` with `\` separators, svn is found above
+  the folder, and a detached HEAD in a linked worktree is named (these three unit-tested only).
+  Tested live on one Windows 11 machine (Git 2.56.0, Claude Code 2.1.300), started from PowerShell
+  and from Git Bash.
+
 ## [0.2.0] - 2026-10-16
 
 ### Added
@@ -87,6 +103,7 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/zhoufanscut/VArgus/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/zhoufanscut/VArgus/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/zhoufanscut/VArgus/compare/v0.1.1...v0.1.2

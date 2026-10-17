@@ -1,6 +1,8 @@
 import { describe, expect, mock, test, type MockClock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+import { dataDir, homeDir, moveArgv, removeArgv } from '../src/write'
+
 // The line file (DESIGN, "The line file"), driven through the mod's own hooks.
 
 const DATA = '/home/u/.claude/plugins/data/vargus-vargus'
@@ -20,6 +22,8 @@ type World = {
   id: string
   // mv's exit code, or 'throw' for a refused process
   mv: number | 'throw'
+  // fs.write of a temp file throws
+  tmpFails: boolean
   // a cwd function, to change the text between ticks
   cwd: () => string
   // hold each fs.write, each rm and each fs.list this long on the mock clock
@@ -37,7 +41,7 @@ type World = {
 
 function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '/home/u', NO_COLOR: '1' }): World {
   const w: World = {
-    writes: [], runs: [], id: 'S1', mv: 0, cwd: () => '/home/u/proj/x',
+    writes: [], runs: [], id: 'S1', mv: 0, tmpFails: false, cwd: () => '/home/u/proj/x',
     holdMs: 0, rmHoldMs: 0, listHoldMs: 0, inFlight: 0, maxInFlight: 0, started: [], tree: {}, dirTimes: {},
   }
   mock.env(on, env)
@@ -54,17 +58,25 @@ function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '
     w.maxInFlight = Math.max(w.maxInFlight, w.inFlight)
     if (w.holdMs) await clock.sleep(w.holdMs)
     w.inFlight -= 1
+    if (w.tmpFails && e.path.endsWith('.tmp')) throw new Error('denied')
     w.writes.push({ path: e.path, text: e.text })
     return { value: undefined }
   })
+  // The engine hands a Windows drive path on as relative to its cwd on Linux
+  // (`<cwd>/C:/...`): tree keys start at the drive.
+  // On Windows it hands them on as given, with `\`.
+  const key = (p: string) => {
+    const at = p.search(/[A-Za-z]:[\\/]/)
+    return at < 0 ? p : p.slice(at).replace(/\\/g, '/')
+  }
   on('fs.list', async ($, e) => {
     if (w.listHoldMs) await clock.sleep(w.listHoldMs)
-    const entries = w.tree[e.path ?? '']
+    const entries = w.tree[key(e.path ?? '')]
     if (!entries) throw new Error('ENOENT')
     return { value: entries.map(x => ({ size: 0, isLink: false, ...x, mtimeMs: x.kind === 'file' ? x.mtimeMs : 0 })) }
   })
   on('fs.stat', async ($, e) => {
-    const t = w.dirTimes[e.path]
+    const t = w.dirTimes[key(e.path)]
     if (t === undefined) throw new Error('ENOENT')
     return { value: { kind: 'dir' as const, size: 0, mtimeMs: t, isLink: false } }
   })
@@ -149,6 +161,112 @@ describe('line file', () => {
     await $.session.start(start)
     await clock.advance(1000)
     expect(w.writes).toEqual([])
+  })
+
+  test('Windows: HOME unset, the folder shortens to ~ from USERPROFILE', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: 3 })
+    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u', NO_COLOR: '1' })
+    w.cwd = () => 'C:\\Users\\u\\proj'
+    await $.session.start({ ...start, cwd: 'C:\\Users\\u\\proj' })
+    await clock.settle()
+    expect(w.writes.at(-1)?.text).toBe('~\\proj')
+  })
+
+  test('a temp file that cannot be written: no line written in place either', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: 3 })
+    const w = world(on, clock)
+    w.tmpFails = true
+    await $.session.start(start)
+    await clock.advance(1000)
+    expect(w.writes).toEqual([])
+    expect(w.runs).toEqual([])
+  })
+
+  test('Windows: a data folder with a cmd special character is never given to cmd', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: 100 * 24 * 3_600_000 })
+    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u', CLAUDE_CONFIG_DIR: 'D:\\R&D\\claude' })
+    // an old folder the prune would remove, given a command
+    const data = 'D:/R&D/claude/plugins/data/vargus-vargus'
+    w.tree[data] = [{ name: 'old', kind: 'dir', mtimeMs: 0 }]
+    w.tree[`${data}/old`] = [{ name: 'line', kind: 'file', mtimeMs: 1 }]
+    await $.session.start(start)
+    await clock.settle()
+    // no move: the line written in place, no temp file
+    expect(w.writes.map(x => x.path.split(/[\\/]/).pop())).toEqual(['line'])
+    await $.session.end({ reason: 'prompt_input_exit', sessionId: 'S1', resume: { id: 'S1' } } as const)
+    await clock.advance(3000)
+    expect(w.runs).toEqual([])
+  })
+
+  test('the move and remove commands: mv/rm, cmd.exe on Windows, none for a path cmd acts on', async () => {
+    expect(moveArgv({ tools: 'posix' }, '/d/a.tmp', '/d/line')).toEqual(['mv', '-f', '/d/a.tmp', '/d/line'])
+    expect(removeArgv({ tools: 'posix' }, '/d/S1')).toEqual(['rm', '-rf', '--', '/d/S1'])
+    expect(moveArgv({ tools: 'cmd' }, 'C:/d/a.tmp', 'C:/d/line')).toEqual(['cmd', '/d', '/c', 'move', '/y', 'C:\\d\\a.tmp', 'C:\\d\\line'])
+    expect(removeArgv({ tools: 'cmd' }, 'C:/d/S1')).toEqual(['cmd', '/d', '/c', 'rmdir', '/s', '/q', 'C:\\d\\S1'])
+    // the folder or the session id
+    expect(moveArgv({ tools: 'cmd' }, 'D:/a,b/a.tmp', 'D:/a,b/line')).toBeNull()
+    expect(moveArgv({ tools: 'cmd' }, 'C:/d/a&b/a.tmp', 'C:/d/a&b/line')).toBeNull()
+    expect(removeArgv({ tools: 'cmd' }, 'C:/d/a;b')).toBeNull()
+    expect(removeArgv({ tools: 'cmd' }, 'C:/d/%x%')).toBeNull()
+    // the same characters mean nothing to mv and rm
+    expect(moveArgv({ tools: 'posix' }, '/a,b/a.tmp', '/a,b/line')).toEqual(['mv', '-f', '/a,b/a.tmp', '/a,b/line'])
+  })
+
+  test('the home: USERPROFILE on Windows over a HOME that is not a / path; elsewhere HOME, then USERPROFILE', async () => {
+    expect(homeDir('D:\\h', 'C:\\Users\\u')).toBe('C:\\Users\\u')
+    expect(homeDir('C:\\Users\\u', 'C:\\Users\\u')).toBe('C:\\Users\\u')
+    // WSL with the Windows USERPROFILE passed through: its own HOME
+    expect(homeDir('/home/u', 'C:\\Users\\u')).toBe('/home/u')
+    expect(homeDir(undefined, 'C:\\Users\\u')).toBe('C:\\Users\\u')
+    expect(homeDir('/home/u', undefined)).toBe('/home/u')
+    expect(homeDir('/home/u', '/home/w')).toBe('/home/u')
+    expect(homeDir(undefined, '/home/w')).toBe('/home/w')
+    expect(homeDir('', '')).toBeUndefined()
+  })
+
+  test('WSL: a Windows USERPROFILE passed through leaves HOME in charge', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: 3 })
+    const w = world(on, clock, { HOME: '/home/u', USERPROFILE: 'C:\\Users\\u', WSLENV: 'USERPROFILE', NO_COLOR: '1' })
+    await $.session.start(start)
+    await clock.settle()
+    expect(w.runs).toEqual([['mv', '-f', `${DATA}/S1/line.3.tmp`, `${DATA}/S1/line`]])
+  })
+
+  test('Windows: HOME set elsewhere, the folder still shortens against USERPROFILE', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: 3 })
+    const w = world(on, clock, { HOME: 'D:\\h', USERPROFILE: 'C:\\Users\\u', NO_COLOR: '1' })
+    w.cwd = () => 'C:\\Users\\u\\proj'
+    await $.session.start({ ...start, cwd: 'C:\\Users\\u\\proj' })
+    await clock.settle()
+    expect(w.writes.at(-1)?.text).toBe('~\\proj')
+  })
+
+  test('Windows: HOME set elsewhere, the line still goes under USERPROFILE', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: 3 })
+    const w = world(on, clock, { HOME: 'D:\\h', USERPROFILE: 'C:\\Users\\u' })
+    await $.session.start(start)
+    await clock.settle()
+    expect(w.runs[0]?.[5]).toBe('C:\\Users\\u\\.claude\\plugins\\data\\vargus-vargus\\S1\\line.3.tmp')
+  })
+
+  test('Windows drive paths are absolute, written with / separators', async () => {
+    expect(dataDir(undefined, 'C:\\Users\\u')).toBe('C:/Users/u/.claude/plugins/data/vargus-vargus')
+    expect(dataDir('D:\\cfg', 'C:\\Users\\u')).toBe('D:/cfg/plugins/data/vargus-vargus')
+    expect(dataDir('D:/cfg', undefined)).toBe('D:/cfg/plugins/data/vargus-vargus')
+    expect(dataDir('C:rel', undefined)).toBeNull()
+    expect(dataDir('rel', '/home/u')).toBeNull()
+    expect(dataDir('C:\\', undefined)).toBe('C:/plugins/data/vargus-vargus')
+    expect(dataDir('/cfg/', undefined)).toBe('/cfg/plugins/data/vargus-vargus')
+    expect(dataDir(undefined, 'C:\\Users\\u\\')).toBe('C:/Users/u/.claude/plugins/data/vargus-vargus')
+  })
+
+  test('Windows: cmd.exe move puts the line in place, with \\ separators', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: 3 })
+    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u' })
+    await $.session.start(start)
+    await clock.settle()
+    const data = 'C:\\Users\\u\\.claude\\plugins\\data\\vargus-vargus\\S1'
+    expect(w.runs).toEqual([['cmd', '/d', '/c', 'move', '/y', `${data}\\line.3.tmp`, `${data}\\line`]])
   })
 
   test('nothing is written outside an interactive session', FOLDER_ONLY, async ($, on) => {
@@ -245,6 +363,16 @@ describe('the session folder at session.end', () => {
     expect(w.writes.map(x => x.path).at(-1)).toBe(`${DATA}/S1/line.1.tmp`)
   })
 
+  test('Windows: removed with cmd.exe rmdir', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: 1 })
+    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u' })
+    await $.session.start(start)
+    await clock.settle()
+    await $.session.end(end('prompt_input_exit'))
+    await clock.advance(3000)
+    expect(w.runs.at(-1)).toEqual(['cmd', '/d', '/c', 'rmdir', '/s', '/q', 'C:\\Users\\u\\.claude\\plugins\\data\\vargus-vargus\\S1'])
+  })
+
   test('nothing is written while the removal runs', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 1 })
     const w = world(on, clock)
@@ -324,6 +452,20 @@ describe('the age prune at session.start', () => {
     await clock.advance(10_000)
     await starting
     expect(removed(w)).toEqual([`${DATA}/old`])
+  })
+
+  test('Windows: an old folder is removed with cmd.exe rmdir', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u' })
+    const data = 'C:/Users/u/.claude/plugins/data/vargus-vargus'
+    w.tree[data] = [dir('old'), dir('S1')]
+    w.tree[`${data}/old`] = [file('line', 30)]
+    w.tree[`${data}/S1`] = [file('line', 30)]
+    await $.session.start(start)
+    await clock.settle()
+    expect(w.runs.filter(r => r[3] === 'rmdir')).toEqual([
+      ['cmd', '/d', '/c', 'rmdir', '/s', '/q', 'C:\\Users\\u\\.claude\\plugins\\data\\vargus-vargus\\old'],
+    ])
   })
 
   test('only plain folders named like an id: not a link, a file or another name', FOLDER_ONLY, async ($, on) => {

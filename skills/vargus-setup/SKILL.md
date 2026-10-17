@@ -27,6 +27,19 @@ the command.
 
 ## Set up
 
+0. On Windows (the session's platform is `win32`, or the data folder above starts with a drive
+   letter such as `C:`), check for Git Bash before changing anything: Claude Code runs the
+   `statusLine` command through Git Bash when it is installed, else through PowerShell, where
+   these readers fail and the row stays blank. Claude Code gives the session a Bash tool only
+   when it found Git Bash, so that is the check: with no Bash tool (only PowerShell), tell the
+   person VArgus on Windows needs Git for Windows (https://git-scm.com/downloads/win): install
+   it, restart Claude Code, then ask for setup again. Stop there, with the settings unchanged.
+   Don't run `bash` from PowerShell to check: with WSL installed that starts WSL's bash, which
+   has `cat` and `find` while Claude Code still has no Git Bash. With a Bash tool, run `command
+   -v cat find` in it. If either is missing, say so, and stop with the settings unchanged. If
+   both are found, go on, and in step 3 write the data folder with `/` in place of each `\`
+   (`C:/Users/...`): Git Bash drops unquoted backslashes, and JSON would need each one escaped.
+   VArgus has been tested on one Windows 11 machine only.
 1. Pick the settings file by how the plugin is installed. Run `claude plugin list --json` and
    read the `vargus@...` entries' `scope` and `projectPath` (the list also shows local installs
    of other projects; the one for this project has `enabled: true`).

@@ -5,8 +5,14 @@ export function cleanText(text: string): string {
 }
 
 // `~` for a `home` prefix of `cwd`; a home of `/` (or empty) never shortens.
+// In a Windows drive path (`C:\...`) `\` separates too; the rest of the path
+// keeps its own.
 export function shortenHome(cwd: string, home: string | undefined): string {
-  const root = (home ?? '').replace(/\/+$/, '')
+  const drive = /^[A-Za-z]:/.test(home ?? '')
+  const root = (home ?? '').replace(drive ? /[\\/]+$/ : /\/+$/, '')
   if (root === '') return cwd
-  return cwd === root || cwd.startsWith(root + '/') ? '~' + cwd.slice(root.length) : cwd
+  const next = cwd[root.length]
+  return cwd.startsWith(root) && (next === undefined || next === '/' || (drive && next === '\\'))
+    ? '~' + cwd.slice(root.length)
+    : cwd
 }

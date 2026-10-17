@@ -15,4 +15,15 @@ describe('text', () => {
     expect(shortenHome('/x', '/')).toBe('/x')
     expect(shortenHome('/x', undefined)).toBe('/x')
   })
+
+  test('Windows: a \\ home prefix becomes ~, the rest keeps its separators', async () => {
+    expect(shortenHome('C:\\Users\\u\\proj', 'C:\\Users\\u')).toBe('~\\proj')
+    expect(shortenHome('C:/Users/u/proj', 'C:/Users/u')).toBe('~/proj')
+    expect(shortenHome('C:\\Users\\u', 'C:\\Users\\u\\')).toBe('~')
+    expect(shortenHome('C:\\Users\\u2\\x', 'C:\\Users\\u')).toBe('C:\\Users\\u2\\x')
+    // outside a drive path a \ is part of a name, as before
+    expect(shortenHome('/home/u\\x', '/home/u')).toBe('/home/u\\x')
+    expect(shortenHome('/home/u\\', '/home/u\\')).toBe('~')
+    expect(shortenHome('/home/u/x', '/home/u\\')).toBe('/home/u/x')
+  })
 })

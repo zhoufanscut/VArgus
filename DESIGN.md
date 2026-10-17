@@ -38,7 +38,18 @@ Code comments cite this file by section name: `(DESIGN, "The line file")`.
 - The line shows wherever Claude Code shows a `statusLine`: `claude` in a terminal, an editor's
   integrated terminal included. Where the status line is not drawn (the VS Code extension's chat
   panel, `claude -p`, the Agent SDK, cloud sessions) VArgus shows nothing, as VantageHUD did.
-- Linux and macOS. The reader is POSIX `sh`; Windows is not covered.
+- Linux and macOS. Windows only with Git for Windows (tested on one Windows 11 machine, Git
+  2.56.0, Claude Code 2.1.300, 2026-10-17): Claude
+  Code "runs status line commands through Git Bash when Git Bash is installed, or through
+  PowerShell when Git Bash is absent" (statusline docs, read 2026-10-17), so the POSIX `sh`
+  reader runs there and fails under PowerShell. The setup skill checks for Git Bash before it
+  writes the reader, and writes the data folder with `/`. The mod takes the home from
+  `USERPROFILE` and treats `C:\...` or `C:/...` as absolute (written with `/`). `$.process.run`
+  has no shell (types: "by its argument vector (no shell)"), so `mv` and `rm` run only when Git's
+  `usr\bin` is on Claude Code's `PATH`. Measured on that machine: started from PowerShell it was
+  not (the machine `PATH` has only `Git\cmd`), so the line was written in place with its `.tmp`
+  left beside it, and session folders stayed after exit; started from Git Bash both worked. So
+  on Windows the mod moves and removes through cmd.exe ([The line file](#the-line-file)).
 
 Not in scope: the band above the prompt and other mod-drawn UI (the `/vargus` pane, opened only
 when asked, aside), data that only the status-line
@@ -290,7 +301,14 @@ language touches no fragment.
   `marketplace.json`). Why: that folder survives plugin updates, while the plugin's install folder
   changes with each version (plugins/components docs). The mod builds the path as
   `$CLAUDE_CONFIG_DIR`, else `$HOME/.claude`, then `/plugins/data/vargus-vargus`, reading both with
-  `$.env.get` (`$.fs` does not expand `~`; the mod's env has no `CLAUDE_PLUGIN_DATA`). Measured
+  `$.env.get` (`$.fs` does not expand `~`; the mod's env has no `CLAUDE_PLUGIN_DATA`). On Windows
+  (`USERPROFILE` a drive path and `HOME` not a `/` path: WSL can pass the Windows `USERPROFILE`
+  through beside its own `HOME`) the home is `USERPROFILE`: measured with
+  `HOME=D:\h` set, Claude Code kept its config and plugin data under `C:\Users\<name>\.claude`,
+  and a mod that took `HOME` wrote `D:\h\.claude\...`, so the row stayed blank. Started from
+  PowerShell `HOME` is unset; Git Bash hands it on as `C:\Users\...`. A drive path (`C:\...`,
+  `C:/...`) counts as absolute and is written with `/` (measured: the line landed where the
+  skill's `${CLAUDE_PLUGIN_DATA}` named, started from PowerShell and from Git Bash). Measured
   (2.1.300, a throwaway plugin installed from a local directory marketplace): the skill's
   `${CLAUDE_PLUGIN_DATA}` named the path the mod built, with and without `CLAUDE_CONFIG_DIR` set;
   the folder did not exist until the mod's first `$.fs.write`, which created it and the session
@@ -316,8 +334,16 @@ language touches no fragment.
   `CLAUDE_CODE_SESSION_ID`. Why it matters: VantageHUD once keyed its cache on a variable
   Claude Code doesn't export, so concurrent sessions shared one file and `ctx:` dropped to 0%.
 - Each write goes to `line.<t>.tmp` in the same folder, then `$.process.run(['mv', '-f', <tmp>,
-  <line>])` puts it in place. `<t>` is `$.clock.now()` taken at `session.start`, so each loaded copy
-  of the mod (after a hot reload, or a second process on the session) has its own temp file. Why:
+  <line>])` puts it in place; on Windows (a drive-letter data folder) `cmd /d /c move /y` with `\`
+  separators (`mv` is on the `PATH` only when Claude Code was started from Git Bash;
+  [Scope](#scope)). `/d` skips cmd's AutoRun, for the same reason git runs with
+  `core.fsmonitor=false`: no program the person configured runs. The runtime quotes only an
+  argument with a space, so cmd would act on `&` (measured: `a&b.tmp` ran `b.tmp` as a command),
+  `,` `;` `=` (argument separators), `^`, `%` and `!`: `rmdir /s /q D:\R&D\...` would remove
+  `D:\R`. A path holding any of `&^%!,;=()"<>|` (in the data folder or the session id) gets no
+  cmd command: the line is written in place with no temp file, and nothing is removed. `<t>` is
+  `$.clock.now()` taken at `session.start`, so each loaded copy of the mod (after a hot reload,
+  or a second process on the session) has its own temp file. Why:
   `$.fs.write` is not atomic ("it replaces the file's content in place, so another process can read
   a partly written file", mods/reference) and `$.fs` has no rename; `mv` within one folder is a
   rename, which a reader sees whole or not at all. Measured in a live session (2.1.299, tmpfs, a
@@ -344,7 +370,8 @@ language touches no fragment.
 - `mv` on the real data folder's disk (ext4) against tmpfs, in one run from Python (300 each,
   2026-10-15): median 1.28 against 1.26 ms, 95th percentile 2.11 against 1.57 ms.
 - At `session.end` (any reason) the mod removes the ending session's folder with
-  `$.process.run(['rm', '-rf', '--', <data>/<id>])`, since `$.fs` has no delete: after a write
+  `$.process.run(['rm', '-rf', '--', <data>/<id>])` (on Windows `cmd /d /c rmdir /s /q`, as for
+  the move above), since `$.fs` has no delete: after a write
   in flight finishes, and only for an id that is a plain name (letters, digits, `_`, `-`) and
   a data folder that is an absolute path. It writes no more for that id until another session
   ends in this process: after a resume `$.session.id()` can still give it (0.75 s in the one

@@ -73,6 +73,11 @@ VArgus has two parts:
 - Claude Code 2.1.299 or later, in a terminal. The status line is not shown in the VS Code chat
   panel or under `claude -p`.
 - Linux or macOS: the status-line command is POSIX `sh`.
+- Windows: only with [Git for Windows](https://git-scm.com/downloads/win) installed. Claude Code
+  runs the status-line command through Git Bash when it finds it, else through PowerShell, where
+  the VArgus command fails and the row stays blank. The setup skill checks this first and stops
+  if the session has no Bash tool (no Git Bash). Tested on one Windows 11 machine (Git 2.56.0,
+  Claude Code 2.1.300).
 
 ## Setup
 
@@ -124,7 +129,8 @@ entry if you have one, asks before replacing it, and adds the VArgus one.
 
 Add this to `~/.claude/settings.json` (or, for a plugin installed for one project only, to that
 project's `.claude/settings.local.json`), replacing any `statusLine` entry you have. It assumes the
-default config folder (`~/.claude`); with `CLAUDE_CONFIG_DIR` set, let the skill do it.
+default config folder (`~/.claude`); with `CLAUDE_CONFIG_DIR` set, or on Windows, let the skill
+do it.
 
 ```json
 "statusLine": {
@@ -203,6 +209,10 @@ from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-
   plugin's data folder until a later session removes it, 14 days after its last write. Where an
   organization refuses the mod's processes, every session's folder stays.
 - Labels are English only for now.
+- On Windows the mod moves and removes files with `cmd.exe` (`move`, `rmdir`). When the config
+  folder's path holds a character cmd acts on (`&`, `,`, `;`, `=`, `^`, `%`, `!`, `(`, `)` and
+  others), it hands cmd nothing: the line is written in place (a refresh can catch it
+  half-written) and session folders are not removed.
 - A line can lag the session by up to about two seconds. If the plugin stops (turned off, or a
   crash), the last line stays on screen with frozen numbers, unless **Blank a stopped line** is
   on.

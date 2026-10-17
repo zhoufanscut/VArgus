@@ -424,7 +424,7 @@ export async function findSvnRoot($: EngineInterface, cwd: string): Promise<stri
   }
   for (;;) {
     if (await $.fs.exists(`${dir === '/' ? '' : dir}/.svn`)) return dir
-    const parent = dir.replace(/\/[^/]*$/, '') || '/'
+    const parent = dir.replace(DRIVE.test(dir) ? /[\\/][^\\/]*$/ : /\/[^/]*$/, '') || '/'
     if (parent === dir) return null
     dir = parent
   }
@@ -573,17 +573,28 @@ function svnBucket(attrs: string): SvnBucket | null {
 // ---------------------------------------------------------------------------
 // Paths, without node:path (a mod imports only its own files and claude-code).
 
+// A Windows drive path (`C:`): `\` separates there too.
+const DRIVE = /^[A-Za-z]:/
+
 function baseName(path: string): string {
-  return path.replace(/\/+$/, '').split('/').pop() ?? path
+  const sep = DRIVE.test(path) ? /[\\/]/ : /\//
+  return path.replace(DRIVE.test(path) ? /[\\/]+$/ : /\/+$/, '').split(sep).pop() ?? path
 }
 
-// `rel` against the absolute folder `base`, `.` and `..` folded.
-function resolvePath(base: string, rel: string): string {
+// `rel` against the absolute folder `base`, `.` and `..` folded. A Windows
+// drive (`C:`) stays in front; the result is written with `/`.
+export function resolvePath(base: string, rel: string): string {
+  // a pointer from the drive's root (`\x`) keeps the base's drive
+  const baseDrive = DRIVE.exec(base)?.[0]
+  const full = DRIVE.test(rel) ? rel
+    : baseDrive && /^[\\/]/.test(rel) ? baseDrive + rel
+    : rel.startsWith('/') ? rel : `${base}/${rel}`
+  const drive = DRIVE.exec(full)?.[0] ?? ''
   const parts: string[] = []
-  for (const part of (rel.startsWith('/') ? rel : `${base}/${rel}`).split('/')) {
+  for (const part of full.slice(drive.length).split(drive ? /[\\/]/ : /\//)) {
     if (part === '' || part === '.') continue
     if (part === '..') parts.pop()
     else parts.push(part)
   }
-  return `/${parts.join('/')}`
+  return `${drive}/${parts.join('/')}`
 }
