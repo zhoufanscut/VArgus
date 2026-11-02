@@ -20,7 +20,6 @@ const SENTINEL = {
   },
   tool: { result: 'sentinel output' },
   compact: { messages: [{ role: 'user', text: 'sentinel summary', toolUses: [] }] },
-  turnComplete: { text: 'sentinel turn text' },
   end: { sessionId: 'sentinel-session' },
 }
 
@@ -48,7 +47,6 @@ function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '
   on('tool.call', async () => SENTINEL.tool as never)
   on('session.measure', async () => SENTINEL.measure as never)
   on('session.compact', async () => SENTINEL.compact as never)
-  on('turn.complete', async () => SENTINEL.turnComplete as never)
   on('session.end', async () => SENTINEL.end)
   void clock
   return w
@@ -73,7 +71,7 @@ async function line(clock: MockClock, w: World): Promise<string | undefined> {
 const NO_VCS = { options: { repo: false, branch: false, status: false } }
 
 describe('register: each hook returns what the hooks beneath it answered', () => {
-  test('session.start, session.measure, session.compact, turn.step (the result whole), turn.complete, tool.call, session.end', NO_VCS, async ($, on) => {
+  test('session.start, session.measure, session.compact, turn.step (the result whole), tool.call, session.end', NO_VCS, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     world(on, clock)
     expect(await $.session.start(start)).toEqual(SENTINEL.start)
@@ -83,9 +81,6 @@ describe('register: each hook returns what the hooks beneath it answered', () =>
       trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }],
     } as never)).toEqual(SENTINEL.compact)
     expect(await step($)).toEqual({ ...SENTINEL.step, turnId: 't1', index: 0 })
-    expect(await $.turn.complete({
-      answer: 'a', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer',
-    } as never)).toEqual(SENTINEL.turnComplete)
     expect(await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)).toEqual(SENTINEL.tool)
     expect(await $.session.end({ reason: 'clear', sessionId: 'S1', resume: { id: 'S1' } })).toEqual(SENTINEL.end)
   })

@@ -58,7 +58,6 @@ function world(on: On, clock: MockClock): World {
   on('session.measure', async ($, e) => ({ changed: e.changed }))
   on('session.compact', async () =>
     (w.compactSkipped ? { skip: 'no' } : { messages: [{ role: 'user', text: 'summary', toolUses: [] }] }) as never)
-  on('turn.complete', async ($, e) => ({ text: e.answer }))
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   // The kit answers $.state beneath these.
   on('state.set', async ($, e, next) => {
@@ -71,13 +70,6 @@ function world(on: On, clock: MockClock): World {
 }
 
 const start = { cwd: '/home/u/x', surface: 'terminal', isInteractive: true } as const
-
-// The main loop's (or a subagent's) turn end.
-async function turnEnd($: Engine, agentId?: string) {
-  return $.turn.complete({
-    answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId,
-  } as never)
-}
 
 async function step($: Engine, e: Partial<TurnStepInput> = {}) {
   const s = $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1, ...e })
@@ -98,10 +90,14 @@ describe('session collector', () => {
     const w = world(on, clock)
     await $.session.start(start)
     expect(await line(clock, w)).toBe('opus | ctx:20% | session:0m')
+    w.percent = 21
     await step($, { effort: 'high' })
-    // a subagent's effort is not the session's
+    // a subagent's response neither sets effort nor reads the main window
+    w.percent = 22
+    const calls = w.usageCalls
     await step($, { effort: 'low', agentId: 'a1' })
-    expect(await line(clock, w)).toBe('opus:high | ctx:20% | token:3.0k | session:0m')
+    expect(w.usageCalls).toBe(calls)
+    expect(await line(clock, w)).toBe('opus:high | ctx:21% | token:3.0k | session:0m')
   })
 
   test('tokens: input + output of every step, subagents too; cache tokens left out', MINE, async ($, on) => {
@@ -143,6 +139,10 @@ describe('session collector', () => {
     w.startedAt = 100_000 - 23 * 60_000
     await $.session.start(start)
     expect(await line(clock, w)).toContain('session:23m')
+    // a main response fills an unknown start, never replaces a known one
+    w.startedAt = 0
+    await step($)
+    expect(await line(clock, w)).toContain('session:23m')
   })
 
   test('session.measure pushes the context and re-reads the model', MINE, async ($, on) => {
@@ -168,13 +168,15 @@ describe('session collector', () => {
     w.id = 'S3'
     await clock.settle()
     expect(w.saved).toEqual({ tokens: 0, tools: 0, agents: 0, skills: 0, workflows: 0 })
-    // context and start read again on the next tick (usage() starts over)
+    // context and start stay unknown until the first main response reads them
     w.percent = 3
     w.startedAt = 1000
-    expect(await line(clock, w)).toBe('opus | ctx:3% | session:0m')
+    expect(await line(clock, w)).toBe('opus | ctx:0%')
+    await step($)
+    expect(await line(clock, w)).toBe('opus | ctx:3% | token:1.5k | session:0m')
   })
 
-  test('after a resume context and start are read again, not left at ctx:0% until the next turn', MINE, async ($, on) => {
+  test('after a resume the first main response fills context and start; ticks do not poll', MINE, async ($, on) => {
     const clock = mock.clock(on, { now: 10 * 3_600_000 })
     const w = world(on, clock)
     await $.session.start(start)
@@ -184,23 +186,24 @@ describe('session collector', () => {
     w.startedAt = 7 * 3_600_000
     await $.session.end({ reason: 'resume', sessionId: 'S1', resume: { id: 'S2' } })
     w.id = 'S2'
-    expect(await line(clock, w)).toBe('opus | ctx:64% | session:3h0m')
-    // each answer taken until the next turn's measure: a first answer that
-    // still described the session left is corrected on the next tick
+    const calls = w.usageCalls
+    expect(await line(clock, w)).toBe('opus | ctx:0%')
+    expect(w.usageCalls).toBe(calls)
+    await step($)
+    expect(await line(clock, w)).toBe('opus | ctx:64% | token:1.5k | session:3h0m')
+    // a later tick takes no reading of its own; the turn-end push still stands
     w.percent = 65
-    expect(await line(clock, w)).toBe('opus | ctx:65% | session:3h0m')
-    // after the measure, not asked again once the turn ends
+    expect(await line(clock, w)).toBe('opus | ctx:64% | token:1.5k | session:3h0m')
     await $.session.measure({ context: { window: 200000, percent: 66 }, rateLimits: [], changed: ['context'] })
     w.percent = 67
-    expect(await line(clock, w)).toBe('opus | ctx:67% | session:3h0m')
-    await turnEnd($)
-    const calls = w.usageCalls
+    expect(await line(clock, w)).toBe('opus | ctx:66% | token:1.5k | session:3h0m')
+    const afterMeasure = w.usageCalls
     w.percent = 99
-    expect(await line(clock, w)).toBe('opus | ctx:67% | session:3h0m')
-    expect(w.usageCalls).toBe(calls)
+    expect(await line(clock, w)).toBe('opus | ctx:66% | token:1.5k | session:3h0m')
+    expect(w.usageCalls).toBe(afterMeasure)
   })
 
-  test('a compaction that stands drops the fill until the next reading', MINE, async ($, on) => {
+  test('a compaction that stands drops the fill until the next main response', MINE, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     await $.session.start(start)
@@ -209,44 +212,27 @@ describe('session collector', () => {
     w.percent = undefined
     await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
     expect(await line(clock, w)).toBe('opus | ctx:0% | session:0m')
-    // the tick reads again, so a response mid-turn shows...
-    w.percent = 3
-    expect(await line(clock, w)).toBe('opus | ctx:3% | session:0m')
-    // ...the turn's measure pushes a fill, and the tick keeps reading until
-    // the turn ends
-    await $.session.measure({ context: { window: 200000, percent: 4 }, rateLimits: [], changed: ['context'] })
-    w.percent = 5
-    expect(await line(clock, w)).toBe('opus | ctx:5% | session:0m')
-    await turnEnd($)
-    const calls = w.usageCalls
-    w.percent = 99
-    expect(await line(clock, w)).toBe('opus | ctx:5% | session:0m')
-    expect(w.usageCalls).toBe(calls)
-  })
-
-  test('a rate-limit measure mid-turn does not stop a compaction\'s re-read', MINE, async ($, on) => {
-    const clock = mock.clock(on, { now: 0 })
-    const w = world(on, clock)
-    await $.session.start(start)
-    w.percent = undefined
-    await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
+    // the host can still push the old fill just after the compaction lands
+    await $.session.measure({ context: { window: 200000, percent: 20 }, rateLimits: [], changed: ['rateLimits'] })
     expect(await line(clock, w)).toBe('opus | ctx:0% | session:0m')
-    w.percent = 3
-    expect(await line(clock, w)).toBe('opus | ctx:3% | session:0m')
-    // the host moves a rate-limit window while the turn goes on: its measure
-    // carries the context, but the turn's later responses are still to come
-    await $.session.measure({ context: { window: 200000, percent: 3 }, rateLimits: [], changed: ['rateLimits'] })
-    w.percent = 4
-    expect(await line(clock, w)).toBe('opus | ctx:4% | session:0m')
-    // a subagent's turn end is not the main loop's: the reading goes on
-    await turnEnd($, 'a1')
-    w.percent = 5
-    expect(await line(clock, w)).toBe('opus | ctx:5% | session:0m')
-    await turnEnd($)
+    // no tick reads ahead of a response
     const calls = w.usageCalls
-    w.percent = 99
-    expect(await line(clock, w)).toBe('opus | ctx:5% | session:0m')
+    w.percent = 3
+    expect(await line(clock, w)).toBe('opus | ctx:0% | session:0m')
     expect(w.usageCalls).toBe(calls)
+    await step($)
+    expect(await line(clock, w)).toBe('opus | ctx:3% | token:1.5k | session:0m')
+    // each later main response replaces the fill, with no polling between
+    w.percent = 4
+    await step($)
+    expect(await line(clock, w)).toBe('opus | ctx:4% | token:3.0k | session:0m')
+    // with the first main response read, the ordinary push path stands again
+    await $.session.measure({ context: { window: 200000, percent: 5 }, rateLimits: [], changed: ['context'] })
+    expect(await line(clock, w)).toBe('opus | ctx:5% | token:3.0k | session:0m')
+    const afterSteps = w.usageCalls
+    w.percent = 99
+    expect(await line(clock, w)).toBe('opus | ctx:5% | token:3.0k | session:0m')
+    expect(w.usageCalls).toBe(afterSteps)
   })
 
   test('a skipped, precompute or subagent compaction leaves the fill and the reading alone', MINE, async ($, on) => {
@@ -270,7 +256,7 @@ describe('session collector', () => {
     expect(w.usageCalls).toBe(calls)
   })
 
-  test('a refused usage() after /clear keeps the line', MINE, async ($, on) => {
+  test('a refused usage() after /clear keeps the step result and the line', MINE, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     await $.session.start(start)
@@ -278,7 +264,8 @@ describe('session collector', () => {
     w.usageRefused = true
     await $.session.end({ reason: 'clear', sessionId: 'S1', resume: { id: 'S1' } })
     w.id = 'S2'
-    expect(await line(clock, w)).toBe('opus | ctx:0%')
+    expect((await step($)).stopReason).toBe('end_turn')
+    expect(await line(clock, w)).toBe('opus | ctx:0% | token:1.5k')
   })
 
   test('counts saved in $.state are taken back at session.start (a hot reload)', MINE, async ($, on) => {

@@ -1,6 +1,6 @@
 import type {
   EngineInterface, SessionCompactInput, SessionCompactResult, SessionContextUsage, SessionEndInput,
-  SessionMeasureInput, ToolCallInput, TurnCompleteInput, TurnStepInput, TurnStepResult,
+  SessionMeasureInput, ToolCallInput, TurnStepInput, TurnStepResult,
 } from 'claude-code'
 
 import type { VargusCounts } from '../../types'
@@ -43,11 +43,9 @@ export type SessionValues = {
   contextWindow: number | undefined
   // $.session.usage().startedAt, in $.clock.now() ms; undefined until read
   startedAt: number | undefined
-  // after /clear, a resume or a compaction, until the main loop's next
-  // turn.complete: the tick reads context and start again (register.ts
-  // refresh). Not cleared by session.measure: one can be raised mid-turn for
-  // a rate limit alone, with the turn's later responses still to come
-  rereading: boolean
+  // a standing compaction until the next main-loop step: a measure in this
+  // gap can still carry the pre-compact fill and must not restore it
+  compactPending: boolean
   counts: VargusCounts
 }
 
@@ -60,7 +58,7 @@ function zero(): VargusCounts {
 export function initialSession(): SessionValues {
   return {
     model: undefined, effort: undefined, contextPercent: undefined, contextTokens: undefined,
-    contextWindow: undefined, startedAt: undefined, rereading: false,
+    contextWindow: undefined, startedAt: undefined, compactPending: false,
     counts: zero(),
   }
 }
@@ -117,29 +115,36 @@ export function setContext(values: SessionValues, context: SessionContextUsage):
 // One function per event, so another collector hooking the same event can be
 // called from one shared hook instead.
 
-// Pushed after each main-thread turn: the context, and a fresh read of the
-// model and session start (which /clear and a resume move). The push does not
-// end a reread: session.measure can fire mid-turn for a rate limit alone.
+// Pushed after each main-thread turn, and when a rate-limit window moves: the
+// context, and a fresh read of the model and session start (which /clear and a
+// resume move). Just after a compaction the pushed context can still be the
+// old window's, so the next main step supersedes it instead.
 export function measured($: EngineInterface, e: SessionMeasureInput, values: SessionValues): void {
-  setContext(values, e.context)
+  if (!values.compactPending) setContext(values, e.context)
   readSession($, values, false).catch(() => {})
-}
-
-// The main loop's turn is over (its session.measure follows, or none was
-// needed): the tick stops reading usage each second. A subagent's turn end
-// leaves the main conversation's reading alone.
-export function turnEnded(e: TurnCompleteInput, values: SessionValues): void {
-  if (e.agentId === undefined) values.rereading = false
 }
 
 export function stepStarting(e: TurnStepInput, values: SessionValues): void {
   if (e.agentId === undefined) values.effort = e.effort
 }
 
-export function stepDone($: EngineInterface, r: TurnStepResult, values: SessionValues): void {
-  if (!r.usage) return
-  values.counts.tokens += r.usage.input_tokens + r.usage.output_tokens
-  save($, values)
+// A main-loop response is already in usage() when its step resolves; a
+// subagent's response is not the main conversation's window. Read after every
+// main step, even one without usage: a failed response then keeps the last fill.
+export async function stepDone($: EngineInterface, e: TurnStepInput, r: TurnStepResult, values: SessionValues): Promise<void> {
+  if (r.usage) {
+    values.counts.tokens += r.usage.input_tokens + r.usage.output_tokens
+    save($, values)
+  }
+  if (e.agentId !== undefined) return
+  values.compactPending = false
+  try {
+    const usage = await $.session.usage()
+    setContext(values, usage.context)
+    if (values.startedAt === undefined) values.startedAt = usage.startedAt
+  } catch {
+    // keep the last
+  }
 }
 
 export function toolCalled($: EngineInterface, e: ToolCallInput, values: SessionValues): void {
@@ -154,7 +159,7 @@ export function toolCalled($: EngineInterface, e: ToolCallInput, values: Session
 
 // /clear and a resume go on under another session id with no session.start;
 // the counts start over, as $.session.usage() does at /clear. Context and
-// start are unknown until the next reading.
+// start are unknown until the next main-loop step or session.measure.
 export function sessionEnding($: EngineInterface, e: SessionEndInput, values: SessionValues): void {
   if (e.reason !== 'clear' && e.reason !== 'resume') return
   values.counts = zero()
@@ -162,22 +167,19 @@ export function sessionEnding($: EngineInterface, e: SessionEndInput, values: Se
   values.contextTokens = undefined
   values.contextWindow = undefined
   values.startedAt = undefined
-  values.rereading = true
+  values.compactPending = false
   save($, values)
 }
 
 // A compaction that stands replaces the conversation: the live window starts
 // over, and usage() answers the window alone until its first response (types,
 // SessionContextUsage). session.measure is raised at a turn's end, not at a
-// compaction, so without this the line holds the pre-compact fill through the
-// next turn (measured on 2.1.312: ctx:16% after a 161k-token /compact, 3% only
-// once that turn ended). The tick then reads usage each second, as after a
-// resume, until the main loop's next turn.complete, so a response's fill shows
-// before the turn ends. A hook's skip, a precompute (nothing installed) and a
-// subagent's own transcript leave the main conversation's fill alone.
+// compaction, so drop the old fill here; the next main-loop step reads the new
+// window's first response. A hook's skip, a precompute (nothing installed) and
+// a subagent's own transcript leave the main conversation's fill alone.
 export function compacted(e: SessionCompactInput, r: SessionCompactResult, values: SessionValues): void {
   if (e.agentId !== undefined || e.trigger === 'precompute' || r.skip !== undefined) return
   values.contextPercent = undefined
   values.contextTokens = undefined
-  values.rereading = true
+  values.compactPending = true
 }

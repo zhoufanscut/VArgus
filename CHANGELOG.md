@@ -8,11 +8,12 @@ Notable changes to this project. The format follows
 
 ### Fixed
 
-- After a compaction that stands (`/compact`, auto-compact or a plugin's), `ctx:` kept the
-  pre-compact fill until the next turn ended, which a long turn could stretch for minutes. The
-  collector now drops the fill when the compaction lands and reads `$.session.usage()` each
-  second until the main loop's next turn ends, as after a resume: the line shows `ctx:0%` until
-  the compacted conversation's first response, then that response's fill.
+- `ctx:` could keep the pre-compact fill until the next turn ended, which a long turn could
+  stretch for minutes. The collector drops that fill when a compaction stands (`/compact`,
+  auto-compact or a plugin's), then reads `$.session.usage()` after every main-loop `turn.step`.
+  Every main response now updates `ctx:` while the turn is running; a fresh session, `/clear` or
+  an in-session resume starts at `ctx:0%`, and a measure just after a compaction cannot restore
+  the old fill. The one-second usage poll is gone.
 
 ## [0.3.0] - 2026-10-17
 
