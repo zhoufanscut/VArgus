@@ -22,6 +22,8 @@ type World = {
   // what the mod last saved to $.state, and what a state read answers
   saved: unknown
   restore: unknown
+  // a session.compact answers skipped (a hook vetoed it)
+  compactSkipped: boolean
   // the session id; an ended session's id is written no more, so a test
   // moves it on as /clear and a resume do
   id: string
@@ -29,7 +31,7 @@ type World = {
 
 function world(on: On, clock: MockClock): World {
   const w: World = {
-    lines: [], model: 'claude-opus-5-5[1m]', startedAt: 0, percent: 20, usageRefused: false, usageCalls: 0, saved: undefined, restore: undefined, id: 'S1',
+    lines: [], model: 'claude-opus-5-5[1m]', startedAt: 0, percent: 20, usageRefused: false, usageCalls: 0, saved: undefined, restore: undefined, compactSkipped: false, id: 'S1',
     usage: { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 90000, cache_creation_input_tokens: 7000 },
   }
   mock.env(on, { HOME: '/home/u', NO_COLOR: '1' })
@@ -54,6 +56,9 @@ function world(on: On, clock: MockClock): World {
   })
   on('tool.call', async () => ({ result: 'ok' }) as never)
   on('session.measure', async ($, e) => ({ changed: e.changed }))
+  on('session.compact', async () =>
+    (w.compactSkipped ? { skip: 'no' } : { messages: [{ role: 'user', text: 'summary', toolUses: [] }] }) as never)
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   // The kit answers $.state beneath these.
   on('state.set', async ($, e, next) => {
@@ -66,6 +71,13 @@ function world(on: On, clock: MockClock): World {
 }
 
 const start = { cwd: '/home/u/x', surface: 'terminal', isInteractive: true } as const
+
+// The main loop's (or a subagent's) turn end.
+async function turnEnd($: Engine, agentId?: string) {
+  return $.turn.complete({
+    answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId,
+  } as never)
+}
 
 async function step($: Engine, e: Partial<TurnStepInput> = {}) {
   const s = $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1, ...e })
@@ -177,11 +189,84 @@ describe('session collector', () => {
     // still described the session left is corrected on the next tick
     w.percent = 65
     expect(await line(clock, w)).toBe('opus | ctx:65% | session:3h0m')
-    // after the measure, not asked again
+    // after the measure, not asked again once the turn ends
     await $.session.measure({ context: { window: 200000, percent: 66 }, rateLimits: [], changed: ['context'] })
+    w.percent = 67
+    expect(await line(clock, w)).toBe('opus | ctx:67% | session:3h0m')
+    await turnEnd($)
     const calls = w.usageCalls
     w.percent = 99
-    expect(await line(clock, w)).toBe('opus | ctx:66% | session:3h0m')
+    expect(await line(clock, w)).toBe('opus | ctx:67% | session:3h0m')
+    expect(w.usageCalls).toBe(calls)
+  })
+
+  test('a compaction that stands drops the fill until the next reading', MINE, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | session:0m')
+    // the compacted live window: the window alone until its first response
+    w.percent = undefined
+    await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
+    expect(await line(clock, w)).toBe('opus | ctx:0% | session:0m')
+    // the tick reads again, so a response mid-turn shows...
+    w.percent = 3
+    expect(await line(clock, w)).toBe('opus | ctx:3% | session:0m')
+    // ...the turn's measure pushes a fill, and the tick keeps reading until
+    // the turn ends
+    await $.session.measure({ context: { window: 200000, percent: 4 }, rateLimits: [], changed: ['context'] })
+    w.percent = 5
+    expect(await line(clock, w)).toBe('opus | ctx:5% | session:0m')
+    await turnEnd($)
+    const calls = w.usageCalls
+    w.percent = 99
+    expect(await line(clock, w)).toBe('opus | ctx:5% | session:0m')
+    expect(w.usageCalls).toBe(calls)
+  })
+
+  test('a rate-limit measure mid-turn does not stop a compaction\'s re-read', MINE, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    w.percent = undefined
+    await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
+    expect(await line(clock, w)).toBe('opus | ctx:0% | session:0m')
+    w.percent = 3
+    expect(await line(clock, w)).toBe('opus | ctx:3% | session:0m')
+    // the host moves a rate-limit window while the turn goes on: its measure
+    // carries the context, but the turn's later responses are still to come
+    await $.session.measure({ context: { window: 200000, percent: 3 }, rateLimits: [], changed: ['rateLimits'] })
+    w.percent = 4
+    expect(await line(clock, w)).toBe('opus | ctx:4% | session:0m')
+    // a subagent's turn end is not the main loop's: the reading goes on
+    await turnEnd($, 'a1')
+    w.percent = 5
+    expect(await line(clock, w)).toBe('opus | ctx:5% | session:0m')
+    await turnEnd($)
+    const calls = w.usageCalls
+    w.percent = 99
+    expect(await line(clock, w)).toBe('opus | ctx:5% | session:0m')
+    expect(w.usageCalls).toBe(calls)
+  })
+
+  test('a skipped, precompute or subagent compaction leaves the fill and the reading alone', MINE, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    const calls = w.usageCalls
+    w.compactSkipped = true
+    await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
+    w.percent = 99
+    expect(await line(clock, w)).toBe('opus | ctx:20% | session:0m')
+    w.compactSkipped = false
+    // precompute installs nothing, whatever it answered
+    await $.session.compact({ trigger: 'precompute', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | session:0m')
+    // a subagent's own transcript is not the main conversation
+    await $.session.compact({
+      trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }], agentId: 'a1',
+    } as never)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | session:0m')
     expect(w.usageCalls).toBe(calls)
   })
 

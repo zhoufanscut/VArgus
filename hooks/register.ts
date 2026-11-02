@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import { agentSpawned, agentStep, agentsEnding, initialAgents, startAgents } from '../src/collect/agents'
 import { initialLimits, measuredLimits, startLimits } from '../src/collect/limits'
 import {
-  initialSession, measured, sessionEnding, setContext, startSession, stepDone, stepStarting, toolCalled,
+  compacted, initialSession, measured, sessionEnding, setContext, startSession, stepDone, stepStarting, toolCalled, turnEnded,
 } from '../src/collect/session'
 import { initialVcs, startVcs, toolCalledVcs } from '../src/collect/vcs'
 import type { Theme, Values } from '../src/core/types'
@@ -41,13 +41,16 @@ async function refresh($: EngineInterface): Promise<void> {
   // PostModelSwitch, which doesn't run under a managed install (a failed read
   // keeps the last model, never costs the line)
   values.session.model = await $.session.model().catch(() => values.session.model)
-  // After /clear or a resume (sessionEnding) context and start are unknown,
-  // and nothing pushes them until the next main-thread turn's session.measure:
-  // a resumed long conversation would show ctx:0% and no session:. Read them
-  // each tick until that measure (free without a breakdown), taking each
-  // answer, so a first one that still described the session left (the id
-  // lagged 0.75 s after a resume, DESIGN "The line file") is corrected a tick
-  // later. A failed read keeps the values and never costs the line.
+  // After /clear or a resume context and start are unknown, and after a
+  // compaction the context is (the start stays); nothing pushes them until
+  // the next main-thread turn's session.measure: a resumed long conversation
+  // would show ctx:0% and no session:. Read them each tick until that turn's
+  // turn.complete, taking each answer, so a first one that still described
+  // the session left (the id lagged 0.75 s after a resume, DESIGN "The line
+  // file") is corrected a tick later, and a compacted conversation's response
+  // fill shows before its turn ends. A session.measure does not end the
+  // reading: one can be raised mid-turn for a rate limit alone. A failed read
+  // keeps the values and never costs the line.
   const s = values.session
   if (s.rereading) {
     const usage = await $.session.usage().catch(() => null)
@@ -118,12 +121,27 @@ export const register: Register = (on, given) => {
     return next(e)
   })
 
+  // A compaction that stands resets the live window with no session.measure
+  // until the next turn's end (DESIGN, "Data sources").
+  on('session.compact', async ($, e, next) => {
+    const r = await next(e)
+    compacted(e, r, values.session)
+    return r
+  })
+
   on('turn.step', async function* ($, e, next) {
     stepStarting(e, values.session)
     const r = yield* next(e)
     stepDone($, r, values.session)
     if (options?.detailView) agentStep($, agents, e, r, values.session.counts.tokens)
     return r
+  })
+
+  // The main loop's turn end (its measure follows): stop the per-tick reading.
+  // A subagent's turn end is not the main conversation's (session.ts turnEnded).
+  on('turn.complete', async ($, e, next) => {
+    turnEnded(e, values.session)
+    return next(e)
   })
 
   on('tool.call', async ($, e, next) => {

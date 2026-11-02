@@ -4,6 +4,16 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- After a compaction that stands (`/compact`, auto-compact or a plugin's), `ctx:` kept the
+  pre-compact fill until the next turn ended, which a long turn could stretch for minutes. The
+  collector now drops the fill when the compaction lands and reads `$.session.usage()` each
+  second until the main loop's next turn ends, as after a resume: the line shows `ctx:0%` until
+  the compacted conversation's first response, then that response's fill.
+
 ## [0.3.0] - 2026-10-17
 
 ### Added

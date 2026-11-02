@@ -1,6 +1,6 @@
 import type {
-  EngineInterface, SessionContextUsage, SessionEndInput, SessionMeasureInput, ToolCallInput, TurnStepInput,
-  TurnStepResult,
+  EngineInterface, SessionCompactInput, SessionCompactResult, SessionContextUsage, SessionEndInput,
+  SessionMeasureInput, ToolCallInput, TurnCompleteInput, TurnStepInput, TurnStepResult,
 } from 'claude-code'
 
 import type { VargusCounts } from '../../types'
@@ -43,8 +43,10 @@ export type SessionValues = {
   contextWindow: number | undefined
   // $.session.usage().startedAt, in $.clock.now() ms; undefined until read
   startedAt: number | undefined
-  // after /clear or a resume, until the next session.measure: the tick reads
-  // context and start again (register.ts refresh)
+  // after /clear, a resume or a compaction, until the main loop's next
+  // turn.complete: the tick reads context and start again (register.ts
+  // refresh). Not cleared by session.measure: one can be raised mid-turn for
+  // a rate limit alone, with the turn's later responses still to come
   rereading: boolean
   counts: VargusCounts
 }
@@ -116,11 +118,18 @@ export function setContext(values: SessionValues, context: SessionContextUsage):
 // called from one shared hook instead.
 
 // Pushed after each main-thread turn: the context, and a fresh read of the
-// model and session start (which /clear and a resume move).
+// model and session start (which /clear and a resume move). The push does not
+// end a reread: session.measure can fire mid-turn for a rate limit alone.
 export function measured($: EngineInterface, e: SessionMeasureInput, values: SessionValues): void {
   setContext(values, e.context)
-  values.rereading = false
   readSession($, values, false).catch(() => {})
+}
+
+// The main loop's turn is over (its session.measure follows, or none was
+// needed): the tick stops reading usage each second. A subagent's turn end
+// leaves the main conversation's reading alone.
+export function turnEnded(e: TurnCompleteInput, values: SessionValues): void {
+  if (e.agentId === undefined) values.rereading = false
 }
 
 export function stepStarting(e: TurnStepInput, values: SessionValues): void {
@@ -155,4 +164,20 @@ export function sessionEnding($: EngineInterface, e: SessionEndInput, values: Se
   values.startedAt = undefined
   values.rereading = true
   save($, values)
+}
+
+// A compaction that stands replaces the conversation: the live window starts
+// over, and usage() answers the window alone until its first response (types,
+// SessionContextUsage). session.measure is raised at a turn's end, not at a
+// compaction, so without this the line holds the pre-compact fill through the
+// next turn (measured on 2.1.312: ctx:16% after a 161k-token /compact, 3% only
+// once that turn ended). The tick then reads usage each second, as after a
+// resume, until the main loop's next turn.complete, so a response's fill shows
+// before the turn ends. A hook's skip, a precompute (nothing installed) and a
+// subagent's own transcript leave the main conversation's fill alone.
+export function compacted(e: SessionCompactInput, r: SessionCompactResult, values: SessionValues): void {
+  if (e.agentId !== undefined || e.trigger === 'precompute' || r.skip !== undefined) return
+  values.contextPercent = undefined
+  values.contextTokens = undefined
+  values.rereading = true
 }
