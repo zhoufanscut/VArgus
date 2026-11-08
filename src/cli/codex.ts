@@ -11,7 +11,7 @@ import { findRollout, RolloutReader } from '../hosts/codex/rollout'
 import { Views } from '../hosts/codex/views'
 import { applicationTarget, type Target } from '../outputs/tmux/target'
 import { PaneInput } from '../outputs/tmux/input'
-import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, type FooterSelection } from '../hosts/codex/footer'
+import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, FooterSettings, type FooterSelection } from '../hosts/codex/footer'
 import { resolveOptions } from '../options'
 import { makeTheme } from '../theme'
 import { codexLine } from './line'
@@ -140,7 +140,7 @@ export async function standalone(args: string[]): Promise<number> {
     console.log(current ? description(current) : (await backups(target)).length ? 'VArgus is off; footer restoration is pending. Run !vargus off.' : 'VArgus is off.')
     return 0
   }
-  if (current?.version === 2 && (action === 'off' || current.thread === thread)) {
+  if (current && ((action === 'off' && (current.version === 2 || current.version === 3)) || (current.version === 3 && current.thread === thread))) {
     const reply = await request(current, action as 'on' | 'off')
     console.log(action === 'on' ? `VArgus is already on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))
     return 0
@@ -187,16 +187,20 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const output = new TmuxOutput(target.socket, target.pane)
   const options = resolveOptions({ ...spec.options, tmuxOutput: true }), theme = makeTheme(options.theme, !!process.env.NO_COLOR)
   const readers = new Map<string, { reader: RolloutReader; line: ReturnType<typeof codexLine> }>()
-  const suppressed = new Set<string>()
+  const suppressed = new Set<string>(), footerSettings = new FooterSettings()
   let mode = spec.mode, selected: string | undefined, error: string | undefined
   let stopping = false, attached = false, refreshAt = 0, renderAt = 0
   let lastConfirmed: string | undefined, readingError: string | undefined, published = ''
   const stop = () => { stopping = true }
   process.on('SIGTERM', stop); process.on('SIGHUP', stop)
-  const state = async (): Promise<Running> => ({ pid: process.pid, thread, target, token: spec.token, version: 2,
+  const state = async (): Promise<Running> => ({ pid: process.pid, thread, target, token: spec.token, version: 3,
     mode, selected, pending: (await backups(target)).length, error })
   const step = async () => {
-    if (Date.now() >= refreshAt) { await views.refresh(); refreshAt = Date.now() + 1000 }
+    if (Date.now() >= refreshAt) {
+      await views.refresh()
+      if (mode === 'on') await footerSettings.preload(views.family().map(view => view.cwd))
+      refreshAt = Date.now() + 1000
+    }
     const screen = await input.snapshot(), view = views.selected(screen)
     const changed = selected !== view?.thread
     selected = view?.thread
@@ -211,7 +215,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
         }
         if (mode === 'on' && !suppressed.has(view.thread) && codexComposer(screen, '')) {
           if (!backup) {
-            const selection = await savedFooter(view.cwd)
+            const selection = footerSettings.get(view.cwd)
             restoreFooter(selection)
             backup = { target, thread: view.thread, selection }
             await save(backupFile, backup)
@@ -278,6 +282,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
           mode = request.action === 'on' ? 'on' : 'restore'
           readingError = undefined
           if (mode === 'on') {
+            footerSettings.reset(); refreshAt = 0
             suppressed.clear(); renderAt = 0
             if (!attached) { await output.attach(); attached = true }
           } else if (attached) { await output.detach(); attached = false }

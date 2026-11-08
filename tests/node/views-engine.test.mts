@@ -13,13 +13,46 @@ import { PaneInput } from '../../src/outputs/tmux/input'
 const exec = promisify(execFile)
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
 
-for (const fixture of [{ initialPrompt: '', selection: ['session-id'] }]) test('official Codex follows sibling views and restores them on visit', { timeout: 90000 }, async () => {
-  const { initialPrompt, selection } = fixture
+const crowdedSelection = ['current-dir', 'model-with-reasoning', 'five-hour-limit', 'weekly-limit', 'context-used', 'approval-mode', 'permissions', 'run-state', 'git-branch', 'branch-changes']
+for (const fixture of [
+  { initialPrompt: '', selection: ['session-id'], crowded: false },
+  { initialPrompt: '', selection: crowdedSelection, crowded: true },
+]) test(`official Codex follows sibling views and restores them on visit${fixture.crowded ? ' (crowded fullscreen footer, cold config)' : ''}`, { timeout: 90000 }, async () => {
+  const { initialPrompt, selection, crowded } = fixture
+  const columns = crowded ? 177 : 157
   const dir = await mkdtemp(join(tmpdir(), 'vargus-standalone-test-'))
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
   for (const folder of [cfg, project, temporary]) await mkdir(folder)
-  const env = { ...process.env, CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
+  const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
     NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', TMUX: '', TMUX_PANE: '' }
+  const configReads = join(dir, 'config-reads.log')
+  if (crowded) {
+    const shim = join(dir, 'bin'); await mkdir(shim)
+    const codex = (await exec('which', ['codex'])).stdout.trim()
+    const git = (await exec('which', ['git'])).stdout.trim()
+    await writeFile(join(shim, 'codex'), `#!/usr/bin/env python3
+import sys,time,os
+if sys.argv[1:3] == ['app-server','--stdio']:
+    with open(${JSON.stringify(configReads)}, 'a') as f: f.write(str(time.monotonic())+'\\n')
+    time.sleep(1)
+os.execv(${JSON.stringify(codex)}, ['codex']+sys.argv[1:])
+`, { mode: 0o700 })
+    await writeFile(join(shim, 'git'), `#!/usr/bin/env python3
+import sys,time,os
+if '--numstat' in sys.argv: time.sleep(0.7)
+os.execv(${JSON.stringify(git)}, ['git']+sys.argv[1:])
+`, { mode: 0o700 })
+    Object.assign(env, { PATH: shim + ':' + process.env.PATH })
+    await exec('git', ['init', '-q', '-b', 'main'], { cwd: project })
+    await writeFile(join(project, 'lines.txt'), 'old\n'.repeat(327))
+    const commit = () => exec('git', ['-c', 'user.name=Local fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qam', 'fixture'], { cwd: project })
+    await exec('git', ['add', '.'], { cwd: project }); await commit()
+    await exec('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: project })
+    await exec('git', ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'], { cwd: project })
+    await exec('git', ['checkout', '-qb', 'feat/codex-support'], { cwd: project })
+    await writeFile(join(project, 'lines.txt'), 'new\n'.repeat(3958)); await commit()
+  }
+  const reads = async () => (await readFile(configReads, 'utf8')).trim().split('\n').filter(Boolean).length
   let posts = 0, spawned = false
   const provider = createServer(async (req, res) => {
     if (req.method !== 'POST') { res.end('{}'); return }
@@ -31,7 +64,7 @@ for (const fixture of [{ initialPrompt: '', selection: ['session-id'] }]) test('
     if (call) spawned = true
     const calls = ['first', 'second'].map(name => ({
       type: 'function_call', name: 'spawn_agent', namespace: 'collaboration', id: `fc_${name}`, call_id: `call_${name}`,
-      arguments: JSON.stringify({ message: `${name.toUpperCase()}_CHILD local response.`, agent_type: 'default', task_name: name, fork_turns: 'none' }),
+      arguments: JSON.stringify({ message: `${name.toUpperCase()}_CHILD local response.`, agent_type: 'default', task_name: crowded ? 'follow_test_' + name : name, fork_turns: 'none' }),
     }))
     const first = text.includes('FIRST_CHILD'), second = text.includes('SECOND_CHILD')
     // Child requests contain their own task marker; the parent's tool history contains both.
@@ -54,19 +87,22 @@ for (const fixture of [{ initialPrompt: '', selection: ['session-id'] }]) test('
         output_tokens: 777, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: child === 'first' ? 8777 : child === 'second' ? 16777 : 43201 } } },
     ]
     res.writeHead(200, { 'Content-Type': 'text/event-stream', Connection: 'close',
-      'x-codex-primary-used-percent': '27.5', 'x-codex-primary-window-minutes': '300' })
+      'x-codex-primary-used-percent': '27.5', 'x-codex-primary-window-minutes': '300',
+      'x-codex-secondary-used-percent': '11', 'x-codex-secondary-window-minutes': '10080' })
     res.end(events.map(e => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join(''))
   })
   provider.listen(0, '127.0.0.1'); await once(provider, 'listening')
   const port = (provider.address() as { port: number }).port
   await writeFile(join(cfg, 'config.toml'), `model = "gpt-6.1-sol"
 model_provider = "local_mock"
-model_reasoning_effort = "low"
+model_reasoning_effort = "${crowded ? 'xhigh' : 'low'}"
 model_context_window = 200000
 check_for_update_on_startup = false
 [tui]
 ${selection === null ? '' : 'status_line = ' + JSON.stringify(selection)}
 screen_reader_detection_done = true
+fullscreen_transcript = ${crowded}
+status_line_use_colors = true
 [tui.model_availability_nux]
 "gpt-6.1-sol" = 99
 [model_providers.local_mock]
@@ -116,19 +152,19 @@ trust_level = "trusted"
       assert.doesNotMatch(await activity(), /^• (?:Running|Working) /m)
     }
   }
-  const command = (action: string, extra = '') => '!COLUMNS=80 ' + quote(resolve('bin/vargus')) + ' ' + action + (extra ? ' ' + extra : '')
+  const command = (action: string, extra = '') => '!' + (crowded ? 'PATH=' + quote(env.PATH!) + ' ' : '') + 'COLUMNS=80 ' + quote(resolve('bin/vargus')) + ' ' + action + (extra ? ' ' + extra : '')
   try {
     // This daemon starts outside tmux: !command must not rely on inherited pane variables.
     await exec('codex', ['app-server', 'daemon', 'start'], { env })
-    await tmux('-f', '/dev/null', 'new-session', '-d', '-s', 'test', '-x', '157', '-y', '40', 'sleep 120')
+    await tmux('-f', '/dev/null', 'new-session', '-d', '-s', 'test', '-x', String(columns), '-y', '53', 'sleep 120')
     pane = await tmux('display-message', '-p', '#{pane_id}')
     await tmux('set-window-option', 'remain-on-exit', 'on')
     before = await tmux('show-options', '-t', 'test')
-    client = spawn('script', ['-q', '-f', '-c', 'stty cols 157 rows 40; exec tmux -S ' + quote(socket) + ' attach-session -t test', join(dir,'physical.log')], { env: { ...env, TERM:'xterm-256color' }, stdio:['pipe','ignore','ignore'] })
+    client = spawn('script', ['-q', '-f', '-c', 'stty cols ' + columns + ' rows 53; exec tmux -S ' + quote(socket) + ' attach-session -t test', join(dir,'physical.log')], { env: { ...env, TERM:'xterm-256color' }, stdio:['pipe','ignore','ignore'] })
     await delay(300)
 
     const launch = ['env', `CODEX_HOME=${cfg}`, `TMPDIR=${temporary}`, 'VARGUS_LOCAL_TEST_KEY=local-test-only',
-      'NO_PROXY=127.0.0.1,localhost', 'no_proxy=127.0.0.1,localhost', 'codex', '--no-alt-screen', '-C', project].map(quote).join(' ')
+      'NO_PROXY=127.0.0.1,localhost', 'no_proxy=127.0.0.1,localhost', 'codex', ...(crowded ? [] : ['--no-alt-screen']), '-C', project].map(quote).join(' ')
     await tmux('respawn-pane', '-k', '-t', pane, launch + (initialPrompt ? ' ' + quote(initialPrompt) : ''))
     await wait(screen, /Ask Codex/)
     await delay(1000)
@@ -141,14 +177,23 @@ trust_level = "trusted"
       }
       return values
     }
+    const pending = async (thread: string) => {
+      for (const name of await readdir(join(controlRoot, 'footers'))) {
+        try {
+          if (JSON.parse(await readFile(join(controlRoot, 'footers', name), 'utf8')).thread === thread) return 'pending'
+        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+      }
+      return 'restored'
+    }
     await submit(command('on', '--socket ' + quote(socket)))
     await wait(row, /session:/)
     assert.equal(posts, 0)
     let active = (await records())[0]
-    assert.equal(active.version, 2)
-    const fake = join(dir, 'fake'), trace = join(dir, 'ps-trace.jsonl')
-    await mkdir(fake)
-    await writeFile(join(fake, 'ps'), `#!/usr/bin/env python3
+    assert.equal(active.version, 3)
+    if (!crowded) {
+      const fake = join(dir, 'fake'), trace = join(dir, 'ps-trace.jsonl')
+      await mkdir(fake)
+      await writeFile(join(fake, 'ps'), `#!/usr/bin/env python3
 import sys,time,os,pathlib,json
 if '-p' in sys.argv:
     time.sleep(0.8)
@@ -156,12 +201,14 @@ if '-p' in sys.argv:
     with open(${JSON.stringify(trace)},'a') as f:
         f.write(json.dumps({'replies':[x.name for x in p.glob('*.reply')],'records':[x.name for x in p.glob('*.json')]})+'\\n')
 os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
-`, { mode: 0o700 })
-    await exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread, PATH: fake + ':' + process.env.PATH } })
-    const observations = (await readFile(trace, 'utf8')).trim().split('\n').map(l => JSON.parse(l))
-    assert.ok(observations.some(o => o.replies.length > 0 && o.records.length === 0), 'reply must be present after helper exit in the forced acknowledgement race')
-    await submit(command('on', '--socket ' + quote(socket)))
-    active = (await records())[0]
+  `, { mode: 0o700 })
+      await exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread, PATH: fake + ':' + process.env.PATH } })
+      const observations = (await readFile(trace, 'utf8')).trim().split('\n').map(l => JSON.parse(l))
+      assert.ok(observations.some(o => o.replies.length > 0 && o.records.length === 0), 'reply must be present after helper exit in the forced acknowledgement race')
+      await submit(command('on', '--socket ' + quote(socket)))
+      active = (await records())[0]
+    }
+    const readsBeforeVisits = crowded ? await reads() : 0
     await submit('Use two subagents for this local fixture.')
     await wait(screen, /LOCAL CONTROL RESPONSE/)
     await wait(row, /token:4\.2k/)
@@ -175,7 +222,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     assert.equal(children.length, 2)
     const expected = new Map(children.map(m => {
       const path = m.source.subagent.thread_spawn.agent_path
-      return [path, { id: m.id, tokens: path.endsWith('/first') ? '8.8k' : '16.8k' }]
+      return [path, { id: m.id, tokens: path.endsWith('first') ? '8.8k' : '16.8k' }]
     }))
     const afterTurns = posts
     assert.ok(afterTurns > 0, 'positive control: real turns reached the same mock provider')
@@ -188,21 +235,45 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     let lastPath = ''
     for (let i = 0; i < 2; i++) {
       await tmux('send-keys', '-t', pane, 'M-Left')
+      if (crowded && i === 0) {
+        await delay(1100)
+        console.log('FIRST_CROWDED_SWITCH', JSON.stringify({ screen: await screen(), record: await records(), configReads: await reads() }))
+      }
       const childScreen = await wait(async () => {
         const value = await childFooter()
         return lastPath && value.includes('`' + lastPath + '`') ? '' : value
-      }, /`(\/root\/(?:first|second))`/)
-      const path = childScreen.match(/`(\/root\/(?:first|second))`/)![1]!
+      }, /`(\/root\/(?:follow_test_)?(?:first|second))`/)
+      const path = childScreen.match(/`(\/root\/(?:follow_test_)?(?:first|second))`/)![1]!
       lastPath = path
       const value = expected.get(path)!
       await wait(row, new RegExp('token:' + value.tokens.replace('.', '\\.')))
       await delay(300)
       assert.doesNotMatch((await screen()).slice((await screen()).lastIndexOf('Viewing sub-agent')), new RegExp(value.id))
+      if (crowded) assert.doesNotMatch(await childFooter(), /GPT-6\.1-Sol|Context \d+% used/, 'configured native footer must be hidden on the first visit')
       assert.equal((await records())[0].selected, value.id)
       visited.add(path)
     }
     assert.equal(visited.size, 2)
     assert.match((await readFile(join(dir, 'physical.log'), 'utf8')).slice(physicalOffset), /session:0m/)
+    if (crowded) {
+      assert.ok(readsBeforeVisits > 0, 'positive control: config/read helper was observed during activation')
+      assert.equal(await reads(), readsBeforeVisits, 'first visits must use the preloaded workspace selection')
+      for (let i = 0; i < 3; i++) {
+        await tmux('send-keys', '-t', pane, 'M-Right'); await delay(500)
+        if ((await screen()).includes('Main [default]')) break
+      }
+      await wait(row, /token:4\.2k/)
+      await submit(command('off'))
+      await wait(row, /^$/)
+      await submit('/exit')
+      await wait(() => tmux('display-message', '-p', '-t', pane, '#{pane_dead}'), /^1$/)
+      await wait(async () => String((await records()).length), /^0$/)
+      assert.deepEqual(await readdir(join(controlRoot, 'footers')), [])
+      assert.equal(await readFile(join(cfg, 'config.toml'), 'utf8'), savedConfig)
+      assert.equal(posts, afterTurns)
+      console.log(JSON.stringify({ crowdedFirstVisits: [...visited], configReadsBeforeVisits: readsBeforeVisits, configReadsAfterVisits: await reads(), providerCalls: posts }))
+      return
+    }
     // Losing a saved log blanks readings without killing the pane controller.
     const missing = children.find(m => m.source.subagent.thread_spawn.agent_path === lastPath)!
     const relative = (await readdir(join(cfg, 'sessions'), { recursive: true })).find(n => n.endsWith('-' + missing.id + '.jsonl'))!
@@ -218,7 +289,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     await tmux('resize-window', '-t', 'test', '-x', '24', '-y', '40')
     await wait(async () => (await row()).replace(/#\[[^\]]*\]/g, ''), /^$/)
     await wait(async () => (await records())[0]?.selected ?? '', /^$/)
-    await tmux('resize-window', '-t', 'test', '-x', '157', '-y', '40')
+    await tmux('resize-window', '-t', 'test', '-x', String(columns), '-y', '53')
     await wait(row, /token:/)
     // Return to the parent; its native override and its own metrics survive both children.
     for (let i = 0; i < 3; i++) {
@@ -249,6 +320,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     await control('off')
     await wait(row, /^$/)
     await wait(screen, new RegExp(active.thread))
+    await wait(() => pending(active.thread), /^restored$/)
     // Visiting each child restores only its own saved selection. The helper then exits.
     lastPath = ''
     for (let i = 0; i < 2; i++) {
@@ -256,10 +328,11 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
       const childScreen = await wait(async () => {
         const value = await childFooter()
         return lastPath && value.includes('`' + lastPath + '`') ? '' : value
-      }, /`(\/root\/(?:first|second))`/)
-      const path = childScreen.match(/`(\/root\/(?:first|second))`/)![1]!
+      }, /`(\/root\/(?:follow_test_)?(?:first|second))`/)
+      const path = childScreen.match(/`(\/root\/(?:follow_test_)?(?:first|second))`/)![1]!
       lastPath = path
       await wait(screen, new RegExp(expected.get(path)!.id))
+      await wait(() => pending(expected.get(path)!.id), /^restored$/)
       assert.equal(await row(), '')
     }
     await wait(async () => String((await records()).length), /^0$/)

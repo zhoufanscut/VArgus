@@ -28,6 +28,9 @@ Notable changes to this project. The format follows
 
 ### Fixed
 
+- Preload Codex footer settings per workspace before pane observation, removing a
+  config read from the first-subagent switch. Existing restore backups remain intact;
+  the UI uses the same footer commands without extra cards or menus.
 - Standalone Codex follows parent/subagent navigation with per-view readings and
   footer suppression. `off` removes the tmux row immediately and restores affected
   views on their next visit; a helper remains until restoration completes or Codex

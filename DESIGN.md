@@ -171,6 +171,24 @@ settings, restoration uses `model-with-reasoning current-dir thread-name`, the
 `DEFAULT_STATUS_LINE_ITEMS` in checked source `c2bd770ca7` and tested on 0.167.0.
 Invocation overrides and private session-only footer selections are not read back.
 
+`FooterSettings` preloads each known workspace's saved selection before pane
+observation. Views in the same workspace share cached settings, while restore backups remain per
+thread. Explicit `on` starts a fresh settings cache without replacing existing
+backups; failed workspace reads can retry without discarding other cached values.
+No config/read call sits between recognizing a new view and backing it up/clearing
+its footer. Worker v3 replaces older on-mode workers while retaining their backups;
+`off` can still talk to a v2 worker.
+
+A read-only trace on 2026-11-08 captured the first-visit failure with a populated
+fullscreen footer: the full child path appeared, Git counts arrived and clipped it,
+then the worker recorded unknown identity and blanked its row while tmux kept the
+row allocated. A second visit cleared the footer before clipping. The controlled
+engine regression uses the same footer item selection, a one-second config-read
+delay and a delayed Git summary; it fails with the previous worker and passes with
+preloading. The user's fresh first-switch retest also cleared the configurable
+footer and retained the tmux row. This addresses the observed cold-read window;
+it does not establish reliable identification when the path is already clipped.
+
 The [official command documentation](https://learn.chatgpt.com/docs/developer-commands#configure-footer-items-with-statusline)
 says to list items "for this session only" and documents `/statusline --clear`.
 In checked source, `chatwidget/status_surface_commands.rs` changes frontend
@@ -226,8 +244,9 @@ the live tests; simultaneous typing still races with terminal observations becau
 there is no atomic editor lock. Users must wait for a control to finish before
 typing or navigating. Codex's shortcut/context hint row remains after clearing footer items.
 A confirmed view transition requests one full tmux client redraw; ordinary updates
-still use status-only refresh. This is a scoped refresh policy, not a claim that the
-initial reported painting failure had a proven cause.
+still use status-only refresh. The captured first-visit failure above involved
+blanked row content after clipped identity. Necessity of a full client redraw is
+not established by the row-visibility fixture.
 
 The live local-mock suite exercises saved defaults, explicit empty/custom layouts,
 repeated on after a saved setting change, two panes, blocked draft restoration,

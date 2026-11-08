@@ -132,8 +132,12 @@ views are restored or the Codex terminal process exits. Inactive views cannot be
 restored immediately through Codex's session-only command. `!vargus status` reports
 pending restorations. Running `on` again reuses the helper and original backups.
 
-VArgus reads saved config through Codex and sends session-only `/statusline` commands
-through tmux, including in read-only subagent views. Codex's shortcut/context hint
+VArgus preloads saved footer settings per known workspace before checking the view,
+so a first subagent visit can use the cached layout. Explicit `on` refreshes that
+cache while keeping existing restore backups. A footer that already hides the full
+agent label can still pause automation. No status cards or extra menus are opened.
+VArgus sends session-only `/statusline` commands through tmux, including in read-only
+subagent views. Codex's shortcut/context hint
 row remains. Saved config files are not rewritten. Backups survive a helper crash;
 `!vargus off` restarts restoration. An already-empty saved footer stays empty.
 
