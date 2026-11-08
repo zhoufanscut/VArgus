@@ -126,10 +126,12 @@ recorded subagent starts in the displayed conversation; `⚡3` counts observed s
 loads, once per skill path per user turn. Workflow counts are omitted. Missing readings stay hidden.
 Ephemeral chats without a saved transcript are unsupported. Log-backed readings
 update when Codex writes them; model/effort picks are not inferred ahead of that.
-Child logs that copy parent session metadata, as observed with `fork_turns:all`,
-can initially report `The transcript belongs to another Codex thread.` through
-`status`. Later refreshes can advance past that error. Readings from these mixed
-logs remain unsupported; VArgus omits their subagent and skill counts.
+For paginated subagent logs with Codex's recorded history boundary, VArgus skips
+inherited parent activity and counts the child's own work. Inherited skill catalogs
+can still identify later skill reads by the child. Logs without that supported
+boundary can initially report `The transcript belongs to another Codex thread.`
+through `status`; later refreshes can advance past the error. Readings from those
+mixed logs remain unsupported, and their subagent and skill counts stay omitted.
 
 Codex displays known model families as `astra`, `sol`, `terra` or `luna`, for example
 `sol:xhigh`. Both `gpt-6-sol` and `gpt-6.1-sol` display `sol`; unfamiliar IDs remain

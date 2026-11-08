@@ -6,7 +6,7 @@ import { CodexCollector } from './collect'
 import { SkillLoads } from './skills'
 import type { Usage } from './protocol'
 
-type RecordLine = { type: string; timestamp?: string; payload: any }
+type RecordLine = { type: string; timestamp?: string; ordinal?: number; payload: any }
 const usage = (u: any): Usage => ({ inputTokens: u.input_tokens, cachedInputTokens: u.cached_input_tokens,
   outputTokens: u.output_tokens, totalTokens: u.total_tokens })
 const window = (w: any) => w == null ? null : ({ usedPercent: w.used_percent,
@@ -28,12 +28,27 @@ export class RolloutReader {
   private decoder = new TextDecoder()
   private skills = new SkillLoads()
   private countersAttributed = true
+  private historyStart: number | undefined
+  private historyError: string | undefined
   constructor(private file: string, private thread: string, cwd: string, home: string) {
     this.collector = new CodexCollector(cwd, home)
   }
 
   observe(record: RecordLine): void {
+    if (this.historyError) throw new Error(this.historyError)
     const p = record.payload
+    if (this.selected && this.historyStart !== undefined) {
+      if (!Number.isSafeInteger(record.ordinal) || record.ordinal! < 0) {
+        this.historyError = 'The paginated Codex transcript is missing a valid ordinal; turn VArgus off and on again.'
+        throw new Error(this.historyError)
+      }
+      if (record.ordinal! < this.historyStart) {
+        // Inherited catalogs remain useful for recognizing the child's later reads.
+        // Inherited injections, settings, usage and completed items are not activity.
+        if (record.type === 'response_item' && p.type === 'message') this.skills.message(p, false)
+        return
+      }
+    }
     if (record.type === 'session_meta') {
       if (p.id !== this.thread) {
         // A retry can advance past copied parent metadata. The existing reader
@@ -42,6 +57,10 @@ export class RolloutReader {
         const counts = this.collector.snapshot()?.session.counts
         if (counts) { counts.agents = 0; counts.skills = 0 }
         throw new Error('The transcript belongs to another Codex thread.')
+      }
+      if (!this.selected && p.history_mode === 'paginated'
+        && Number.isSafeInteger(p.subagent_history_start_ordinal) && p.subagent_history_start_ordinal > 0) {
+        this.historyStart = p.subagent_history_start_ordinal
       }
       this.collector.selectThread({ id: p.id, cwd: p.cwd,
         createdAt: Date.parse(p.timestamp ?? record.timestamp!) / 1000 })
@@ -99,6 +118,7 @@ export class RolloutReader {
   }
 
   async poll(): Promise<void> {
+    if (this.historyError) throw new Error(this.historyError)
     const file = await open(this.file, 'r')
     try {
       if ((await file.stat()).size < this.offset) throw new Error('The Codex transcript was replaced; turn VArgus off and on again.')

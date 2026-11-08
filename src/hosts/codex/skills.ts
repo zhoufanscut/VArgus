@@ -25,7 +25,7 @@ export class SkillLoads {
     if (!this.seen.has(key)) { this.seen.add(key); this.count++ }
   }
 
-  message(item: any): void {
+  message(item: any, countLoads = true): void {
     const metadata = item.internal_chat_message_metadata_passthrough
     for (const [index, content] of (item.content ?? []).entries()) {
       const kind = metadata?.content_item_kinds?.[index], text = content.text
@@ -42,7 +42,7 @@ export class SkillLoads {
           if (absolute) known.add(absolute)
         }
         this.known = known
-      } else if (item.role === 'user' && kind === 'skills.selected_skill_instructions') {
+      } else if (countLoads && item.role === 'user' && kind === 'skills.selected_skill_instructions') {
         const match = /^<skill>\s*<name>[^\n]*<\/name>\s*<path>([^\n]+)<\/path>/.exec(text)
         const path = match && this.path(match[1]!)
         if (path) { this.known.add(path); this.load(path, metadata?.turn_id ?? this.turn) }

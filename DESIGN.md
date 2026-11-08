@@ -137,17 +137,25 @@ Compaction drops the old context reading until new usage arrives. Token totals
 remain within the selected thread; child histories are not aggregated into the
 parent. Subagent starts and observed skill loads are replayed as described below;
 workflow counts are not reconstructed.
-The reader initially rejects foreign `session_meta`, including copied parent
-metadata observed in a real 0.167.0 `spawn_agent` child with `fork_turns:all`.
-`status` can expose `The transcript belongs to another Codex thread.` The existing
-poller advances its file offset before parsing and can resume buffered/copied
-records on later polls, clearing that transient error and returning readings.
-These mixed histories remain outside the supported reader contract. On foreign
-metadata, the new agent/skill counters are cleared and omitted for that reader's
-lifetime, including retries, so copied parent injections cannot become child
-skill loads. The remaining reader behavior is unchanged; fixing attribution of
-its other readings is separate work. This limit was measured by repeated polls
-of a real child log and by settled official-TUI refresh checkpoints.
+Paginated child logs can contain a copied parent prefix. In checked source
+`c2bd770ca7`, `protocol/src/protocol.rs` defines
+`subagent_history_start_ordinal` as "First rollout ordinal that belongs to this
+subagent's own projected history." The reader selects the child's initial metadata
+and skips records before that ordinal. Inherited developer skill catalogs remain
+available for recognizing later local reads, but inherited skill injections,
+settings, usage, compaction and tool/agent items do not update the child's readings.
+This uses the recorded ordinal, not a line count, timestamp or guessed user-message
+boundary. Polling an incomplete inherited prefix leaves activity empty; later
+appends and a cold replay use the same boundary. A missing/invalid ordinal in this
+mode stops that reader persistently instead of resuming unattributed records.
+
+The boundary is used only with paginated metadata and a positive safe integer.
+Mixed histories without this supported boundary retain the earlier guard: foreign
+`session_meta` throws `The transcript belongs to another Codex thread.` and clears
+agent/skill counters for the reader lifetime. Later polls can advance past that
+error, but other readings in those unsupported mixed logs remain unreliable.
+Direct `thread/fork` and older transcript formats are not inferred to have a copied
+prefix from `forked_from_id` alone.
 The pane helper checks the view on a 250 ms loop. Readings refresh once per second
 or when the recognized view changes; new saved sessions are discovered once per
 second. It uses the existing git poll/hold-off rule.
@@ -378,7 +386,10 @@ The real 0.167.0 app-server/localhost-provider skill test loads two scratch skil
 explicit alpha, automatic alpha read twice in the next turn, then explicit alpha
 plus alpha/beta reads in a third turn. Its observed skill totals are 1, 2 and 4;
 the four shell reads stay four tool calls, and a fresh reader reconstructs 4 from
-the log without another provider request. These are engine-record checks with
+the log without another provider request. It then spawns a real `fork_turns:all`
+child whose inherited prefix includes those loads. The child performs a beta skill
+read: its tool and skill totals reflect that local read, while the parent retains
+its own skill total and records the spawn. These are engine-record checks with
 deliberately supplied local tool calls, not proof of a model choosing skills.
 
 ## Scope

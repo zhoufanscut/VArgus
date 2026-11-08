@@ -145,3 +145,52 @@ test('mixed-thread history omits agent and skill counts across later polling ret
     assert.equal(r.collector.snapshot()!.session.counts.agents, 0)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
+
+test('paginated child history skips the inherited prefix but retains its skill catalog', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-child-history-'))
+  const file = join(dir, 'history.jsonl')
+  const childMeta = { ...meta, ordinal: 0, payload: { ...meta.payload,
+    history_mode: 'paginated', subagent_history_start_ordinal: 8 } }
+  const message = (role: string, kind: string, text: string) => ({ type: 'response_item', payload: {
+    type: 'message', role, content: [{ type: 'input_text', text }],
+    internal_chat_message_metadata_passthrough: { turn_id: 'parent-turn', content_item_kinds: [kind] },
+  } })
+  const rows = [childMeta,
+    { ...meta, payload: { ...meta.payload, id: 'parent' } },
+    { type: 'turn_context', payload: { model: 'parent-model', cwd: '/parent' } },
+    count,
+    message('developer', 'host_skills.instructions', '- alpha: Fixture. (file: /repo/alpha/SKILL.md)'),
+    message('user', 'skills.selected_skill_instructions', '<skill>\n<name>alpha</name>\n<path>/repo/alpha/SKILL.md</path>\ninstructions\n</skill>'),
+    { type: 'event_msg', payload: { type: 'task_started', turn_id: 'parent-turn' } },
+    { type: 'event_msg', payload: { type: 'item_completed', thread_id: 'parent', item: { type: 'CommandExecution', id: 'parent-tool' } } },
+    settings,
+    { type: 'event_msg', payload: { type: 'task_started', turn_id: 'child-turn' } },
+    { type: 'event_msg', payload: { type: 'item_completed', thread_id: 'thread-a', turn_id: 'child-turn',
+      item: { type: 'CommandExecution', id: 'own-read', source: 'agent', cwd: '/repo',
+        parsed_cmd: [{ type: 'read', path: 'alpha/SKILL.md' }], exit_code: 0, status: 'completed' } } },
+    { type: 'event_msg', payload: { type: 'item_completed', thread_id: 'thread-a',
+      item: { type: 'SubAgentActivity', id: 'own-spawn', kind: 'started' } } },
+    count,
+  ].map((record, ordinal) => ({ ...record, ordinal }))
+  const jsonl = (records: unknown[]) => records.map(r => JSON.stringify(r) + '\n').join('')
+  try {
+    await writeFile(file, jsonl(rows.slice(0, 8)))
+    const r = new RolloutReader(file, 'thread-a', '/repo', dir)
+    await r.poll(); await r.poll()
+    assert.equal(r.collector.snapshot()!.session.model, undefined)
+    assert.deepEqual(r.collector.snapshot()!.session.counts, { tokens: 0, tools: 0, agents: 0, skills: 0, workflows: 0 })
+    await appendFile(file, jsonl(rows.slice(8)))
+    await r.poll(); await r.poll()
+    const v = r.collector.snapshot()!
+    assert.equal(v.core.cwd, '/repo'); assert.equal(v.session.model, 'gpt-6.1-sol')
+    assert.deepEqual(v.session.counts, { tokens: 3201, tools: 1, agents: 1, skills: 1, workflows: 0 })
+    const replay = new RolloutReader(file, 'thread-a', '/repo', dir)
+    await replay.poll()
+    assert.deepEqual(replay.collector.snapshot()!.session, v.session)
+    // An ordinal-less append must not reopen attribution on the next retry.
+    await appendFile(file, jsonl([count]))
+    await assert.rejects(r.poll(), /valid ordinal/)
+    await appendFile(file, jsonl([{ ...count, ordinal: rows.length }]))
+    await assert.rejects(r.poll(), /valid ordinal/)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})

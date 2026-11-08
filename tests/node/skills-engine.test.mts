@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
@@ -27,19 +27,28 @@ test('official Codex skill loads deduplicate injections and reads within each tu
     const path = join(folder, 'SKILL.md'); skills.set(name, path)
     await writeFile(path, `---\nname: ${name}\ndescription: ${name} skill counter fixture.\n---\n${name} fixture instructions.\n`)
   }
-  let posts = 0, commands = 0, pendingReads: string[] = []
+  let posts = 0, commands = 0, pendingReads: string[] = [], spawnNext = false, childReads = 0
   const provider = createServer(async (req, res) => {
     if (req.method !== 'POST') { res.end('{}'); return }
     let raw = ''; for await (const part of req) raw += String(part)
-    const title = JSON.parse(raw).text?.format !== undefined
-    const id = `response_${++posts}`, path = title ? undefined : pendingReads.shift()
-    const item = path ? {
+    const request = JSON.parse(raw), title = request.text?.format !== undefined
+    const task = request.input?.filter((i: any) => i.type === 'agent_message').at(-1)
+    const isChild = task?.recipient === '/root/counter_child'
+    const wantSpawn = spawnNext && !title && !isChild
+    if (wantSpawn) spawnNext = false
+    const id = `response_${++posts}`, path = title || wantSpawn ? undefined : isChild
+      ? childReads++ === 0 ? skills.get('beta') : undefined : pendingReads.shift()
+    const item = wantSpawn ? {
+      type: 'function_call', name: 'spawn_agent', namespace: 'collaboration', id: 'fc_spawn', call_id: 'call_spawn',
+      arguments: JSON.stringify({ message: 'FORK_CHILD_READ_BETA fixture. Reply immediately.',
+        agent_type: 'default', task_name: 'counter_child', fork_turns: 'all' }),
+    } : path ? {
       type: 'function_call', name: 'exec_command', namespace: 'functions', id: `fc_${++commands}`, call_id: `call_${commands}`,
       arguments: JSON.stringify({ cmd: 'cat ' + JSON.stringify(path), workdir: project, max_output_tokens: 1000 }),
     } : { type: 'message', role: 'assistant', id: `msg_${id}`, content: [{ type: 'output_text', text: title ? JSON.stringify({ title: 'Skills fixture' }) : 'SKILL FIXTURE COMPLETE' }] }
     const events = [
       { type: 'response.created', response: { id } },
-      ...(path ? [
+      ...(path || wantSpawn ? [
         { type: 'response.output_item.added', output_index: 0, item: { ...item, arguments: '' } },
         { type: 'response.function_call_arguments.delta', item_id: item.id, output_index: 0, delta: item.arguments },
       ] : []),
@@ -135,6 +144,36 @@ trust_level = "trusted"
     assert.ok(posts > 0, 'positive control: turns reached the localhost provider')
     assert.equal(posts, beforeReplay)
     console.log('SKILL_COUNTS', JSON.stringify({ counts, commands, posts, replay: replay.collector.snapshot()!.session.counts.skills }))
+    spawnNext = true
+    await rpc('turn/start', { threadId: thread, input: [{ type: 'text', text: 'Spawn the fork fixture.' }] })
+    const untilSpawn = Date.now() + 16000
+    let childRecords: any[] = [], childFile = ''
+    do {
+      for (const name of await readdir(join(cfg, 'sessions'), { recursive: true })) {
+        if (!name.endsWith('.jsonl')) continue
+        const file = join(cfg, 'sessions', name)
+        const raw = await readFile(file, 'utf8')
+        const rows = raw.slice(0, raw.lastIndexOf('\n')).split('\n').filter(Boolean).map(line => JSON.parse(line))
+        if (rows[0]?.payload.parent_thread_id === thread) { childRecords = rows; childFile = file }
+      }
+      if (childRecords.some(r => r.type === 'event_msg' && r.payload.type === 'task_complete'
+        && r.ordinal >= childRecords[0].payload.subagent_history_start_ordinal)) break
+      await delay(50)
+    } while (Date.now() < untilSpawn)
+    const childMeta = childRecords[0]?.payload
+    assert.ok(childMeta?.subagent_history_start_ordinal > 0, 'engine must mark the inherited boundary')
+    assert.ok(childRecords.some(r => r.type === 'session_meta' && r.payload.id === thread), 'fixture must include parent metadata')
+    assert.ok(childRecords.some(r => r.type === 'event_msg' && r.payload.type === 'task_complete'
+      && r.ordinal >= childMeta.subagent_history_start_ordinal), 'child must finish its own turn')
+    const childReader = new RolloutReader(childFile, childMeta.id, project, dir)
+    await childReader.poll(); await childReader.poll()
+    const childValues = childReader.collector.snapshot()!
+    assert.equal(childValues.session.model, 'gpt-6.1-sol')
+    assert.deepEqual(childValues.session.counts, { tokens: 4040, tools: 1, skills: 1, agents: 0, workflows: 0 })
+    await reader!.poll()
+    assert.equal(reader!.collector.snapshot()!.session.counts.skills, 4)
+    assert.equal(reader!.collector.snapshot()!.session.counts.agents, 1)
+    console.log('FORK_CHILD_COUNTS', JSON.stringify(childValues.session.counts))
   } finally {
     for (const request of pending.values()) clearTimeout(request.timer)
     lines.close()
