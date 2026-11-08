@@ -1,7 +1,7 @@
 import { describe, expect, mock, test, type MockClock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { dataDir, homeDir, moveArgv, removeArgv } from '../src/write'
+import { dataDir, homeDir, moveArgv, removeArgv } from '../src/hosts/claude/write'
 
 // The line file (DESIGN, "The line file"), driven through the mod's own hooks.
 
@@ -545,5 +545,37 @@ describe('blankStopped: the heartbeat write', () => {
     await $.session.end({ reason: 'prompt_input_exit', sessionId: 'S1', resume: { id: 'S1' } })
     await clock.advance(120_000)
     expect(w.writes).toHaveLength(1)
+  })
+})
+
+// The tmux alias is opt-in and launch-local; /clear and resume keep its path.
+describe('tmux publisher', () => {
+  const runId = '0123456789abcdef0123456789abcdef'
+  const alias = `${DATA}/tmux-${runId}`
+
+  test('off: a launcher run id alone adds no writes', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: 7 })
+    const w = world(on, clock, { HOME: '/home/u', NO_COLOR: '1', VARGUS_TMUX_RUN_ID: runId })
+    await $.session.start(start)
+    await clock.settle()
+    expect(w.writes.map(x => x.path)).toEqual([`${DATA}/S1/line.7.tmp`])
+  })
+
+  test('on: native line and alias agree; clear keeps the alias; exit removes it', { options: { ...FOLDER_ONLY.options, tmuxOutput: true } }, async ($, on) => {
+    const clock = mock.clock(on, { now: 7 })
+    const w = world(on, clock, { HOME: '/home/u', NO_COLOR: '1', VARGUS_TMUX_RUN_ID: runId })
+    await $.session.start(start)
+    await clock.settle()
+    expect(w.writes.map(x => x.path)).toEqual([`${DATA}/S1/line.7.tmp`, `${alias}/line.7.tmp`])
+    expect(w.writes.map(x => x.text)).toEqual(['~/proj/x', '~/proj/x'])
+    await $.session.end({ reason: 'clear', sessionId: 'S1', resume: { id: 'S1' } })
+    expect(w.runs).not.toContainEqual(['rm', '-rf', '--', alias])
+    w.id = 'S2'
+    w.cwd = () => '/home/u/proj/y'
+    await clock.advance(1000)
+    expect(w.writes.at(-1)?.path).toBe(`${alias}/line.7.tmp`)
+    expect(w.writes.at(-1)?.text).toBe('~/proj/y')
+    await $.session.end({ reason: 'prompt_input_exit', sessionId: 'S2', resume: { id: 'S2' } })
+    expect(w.runs).toContainEqual(['rm', '-rf', '--', alias])
   })
 })

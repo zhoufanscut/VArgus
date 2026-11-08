@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { Fragment, FragmentInput, Values } from '../src/core/types'
-import { initialLimits } from '../src/collect/limits'
-import { initialSession } from '../src/collect/session'
-import { initialVcs } from '../src/collect/vcs'
+import { initialLimits } from '../src/hosts/claude/collect/limits'
+import { initialSession } from '../src/hosts/claude/collect/session'
+import { initialVcs } from '../src/hosts/claude/collect/vcs'
 import { en, type Labels } from '../src/i18n/en'
 import { DEFAULTS, type Options } from '../src/options'
 import { calls } from '../src/render/fragments/calls'

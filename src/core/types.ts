@@ -1,8 +1,8 @@
 import type { Labels } from '../i18n'
 import type { Options } from '../options'
-import type { SessionValues } from '../collect/session'
-import type { LimitsValues } from '../collect/limits'
-import type { VcsValues } from '../collect/vcs'
+import type { SessionValues } from './session'
+import type { LimitsValues } from './limits'
+import type { VcsValues } from './vcs'
 
 // The shared contract between collectors, fragments and the composer
 // (DESIGN, "How it works"). Each area owns its own values type.
@@ -33,6 +33,8 @@ export type CoreValues = {
   columns: number | undefined
   // WSL: call counts as text (DESIGN, "Config")
   isWsl: boolean
+  // Host-specific naming and missing-value rules; absent preserves the Claude line.
+  host?: 'claude' | 'codex'
 }
 
 export type Values = {

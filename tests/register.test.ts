@@ -1,7 +1,7 @@
 import { describe, expect, mock, test, type Engine, type MockClock } from 'claude-code/testing'
 import type { On, TurnStepInput } from 'claude-code'
 
-// hooks/register.ts, the wiring: each hook passes the event on and returns
+// src/hosts/claude/register.ts, the wiring: each hook passes the event on and returns
 // what the hooks beneath it answered, untouched; the width from the
 // PromptHint viewport; NO_COLOR, the theme option and WSL as the line shows
 // them; the model re-read on each tick.

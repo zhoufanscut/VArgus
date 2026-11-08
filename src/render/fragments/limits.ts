@@ -1,5 +1,5 @@
 import type { Fragment, Theme } from '../../core/types'
-import { MAX_STALE_MS } from '../../collect/limits'
+import { MAX_STALE_MS } from '../../core/limits'
 import { formatDuration } from '../format'
 
 // The rate limits (DESIGN, "Fragments" row 3; "Rules carried over from
@@ -49,7 +49,7 @@ export const limits: Fragment = ({ v, o, l, t, now }) => {
   // The engine's windows are live: never stale-marked.
   for (const [kind, label] of [['five_hour', l.fiveHour], ['seven_day', l.sevenDay]] as const) {
     const r = engine(kind)
-    if (r) parts.push(drawWindow(t, now, { label, percent: r.percentUsed, resetsAt: engineTime(r.resetsAt) }))
+    if (r) parts.push(drawWindow(t, now, { label: r.label ?? label, percent: r.percentUsed, resetsAt: engineTime(r.resetsAt) }))
   }
 
   // The usage API's numbers: shown up to 15 min after the last good read,

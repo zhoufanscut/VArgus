@@ -1,7 +1,7 @@
 // The $.state contract (DESIGN, "How it works"): values that survive a hot reload.
 
 // Counted from when the mod loaded or the last /clear or resume
-// (src/collect/session.ts says what each counts).
+// (src/hosts/claude/collect/session.ts says what each counts).
 export type VargusCounts = {
   tokens: number
   tools: number
@@ -10,7 +10,7 @@ export type VargusCounts = {
   workflows: number
 }
 
-// One row of the detail view's tokens by agent (src/collect/agents.ts), over
+// One row of the detail view's tokens by agent (src/hosts/claude/collect/agents.ts), over
 // the same span as the counts; the list is saved with the counts' token count
 // of the same moment.
 export type VargusAgent = {

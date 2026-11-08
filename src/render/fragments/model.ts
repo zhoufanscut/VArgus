@@ -41,7 +41,7 @@ export function effortColor(t: Theme, effort: string | number | undefined): Rgb 
 }
 
 export const model: Fragment = ({ v, o, t }) => {
-  const name = v.session.model === undefined ? null : shortModelName(cleanText(v.session.model))
+  const name = v.session.model === undefined ? null : v.core.host === 'codex' ? cleanText(v.session.model) : shortModelName(cleanText(v.session.model))
   if (!name) return null
   const effort = o.effort ? v.session.effort : undefined
   if (effort === undefined || effort === '') return t.paint(effortColor(t, undefined), name)

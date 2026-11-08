@@ -66,7 +66,7 @@
     "callCounts": {
       "type": "boolean",
       "title": "Call counts",
-      "description": "Show tool calls, agents and skills (🔧73 🤖2 ⚡1)",
+      "description": "Show tool calls, agents and skills (\ud83d\udd2773 \ud83e\udd162 \u26a11)",
       "default": true
     },
     "workflowRuns": {
@@ -122,6 +122,12 @@
       "type": "boolean",
       "title": "Detail view",
       "description": "The /vargus command: a live pane with every rate limit, the context window, tokens by agent and git or svn detail",
+      "default": false
+    },
+    "tmuxOutput": {
+      "type": "boolean",
+      "title": "tmux output",
+      "description": "Publish a separate line for an explicitly launched VArgus tmux companion",
       "default": false
     }
   }

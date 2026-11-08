@@ -1,0 +1,54 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readdir, readFile } from 'node:fs/promises'
+import { join, resolve, dirname } from 'node:path'
+
+async function files(dir: string): Promise<string[]> {
+  return (await Promise.all((await readdir(dir, { withFileTypes: true })).map(e =>
+    e.isDirectory() ? files(join(dir, e.name)) : /\.[cm]?tsx?$/.test(e.name) ? [join(dir, e.name)] : []))).flat()
+}
+
+test('shared modules have no host, display, Node or Claude API imports; host collectors are independent', async () => {
+  const checked = await files('src')
+  assert.ok(checked.includes('src/hosts/claude/register.ts'))
+  assert.ok(checked.includes('src/hosts/codex/collect.ts'))
+  for (const file of checked) {
+    const text = await readFile(file, 'utf8')
+    const imports = [...text.matchAll(/(?:from\s+|import\s*)['"]([^'"]+)['"]/g)].map(m => m[1]!)
+    if (/^src\/(core|render|theme|i18n)\//.test(file) || file === 'src/options.ts') {
+      for (const spec of imports) assert.ok(!/hosts|outputs|claude-code|^node:/.test(spec), `${file} imports ${spec}`)
+    }
+    if (file.startsWith('src/hosts/codex/')) for (const spec of imports) assert.ok(!/claude|claude-code|outputs/.test(spec), `${file} imports ${spec}`)
+    if (file.startsWith('src/hosts/claude/')) for (const spec of imports) assert.ok(!/codex|outputs/.test(spec), `${file} imports ${spec}`)
+    if (file.startsWith('src/outputs/')) for (const spec of imports) assert.ok(!/hosts|claude-code/.test(spec), `${file} imports ${spec}`)
+  }
+})
+
+test('the reachable Claude mod graph excludes Node code and its Node-side launcher', async () => {
+  const manifest = JSON.parse(await readFile('hooks/hooks.json', 'utf8')) as { modules: string[] }
+  const pending = manifest.modules.map(spec => resolve('hooks', spec))
+  const visited = new Set<string>()
+  while (pending.length) {
+    const file = pending.pop()!
+    if (visited.has(file)) continue
+    visited.add(file)
+    assert.ok(!file.endsWith('launch-node.ts'), 'Claude mod reaches the Node-side launcher')
+    const text = await readFile(file, 'utf8')
+    for (const [, spec] of text.matchAll(/(?:from\s+|import\s*)['"]([^'"]+)['"]/g)) {
+      if (!spec!.startsWith('.')) {
+        assert.equal(spec, 'claude-code', `${file} imports a package outside the mod API`)
+        continue
+      }
+      const base = resolve(dirname(file), spec!)
+      const destination = [base, base + '.ts', base + '.tsx', base + '.d.ts', join(base, 'index.ts'), join(base, 'index.d.ts')]
+      let found: string | undefined
+      for (const candidate of destination) {
+        try { await readFile(candidate); found = candidate; break } catch { /* next valid source spelling */ }
+      }
+      assert.ok(found, `Cannot resolve ${spec} from ${file}`)
+      pending.push(found)
+    }
+  }
+  assert.ok(visited.has(resolve('src/hosts/claude/register.ts')))
+  assert.ok(visited.has(resolve('src/render/index.ts')))
+})

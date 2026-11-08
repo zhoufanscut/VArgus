@@ -2,7 +2,7 @@ import type {
   AgentSpawnInput, AgentSpawnResult, EngineInterface, SessionEndInput, TurnStepInput, TurnStepResult,
 } from 'claude-code'
 
-import type { VargusAgent } from '../../types'
+import type { VargusAgent } from '../../../../types'
 
 // Tokens by agent, for the detail view only (DESIGN, "The detail view"): the
 // same `turn.step` usage the `token:` count sums, split by `e.agentId` (the

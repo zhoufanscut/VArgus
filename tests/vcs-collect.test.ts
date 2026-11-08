@@ -1,11 +1,11 @@
 import { describe, expect, mock, test, type MockClock } from 'claude-code/testing'
 import type { On, SessionRepo } from 'claude-code'
 
-import { findSvnRoot, resolvePath } from '../src/collect/vcs'
+import { findSvnRoot, resolvePath } from '../src/hosts/claude/collect/vcs'
 
 // The vcs collector driven through the mod's own hooks: the git-vs-svn
 // choice, the worktree and detached-HEAD reads from the git dir, and the
-// refresh policy (src/collect/vcs.ts, "When to refresh"). The rendered line
+// refresh policy (src/hosts/claude/collect/vcs.ts, "When to refresh"). The rendered line
 // is read back from the line file's fs.write.
 
 const CWD = '/home/u/proj/x'

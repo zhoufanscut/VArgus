@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -e
+source_path=${BASH_SOURCE[0]}
+while [[ -h "$source_path" ]]; do
+  source_dir=$(cd -P -- "$(dirname -- "$source_path")" && pwd)
+  source_path=$(readlink -- "$source_path")
+  [[ "$source_path" = /* ]] || source_path=$source_dir/$source_path
+done
+vargus_root=$(cd -P -- "$(dirname -- "$source_path")/.." && pwd)
+if [[ ! -f "$vargus_root/dist/cli.mjs" ]]; then
+  echo 'VArgus: run npm ci && npm run build in the VArgus clone first.' >&2
+  exit 1
+fi
+export VARGUS_CLI_MAIN=1
+exec node "$vargus_root/dist/cli.mjs" "$@"

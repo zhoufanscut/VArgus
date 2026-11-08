@@ -6,6 +6,26 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Standalone `!vargus on|off|status` controls inside official Codex, using a repo-local
+  Bash entry, one PATH symlink and a background log reader. Explicit pane/socket
+  selection handles multiple panes and custom tmux servers; TUI exit restores the bar.
+- Opt-in tmux output for Codex CLI and Claude Code through `bin/vargus <host> --tmux`.
+  The active pane supplies the row; the last wrapper restores the original tmux bar.
+- Codex app-server observer for model/effort, context, token usage, quota windows and visible
+  tool/agent items. The normal Codex TUI runs through a private local transport bridge.
+- Claude `tmuxOutput` option (off by default), publishing a launch-local line for the wrapper.
+
+### Changed
+
+- Standalone Codex `on` hides the native footer through tmux; `off` restores its
+  saved layout. Backups survive helper crashes, and composer checks block delivery
+  into an existing draft. Inconclusive native commands retain recovery state. Saved
+  Codex config is not rewritten.
+- Separate Claude and Codex host code from shared readings/rendering and tmux output. The
+  existing Claude manifest loads `src/hosts/claude/register.ts` directly.
+
 ### Fixed
 
 - `ctx:` could keep the pre-compact fill until the next turn ended, which a long turn could

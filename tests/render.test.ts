@@ -5,9 +5,9 @@ import { resolveLabels } from '../src/i18n'
 import { en } from '../src/i18n/en'
 import { DEFAULTS, resolveOptions, type Options } from '../src/options'
 import { ORDER, render } from '../src/render'
-import { initialLimits } from '../src/collect/limits'
-import { initialSession } from '../src/collect/session'
-import { initialVcs } from '../src/collect/vcs'
+import { initialLimits } from '../src/hosts/claude/collect/limits'
+import { initialSession } from '../src/hosts/claude/collect/session'
+import { initialVcs } from '../src/hosts/claude/collect/vcs'
 import { makeTheme } from '../src/theme'
 
 // The composer (DESIGN, "When the line is written", "Fragments", "Config").

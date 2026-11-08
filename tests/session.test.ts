@@ -1,7 +1,7 @@
 import { describe, expect, mock, test, type Engine, type MockClock } from 'claude-code/testing'
 import type { On, TurnStepInput } from 'claude-code'
 
-// The session collector (src/collect/session.ts), driven through the mod's own
+// The session collector (src/hosts/claude/collect/session.ts), driven through the mod's own
 // hooks; what it collected is read off the line it writes.
 
 // The session area's fragments only, uncoloured.

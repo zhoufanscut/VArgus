@@ -1,5 +1,3 @@
-import type { PluginOptions } from 'claude-code'
-
 // The options (DESIGN, "Config"): one boolean per fragment and sub-option, the
 // theme, blankStopped and detailView. Keys and defaults match `userConfig` in plugin.json.
 export const DEFAULTS = {
@@ -21,13 +19,14 @@ export const DEFAULTS = {
   theme: 'graphite',
   blankStopped: false,
   detailView: false,
+  tmuxOutput: false,
 }
 
 export type Options = typeof DEFAULTS
 
 // The engine fills in defaults and drops values outside a picker's options;
 // this keeps the code's defaults for anything missing or of the wrong type.
-export function resolveOptions(given: PluginOptions): Options {
+export function resolveOptions(given: Record<string, unknown>): Options {
   const out: Record<string, unknown> = { ...DEFAULTS }
   for (const key of Object.keys(DEFAULTS) as (keyof Options)[]) {
     const value = given[key]

@@ -3,18 +3,18 @@ import type { SessionRateLimit } from 'claude-code'
 import { MAX_STALE_MS } from '../collect/limits'
 import { MAIN, OTHERS, type AgentsValues } from '../collect/agents'
 import type { VcsFileKind } from '../collect/vcs'
-import type { FragmentInput, Rgb, Theme, TokenName } from '../core/types'
-import type { Labels } from '../i18n'
-import { formatDuration } from '../render/format'
-import { COMPACT, CRITICAL, WARNING } from '../render/fragments/context'
-import { effortColor, shortModelName } from '../render/fragments/model'
-import { formatTokenCount } from '../render/fragments/tokens'
-import { cleanText, shortenHome } from '../render/text'
-import { stringWidth } from '../render/width'
-import type { VargusAgent } from '../../types'
+import type { FragmentInput, Rgb, Theme, TokenName } from '../../../core/types'
+import type { Labels } from '../../../i18n'
+import { formatDuration } from '../../../render/format'
+import { COMPACT, CRITICAL, WARNING } from '../../../render/fragments/context'
+import { effortColor, shortModelName } from '../../../render/fragments/model'
+import { formatTokenCount } from '../../../render/fragments/tokens'
+import { cleanText, shortenHome } from '../../../render/text'
+import { stringWidth } from '../../../render/width'
+import type { VargusAgent } from '../../../../types'
 
 // The detail view's content (DESIGN, "The detail view"): pure, values in,
-// cards of coloured runs out; src/view/pane.tsx turns them into elements. Every
+// cards of coloured runs out; src/hosts/claude/view/pane.tsx turns them into elements. Every
 // word comes from the labels, every colour from the theme (none with NO_COLOR),
 // and outside text goes through cleanText, as on the line.
 

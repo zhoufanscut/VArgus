@@ -1,6 +1,7 @@
 # VArgus — design
 
-VArgus is a status line for Claude Code in two parts. A mod (a plugin hooks module that stays
+VArgus supports Claude Code through its mod and Codex CLI through a local app-server bridge.
+Both can opt into a tmux row. The existing Claude inline status line has two parts. A mod (a plugin hooks module that stays
 loaded for the whole session) hears the engine's events, keeps the numbers in memory, renders the
 line and writes it to a file. The `statusLine` command is a shell one-liner that prints that file.
 The line stays where VantageHUD's was, under the prompt. VArgus replaces VantageHUD and shares no
@@ -19,7 +20,7 @@ Code comments cite this file by section name: `(DESIGN, "The line file")`.
 
 ## Contents
 
-- [Scope](#scope), [Decisions](#decisions), [Terms](#terms)
+- [Hosts and outputs](#hosts-and-outputs), [Scope](#scope), [Decisions](#decisions), [Terms](#terms)
 - [How it works](#how-it-works): layout, data sources, when the line is written
 - [Fragments](#fragments), [Languages](#languages), [The detail view](#the-detail-view)
 - [The line file](#the-line-file), [The reader](#the-reader), [Setup](#setup)
@@ -30,7 +31,238 @@ Code comments cite this file by section name: `(DESIGN, "The line file")`.
 - [Tests](#tests), [Rules for the code](#rules-for-the-code),
   [Not in this version](#not-in-this-version)
 
+## Hosts and outputs
+
+The boundaries are enforced by `tests/node/boundaries.test.mts`:
+
+- `core`, `render`, `theme`, `i18n` and `options` import no host API or output adapter.
+  Shared readings use VArgus types, including `RateLimit`, rather than Claude's engine types.
+- Claude and Codex collectors do not import each other or an output adapter.
+- Output adapters import no host code. `src/cli.ts` wires collection to display.
+- The Claude mod imports no Node code. The manifest points directly to its register module:
+  Claude Code 2.1.319 validation rejects a re-exported `register` entry point.
+- The normal Claude plugin needs no Node package install. Node dependencies serve the launcher
+  and its tests; `.test.mts` keeps Node tests outside the Claude engine's `.test.ts` runner.
+
+### Opt-in tmux row
+
+`bin/vargus codex --tmux` or `bin/vargus claude --tmux` enables the output for that launch.
+Without `--tmux` the launcher refuses to change the bar. Claude's `tmuxOutput` userConfig
+flag defaults to false; the wrapper enables it through command-line settings. Saved Claude,
+Codex and tmux configuration files are not edited.
+
+The output prepends a row to the session's existing status rows and shifts their effective
+formats down. It stores the original local overrides, so exit restores inheritance as well as
+explicit settings. At tmux's five-row limit it refuses to overwrite a row. The existing
+`status-position` is retained: at the bottom, VArgus is above the original bar.
+
+Each wrapped process owns a pane's `@vargus_line`. The row's `#{@vargus_line}` lookup follows
+that client's active pane. It does not use `E:` or a shell `#()` formatter: repository text
+cannot become a format command through recursive expansion. The encoder converts VArgus's
+SGR colours and bold to tmux styles and escapes literal hashes. Tests use a dedicated server,
+not the person's current tmux server.
+
+A short lock serializes session setup and cleanup across wrappers. A prepared nonempty owner
+directory is published atomically; owner filenames are unique, so stale cleanup cannot remove
+a replacement owner's record. Disappearing lock paths are retried. The last owner restores the
+bar. If status/status-format changed while running, the newer options are kept instead.
+Every resource gets its cleanup even if another cleanup fails; errors are reported separately
+without replacing the host's exit status or original error. SIGTERM and SIGHUP pass through
+cleanup; an uncatchable exit can leave the row. A later launch
+or `bin/vargus tmux-reset` prunes dead owners. Reset refuses while an owner is still running.
+State is under the OS temporary directory, keyed by tmux socket and session; credentials and
+conversation messages are not persisted there. PID reuse and loss of the OS temporary files
+while a wrapper is alive are not recovered automatically.
+
+### Claude through tmux
+
+The existing mod remains the collector and native writer. With `tmuxOutput` on and the
+wrapper's random `VARGUS_TMUX_RUN_ID` present, a second writer publishes the same rendered line
+under `<data>/tmux-<run id>/line`. The alias stays fixed across clear/resume, while the native
+writer still follows the real session id. It uses the same atomic replace path, with a
+30-second heartbeat; the wrapper blanks an alias older than two minutes. Session exit and
+wrapper cleanup remove that launch's alias. Without the flag, the additional writer is absent.
+
+The wrapper loads this clone with `--plugin-dir`, supplies inline options and replaces the
+native statusLine command with `true` for this invocation. The `vargus` and `vargus@inline`
+option keys are both supplied, matching the 2.1.319 reference's description of inline options.
+The existing installed plugin and settings files are not rewritten.
+
+Mod facts were checked in the installed `plugin-authoring` material for Claude Code 2.1.319:
+`reference.md` says a module runs with "no DOM and no Node"; `SessionRateLimit` has `kind`,
+`percentUsed` and optional ISO `resetsAt`. The shared rate-limit shape preserves those fields.
+Existing `$` calls remain under the Claude host and are checked by `claude plugin validate .`.
+
+### Standalone controls in official Codex
+
+`!vargus on|off|status` is a local user-shell command, not a native slash extension.
+In the checked Codex source (`c2bd770ca7`), `chatwidget/input_submission.rs` says
+`"!cmd" executes a local shell command instead of sending to the model`.
+`core/src/tasks/user_shell.rs` passes the thread id into `create_env`, whose contract
+injects `CODEX_THREAD_ID` even with an allowlist. A real 0.167.0 probe, with a scratch
+daemon started outside tmux, received that exact thread id but neither `TMUX` nor
+`TMUX_PANE`. Its shell probe made no model POST; a subsequent user prompt reached
+the same local mock provider. These facts rule out inherited pane variables as the
+sole binding and rule out needing an LLM to activate the row.
+
+`bin/vargus` is a Bash entry that resolves its own symlink and runs `dist/cli.mjs`.
+One PATH symlink exposes it; Node dependencies and built code live in the clone.
+The feature is off until the explicit `on` control enables `tmuxOutput` for its
+helper. The normal Claude mod graph does not reach this script or Node code.
+
+`outputs/tmux/target.ts` discovers a named foreground application through tmux and
+`ps`. The outermost matching application process identifies the frontend; nested
+same-command servers are excluded by ancestry, without inspecting positional prompt
+text. Process lookups use unlimited width so `COLUMNS` cannot truncate worker tokens.
+Selection is scoped to the default server, or an explicit `--socket`. One
+matching pane may be selected automatically; ambiguous targets require `--pane`.
+An inherited environment does not prove which terminal invoked a shared-daemon
+command. Custom servers therefore require their socket explicitly. The CLI stores
+a thread/pane binding and worker PID/token under the temporary control directory.
+It checks the token in the worker command line before signalling it, so a stale PID
+record cannot stop an unrelated process after PID reuse. The existing tmux owner
+lock arbitrates concurrent attachment. Each pane gets one owner and existing bar
+options retain the same cleanup/restore rules. The helper watches the resolved TUI
+process, not the persistent app-server daemon; `off` and TUI exit detach the row.
+
+`hosts/codex/rollout.ts` looks up the exact thread-id filename under CODEX_HOME's
+`sessions` directory, validates its session metadata and incrementally reads JSONL.
+It retains incomplete records and UTF-8 bytes between polls. It normalizes records
+into the existing Codex collector: session metadata for creation time and cwd,
+`turn_context` / `thread_settings_applied` for recorded model and effort,
+`token_count` for cumulative usage, native context-window gauge and quota snapshots,
+and completed visible items for tools. User-shell controls are excluded from tool
+counts. Explicitly attributed settings/items for another thread are ignored.
+Compaction drops the old context reading until new usage arrives. Child token
+histories and agent/skill/workflow counts are not reconstructed in this mode.
+The helper polls once per second and uses the existing git poll/hold-off rule.
+
+The official [hooks documentation](https://learn.chatgpt.com/docs/hooks#common-input-fields)
+says the transcript format "isn't a stable interface". No hook installation is
+required for these controls: their environment supplies the exact thread identity.
+Compatibility comes from the versioned log fixtures and the real official TUI
+with a localhost mock provider. Ephemeral chats have no required saved log and
+are refused. Changes not yet written to the log remain unknown. The binding is to
+one thread; after a thread switch the user activates `on` again. Future host format
+changes must be rechecked against these limits.
+
+#### Native footer control
+
+The explicit standalone `on` control opts into native footer automation as well as
+the row. This is the user's requested behavior for bare `on`; it introduces no
+Claude option. `hosts/codex/footer.ts` reads effective saved layers through an
+initialized `codex app-server --stdio` and `config/read` with the caller's cwd. It
+creates no thread and writes no config. An unset `status_line` is retained as null,
+an explicit empty list stays empty, and custom item order is preserved. For unset
+settings, restoration uses `model-with-reasoning current-dir thread-name`, the
+`DEFAULT_STATUS_LINE_ITEMS` in checked source `c2bd770ca7` and tested on 0.167.0.
+Invocation overrides and private session-only footer selections are not read back.
+
+The [official command documentation](https://learn.chatgpt.com/docs/developer-commands#configure-footer-items-with-statusline)
+says to list items "for this session only" and documents `/statusline --clear`.
+In checked source, `chatwidget/status_surface_commands.rs` changes frontend
+`StatusSurfaceOverrides` and local settings; it does not persist the selection.
+`SlashCommand::Statusline` is available during a task. A real 0.167.0 probe found
+that editing the saved config did not change the displayed footer; native slash
+commands did. These findings select tmux composer delivery rather than config
+rewrites or a custom Codex binary.
+
+The CLI backs up the saved selection before row startup, and sends the clear command
+only after successful attachment. `off` submits the restore command before stopping
+the row. A backup is keyed by socket, pane, TUI PID and thread, separately from the
+worker PID record. Repeated `on` retains it; startup attachment failure removes a
+new backup without touching the footer. Delivery failure keeps it for retry. After
+a worker crash, `off` can find the backup, restore the footer, and prune abandoned
+tmux owners while retaining other live panes. A thread switch leaves that thread's
+backup available when the user switches back. A new TUI PID does not inherit it;
+no saved config needs repair on TUI exit. Runtime backups remain in OS temporary
+storage until restored or that storage is cleared.
+
+`outputs/tmux/input.ts` handles generic capture and key delivery without host
+imports. The Codex host recognizes the cursor at the dimmed empty placeholder;
+a draft with those same words is rejected. The input adapter rechecks before
+insertion, verifies the entire command and cursor before Enter, and observes the
+empty prompt again. Any visible native statusline parse error makes completion
+inconclusive and retains the backup/row, even when it predates the command. A finite
+viewport cannot reliably distinguish repeated identical errors from old ones. The
+user resolves the error and moves it out of view before retrying. The adapter sends
+no erase keys. Unrecognized UI or a restore command wider than the pane fails with
+a retry message. Existing drafts are preserved in
+the live tests; simultaneous typing still races with terminal observations because
+there is no atomic editor lock. Users must wait for a control to finish before
+typing. Codex's shortcut/context hint row remains after clearing footer items.
+
+The live local-mock suite exercises saved defaults, explicit empty/custom layouts,
+repeated on after a saved setting change, two panes, blocked draft restoration,
+row startup failure, restoration after a killed helper and repeated native restore
+rejections without losing the backup. In the fresh-chat runs,
+the provider POST counter stays at zero through controls and increases after a
+user prompt through the same provider as a positive control. This establishes the
+checked 0.167.0 behavior; other composer layouts, macOS and billed endpoints remain
+unverified.
+
+### Codex through tmux
+
+Codex CLI 0.167.0 was used for the generated protocol types and the interactive startup probe.
+The [app-server documentation](https://learn.chatgpt.com/docs/app-server) defines stdio as
+"newline-delimited JSON (JSONL)" and Unix sockets as WebSocket connections. The wrapper starts
+an app-server over stdio and bridges it to a private Unix WebSocket in a temporary directory.
+The regular Codex TUI connects with `--remote unix://...`; it owns initialization, requests,
+approvals and turns. The observer forwards messages without rewriting them and adds no model
+requests or credential handling. This uses an experimental Codex transport.
+
+`protocol.ts` is the subset read from `codex app-server generate-ts` on 0.167.0. Regenerate to a
+scratch directory and re-check that subset when changing the supported version. The observer
+uses:
+
+- Successful `thread/start`, `thread/resume`, `thread/fork` responses for selected thread, cwd,
+  model and effort; explicit child selection is allowed. Successful `turn/start` overrides update
+  those fields. Null effort inherits the thread's effective setting. A picker choice that has
+  not reached the server is not inferred from config files. `thread/started` notifications record
+  metadata but do not select a different conversation.
+- Ephemeral helpers whose `threadSource` is `system` or `thread_title` are excluded from
+  selection and token totals, including their own frontend start/turn requests. This is the
+  same instance-level rule as `tui/src/app/app_server_events.rs` in local revision `c2bd770ca7`.
+  A local mock-provider wire capture found both the user and title threads had `source:vscode`,
+  ruling that field out as a selector. Ephemeral user chats are not hidden by this rule.
+- `thread/tokenUsage/updated` cumulative totals: uncached input plus output. Repeated updates
+  replace the reading. The selected thread and observed descendants are summed; selecting a
+  child uses that subtree. Historical/unobserved child totals are not reconstructed.
+- The same notification's `last.totalTokens` and `modelContextWindow` for context. The gauge
+  follows Codex's 12,000-token baseline allowance from `tui/src/token_usage.rs`, checked in local
+  source revision `c2bd770ca7`. Unknown context is omitted. A context-compaction item drops the
+  prior reading until another usage update.
+- `account/rateLimits/read` responses and `account/rateLimits/updated` notifications for used
+  percentages and reset times. The active model's named bucket is preferred, then `codex`.
+  Windows are labelled by their reported duration; unavailable values are omitted. Full snapshots
+  replace the cached buckets, including removed/null windows. Sparse notifications keep existing
+  non-null readings; `account/updated` clears the cached buckets.
+- Distinct lead-thread tool items for tool counts. Agent starts accept legacy `spawnAgent`
+  items and V2 `subAgentActivity` items with `kind:started`, deduplicated by canonical call item id.
+  The V2 item also supplies the child's parent relation. These count the visible item stream of
+  the launch, not every internal Code Mode call. Skills/workflows have no counter here and are
+  omitted.
+- Git porcelain through the shared parsers, polled outside rendering with the existing slow-walk
+  hold-off rule. This adapter currently omits SVN, named detached HEADs and worktree names.
+
+The wrapper hides the configurable Codex footer with an invocation-only
+`tui.status_line=[]` override. Codex's own shortcut/context hint row remains. `-c`/`--config`,
+`--enable` and `--disable` options are forwarded to app-server; `-C`/`--cd` selects its cwd,
+including attached `-Cpath`. An explicit Codex `-p`/`--profile` (including `-pname`) or `--remote`
+is rejected rather than silently using a different server configuration. The Claude detail pane
+is not registered in Codex.
+
+Startup and cleanup were probed with the real Codex 0.167.0 and Claude 2.1.319 TUIs. The
+permanent Codex engine test uses a localhost mock Responses provider and scratch CODEX_HOME:
+user turns and background title generation report different usage, so it catches helper-thread
+selection errors and checks tokens, context and quota delivery through the real engine/bridge.
+Compaction, selected-child and V2-agent accounting use protocol fixtures; an actual generated
+subagent turn and billed model endpoints have not been used for those checks.
+
 ## Scope
+
+The existing inline/mod rules below describe Claude Code. Codex and the optional tmux
+output are specified in [Hosts and outputs](#hosts-and-outputs).
 
 - Claude Code 2.1.299 or later: mods are on by default from 2.1.287, and the facts below were
   checked on 2.1.299 and re-checked on 2.1.300 and 2.1.301; a measured fact names its version
@@ -96,31 +328,28 @@ own tmux pane, code shared with VantageHUD.
 ## How it works
 
 ```
-.claude-plugin/plugin.json      name, version, userConfig, types
-.claude-plugin/marketplace.json the repo as its own marketplace
-hooks/hooks.json                { "modules": ["./register.ts"] }
-hooks/register.ts               wiring only
-src/core/types.ts               the contract: Values, Theme, Fragment
-src/options.ts                  the options and their defaults (= userConfig)
-src/collect/*.ts                events → values: session, limits, vcs, each with its installer
-src/render/index.ts             the composer: order, options, width
-src/render/fragments/*.ts       pure: one fragment each, values + options + labels + theme → text
-src/render/text.ts              cleanText, the `~` for home
-src/render/format.ts            durations (`4h37m`)
-src/render/width.ts             the wide-character count
-src/theme/*.ts                  palettes, makeTheme, ANSI
-src/i18n/en.ts                  the English labels; the `Labels` type is taken from it
-src/i18n/index.ts               the language registry, resolveLabels
-src/collect/agents.ts           tokens by agent, for the detail view
-src/view/model.ts               pure: the detail view's cards, values + options + labels + theme → runs
-src/view/pane.tsx               the cards as Box and Text elements
-src/write.ts                    the line file
-types/index.d.ts                the `$.state` contract (`PluginState`), named by `types` in plugin.json
-skills/vargus-setup/SKILL.md    how the agent sets up the reader
-tests/*.test.ts                 `claude plugin test .`
-tests/reader.test.sh            the reader, run by `sh`
-tests/manifest.test.sh          userConfig against src/options.ts
-tsconfig.json                   for `tsc -p .`
+.claude-plugin/plugin.json       Claude manifest, userConfig and state contract
+hooks/hooks.json                 points directly to ../src/hosts/claude/register.ts
+src/hosts/claude/register.ts      Claude mod lifecycle and wiring
+src/hosts/claude/collect/         Claude collectors, authentication and polling
+src/hosts/claude/write.ts         Claude native line and optional tmux alias
+src/hosts/claude/paths.ts         pure Claude config/data path rules
+src/hosts/claude/view/            existing /vargus pane
+src/hosts/claude/launch-node.ts   Node launcher; outside the mod import graph
+src/hosts/codex/                 Codex protocol/log observers, bridge and git I/O
+src/core/                       shared readings, defaults and pure git parsers
+src/options.ts                  shared options (defaults match userConfig)
+src/render/                     shared fragment composition, text and width
+src/theme/                      palettes and ANSI colour encoding
+src/i18n/                       labels
+src/outputs/ansi.ts             decode the renderer's SGR vocabulary
+src/outputs/tmux/                tmux encoding, pane ownership and row lifecycle
+src/cli.ts                      standalone controls/worker and optional host launcher
+bin/vargus                      Bash symlink entry for the built Node CLI
+types/index.d.ts                self-contained Claude $.state contract
+tests/*.test.ts                 Claude engine and shared rendering tests
+tests/node/*.test.mts            Node boundaries, Codex and tmux integration
+skills/vargus-setup/SKILL.md     existing Claude inline setup
 ```
 
 Collectors hear events and update values; the renderer turns them into text; the writer puts the
@@ -511,6 +740,7 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 - `blankStopped` (0.1.3, off): the heartbeat write and the second reader
   ([The reader](#the-reader)).
 - `detailView` (0.2.0, off): the `/vargus` pane ([The detail view](#the-detail-view)).
+- `tmuxOutput` (off): the launch-local Claude publisher ([Hosts and outputs](#hosts-and-outputs)).
 - Built in at VantageHUD's defaults: the short model name (`opus`); call counts as emoji (`🔧73`), as
   text (`T:73`) on WSL, as VantageHUD's `auto` did (WSL: `WSLENV` set, or `/proc/version` containing
   "microsoft", read with `$.env.get` and `$.fs.read`); the context thresholds 70 / 80 / 85 % and the
@@ -620,6 +850,13 @@ What the types and docs alone can't settle and no live session has settled yet; 
 
 ## Tests
 
+- `npm ci && npm run build` builds the optional launcher. `npm test` type-checks its graph and
+  runs boundary, protocol/log, real app-server/localhost mock-provider turns and isolated tmux
+  lifecycle tests.
+- `npm run test:claude` runs the existing Claude checks listed below. In this development
+  environment the engine test workers require execution outside the restricted sandbox; the
+  unchanged baseline failed inside and passed outside.
+
 - `claude plugin validate .` reads the manifest and the module as the engine will, and reports
   what the engine would refuse.
 - `tsc -p .` type-checks against the types the engine writes into `.claude-plugin/types/`
@@ -650,10 +887,10 @@ What the types and docs alone can't settle and no live session has settled yet; 
 
 ## Rules for the code
 
-- Import only the mod's own files, by relative path, and `claude-code`: the engine refuses
+- In the Claude mod graph, import only the mod's own files, by relative path, and `claude-code`: the engine refuses
   anything else.
 - Hooks observe: a hook on an engine event passes it on with `next(e)` and changes nothing.
-- `hooks/register.ts` holds every hook, one per event, and calls each area's exported functions
+- `src/hosts/claude/register.ts` holds every hook, one per event, and calls each area's exported functions
   from it: `claude plugin validate` refuses a second `on('<event>')` without a matcher anywhere in
   the module ("registered twice without a matcher", 2.1.300).
 - The renderer is pure; all I/O (`$.process`, `$.fs`, `$.http`) happens in collectors and the

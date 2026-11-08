@@ -1,13 +1,6 @@
-import type {
-  EngineInterface, SessionCompactInput, SessionCompactResult, SessionContextUsage, SessionEndInput,
-  SessionMeasureInput, ToolCallInput, TurnStepInput, TurnStepResult,
-} from 'claude-code'
-
-import type { VargusCounts } from '../../types'
-
 // The session area's collector (DESIGN, "Data sources"): model, effort,
 // context %, session start, tokens and call counts. The hooks live in
-// hooks/register.ts, which calls the functions below; each only observes
+// src/hosts/claude/register.ts, which calls the functions below; each only observes
 // (the hook passes `next(e)` on unchanged and returns what `next` gave).
 //
 // What each count means, against VantageHUD 0.6.0 (src/hud/token-tally.js):
@@ -30,38 +23,16 @@ import type { VargusCounts } from '../../types'
 // from it; the tool names are the 2.1.300 tool table's (VantageHUD also
 // counted `Task`, `proxy_Task`, `proxy_Skill`, which that table lacks).
 
-export type SessionValues = {
-  // $.session.model(), as given (`claude-opus-5-5[1m]`)
-  model: string | undefined
-  // the main loop's last `turn.step` effort; undefined for a model without one
-  effort: string | number | undefined
-  // $.session.usage() context percent, 0-100; undefined before a reading
-  contextPercent: number | undefined
-  // the same reading's tokens in use and window size, for the detail view;
-  // undefined before a reading (tokens also before the first response)
-  contextTokens: number | undefined
-  contextWindow: number | undefined
-  // $.session.usage().startedAt, in $.clock.now() ms; undefined until read
-  startedAt: number | undefined
-  // a standing compaction until the next main-loop step: a measure in this
-  // gap can still carry the pre-compact fill and must not restore it
-  compactPending: boolean
-  counts: VargusCounts
-}
+import { initialSession, zero, type SessionValues } from '../../../core/session'
+export { initialSession, type SessionValues } from '../../../core/session'
+import type {
+  EngineInterface, SessionCompactInput, SessionCompactResult, SessionContextUsage, SessionEndInput,
+  SessionMeasureInput, ToolCallInput, TurnStepInput, TurnStepResult,
+} from 'claude-code'
+
+import type { VargusCounts } from '../../../../types'
 
 const COUNTS = { plugin: 'vargus', key: 'counts' } as const
-
-function zero(): VargusCounts {
-  return { tokens: 0, tools: 0, agents: 0, skills: 0, workflows: 0 }
-}
-
-export function initialSession(): SessionValues {
-  return {
-    model: undefined, effort: undefined, contextPercent: undefined, contextTokens: undefined,
-    contextWindow: undefined, startedAt: undefined, compactPending: false,
-    counts: zero(),
-  }
-}
 
 // Saves run one after another, each writing the counts as they are when it
 // runs, so the last save holds the latest counts whatever order calls came in.

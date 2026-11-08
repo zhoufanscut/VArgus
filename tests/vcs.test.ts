@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { initialLimits } from '../src/collect/limits'
-import { initialSession } from '../src/collect/session'
+import { initialLimits } from '../src/hosts/claude/collect/limits'
+import { initialSession } from '../src/hosts/claude/collect/session'
 import {
   deriveRepoAndBranch, initialVcs, parseGitStatus, parseSvnInfoXml, parseSvnStatusXml, repoNameFromUrl,
   type VcsValues,
-} from '../src/collect/vcs'
+} from '../src/hosts/claude/collect/vcs'
 import type { FragmentInput, Theme } from '../src/core/types'
 import { en, type Labels } from '../src/i18n/en'
 import { DEFAULTS, type Options } from '../src/options'

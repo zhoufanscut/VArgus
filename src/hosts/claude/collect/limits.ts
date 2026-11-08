@@ -1,5 +1,3 @@
-import type { EngineInterface, SessionMeasureInput, SessionRateLimit, SessionStartInput, Timer } from 'claude-code'
-
 // The rate limits (DESIGN, "Data sources"; "Rules carried over from
 // VantageHUD": Usage API, Usage cache and staleness).
 //
@@ -13,33 +11,9 @@ import type { EngineInterface, SessionMeasureInput, SessionRateLimit, SessionSta
 // (no lock; the store's last write wins, both results are good); the first
 // API read of a session shows nothing for sn/op/extra until it answers.
 
-export type Bucket = { percent: number; resetsAt: number | null }
-export type ModelBucket = Bucket & { label: string }
-export type ExtraBucket = Bucket & { spentUsd: number; limitUsd: number }
-
-export type UsageData = {
-  sonnet: Bucket | null
-  opus: Bucket | null
-  // other models' weekly caps, labelled by the API's model name (modelLabel)
-  others: ModelBucket[]
-  extra: ExtraBucket | null
-}
-
-export type ApiError = 'rate_limited' | 'auth' | 'network'
-
-export type LimitsValues = {
-  // the engine's windows as it last reported them
-  engine: SessionRateLimit[]
-  // the usage API's last good numbers and when they were read ($.clock ms)
-  api: UsageData | null
-  lastSuccessAt: number | null
-  // why the last read failed; null after a good read or when the API is skipped
-  error: ApiError | null
-}
-
-export function initialLimits(): LimitsValues {
-  return { engine: [], api: null, lastSuccessAt: null, error: null }
-}
+import { initialLimits, MAX_STALE_MS, type Bucket, type ModelBucket, type ExtraBucket, type UsageData, type ApiError, type LimitsValues } from '../../../core/limits'
+export { initialLimits, MAX_STALE_MS, type Bucket, type ModelBucket, type ExtraBucket, type UsageData, type ApiError, type LimitsValues } from '../../../core/limits'
+import type { EngineInterface, SessionMeasureInput, SessionRateLimit, SessionStartInput, Timer } from 'claude-code'
 
 // What `$.store` keeps per account, shared by every session of that account.
 export type UsageCache = {
@@ -64,9 +38,6 @@ export const RETRY_MS = 120_000
 // Sustained 429s back off up to this; a Retry-After counts up to an hour.
 export const MAX_429_BACKOFF_MS = 5 * 60_000
 export const MAX_RETRY_AFTER_MS = 60 * 60_000
-// Past this the last good numbers are not shown and the error is (DESIGN,
-// "Usage cache and staleness").
-export const MAX_STALE_MS = 15 * 60_000
 // At most this many other models' buckets (VantageHUD's MAX_MODEL_WEEKLY).
 const MAX_OTHERS = 4
 

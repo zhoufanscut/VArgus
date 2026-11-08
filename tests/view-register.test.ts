@@ -1,7 +1,7 @@
 import { describe, expect, mock, test, type Engine, type MockClock } from 'claude-code/testing'
 import type { On, TurnStepInput } from 'claude-code'
 
-// The detail view's wiring in hooks/register.ts (DESIGN, "The detail view"):
+// The detail view's wiring in src/hosts/claude/register.ts (DESIGN, "The detail view"):
 // off by default, nothing registered; on, /vargus toggles the pane, the open
 // pane is redrawn each second, a close stops that, and agents' tokens reach it.
 // The redraws stop in the plugin's ui.close hook, which every close passes

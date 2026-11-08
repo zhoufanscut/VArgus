@@ -1,12 +1,6 @@
+import { dataDir, homeDir, DRIVE_PATH } from './paths'
+export { DATA_FOLDER, dataDir, homeDir } from './paths'
 import type { EngineInterface } from 'claude-code'
-
-// The line file (DESIGN, "The line file"): <data>/<session id>/line, replaced
-// whole by a temp file and `mv`, so the reader's `cat` sees a whole line. The
-// session's folder is removed when the session ends. On Windows `move` and
-// `rmdir` through cmd.exe stand in for `mv` and `rm` (see moveArgv).
-
-// The plugin's data folder name: plugin `vargus` from marketplace `vargus`.
-export const DATA_FOLDER = 'vargus-vargus'
 
 export type Writer = {
   // <data>, absolute, with `/` separators; null when the config folder is
@@ -16,6 +10,8 @@ export type Writer = {
   // macOS a drive path comes only from a CLAUDE_CONFIG_DIR or HOME set to
   // one, or a drive-path USERPROFILE with HOME unset or not a `/` path).
   dir: string | null
+  // Only the opt-in tmux publisher uses a launch-local alias.
+  targetId?: string
   // how the line is moved into place and folders removed: `mv` and `rm`, or
   // on Windows (a drive-letter data folder) cmd.exe
   tools: 'posix' | 'cmd'
@@ -37,27 +33,6 @@ export type Writer = {
 
 // A session id as a folder name: no `/`, `.` or `..`.
 const SAFE_ID = /^[A-Za-z0-9_-]+$/
-
-const DRIVE_PATH = /^[A-Za-z]:[\\/]/
-
-// The home folder Claude Code keeps `.claude` in. On Windows that is
-// USERPROFILE whatever HOME says (measured with HOME set to another folder:
-// Claude Code read C:\Users\<name>\.claude, while a mod that took HOME wrote
-// where no reader looked). Windows here: USERPROFILE a drive path and HOME
-// not a `/` path, since WSL can pass the Windows USERPROFILE through
-// unchanged (WSLENV) beside its own HOME. Else HOME, then USERPROFILE.
-export function homeDir(home: string | undefined, profile: string | undefined): string | undefined {
-  const windows = !!profile && DRIVE_PATH.test(profile) && !home?.startsWith('/')
-  return (windows ? profile : home || profile) || undefined
-}
-
-// The data folder from CLAUDE_CONFIG_DIR, else <home>/.claude (Writer.dir).
-export function dataDir(config: string | undefined, home: string | undefined): string | null {
-  const base = config || (home ? `${DRIVE_PATH.test(home) ? home.replace(/[\\/]+$/, '') : home}/.claude` : '')
-  const drive = DRIVE_PATH.test(base)
-  if (!base.startsWith('/') && !drive) return null
-  return `${(drive ? base.replace(/\\/g, '/') : base).replace(/\/+$/, '')}/plugins/data/${DATA_FOLDER}`
-}
 
 export async function createWriter($: EngineInterface): Promise<Writer> {
   const config = await $.env.get('CLAUDE_CONFIG_DIR')
@@ -160,7 +135,7 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
   while (w.pending !== null) {
     const next = w.pending
     w.pending = null
-    const id = await $.session.id()
+    const id = w.targetId ?? await $.session.id()
     if (!w.dir || !id || id === w.ended) continue
     const now = w.heartbeatMs === null ? 0 : await $.clock.now()
     const same = w.last?.id === id && w.last.text === next
@@ -183,4 +158,15 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
     if (!moved) await $.fs.write(line, next)
     w.last = { id, text: next, at: now }
   }
+}
+
+// The launcher supplies a random run id; paths stay inside the plugin data
+// folder. The native writer continues to follow the host's actual session id.
+export async function createTmuxWriter($: EngineInterface): Promise<Writer | null> {
+  const runId = await $.env.get('VARGUS_TMUX_RUN_ID')
+  if (!runId || !/^[0-9a-f]{32}$/.test(runId)) return null
+  const w = await createWriter($)
+  w.targetId = `tmux-${runId}`
+  w.heartbeatMs = 30_000
+  return w
 }

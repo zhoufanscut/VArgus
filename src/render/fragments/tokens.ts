@@ -1,7 +1,7 @@
 import type { Fragment } from '../../core/types'
 
 // 6. tokens: `token:69.5k`, the session's input + output tokens
-// (src/collect/session.ts says what counts) (DESIGN, "Fragments"; VantageHUD's
+// (src/hosts/claude/collect/session.ts says what counts) (DESIGN, "Fragments"; VantageHUD's
 // elements/token-usage.js). Hidden while nothing is counted.
 
 // Raw under 1k, one decimal of k under 1M, two decimals of M beyond. The k/M

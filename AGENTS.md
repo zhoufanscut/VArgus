@@ -2,7 +2,8 @@
 
 Guidance for coding agents (Claude Code reads it through `CLAUDE.md`) working on VArgus.
 
-VArgus is a Claude Code status line in two parts: a mod (a plugin hooks module) that collects the
+VArgus supports Claude Code and Codex CLI, with an opt-in tmux output for both.
+The existing Claude inline status line has two parts: a mod (a plugin hooks module) that collects the
 numbers and writes the finished line to a file, and a `statusLine` command that prints it. It
 replaces VantageHUD (github.com/zhoufanscut/VantageHUD, last release 0.6.0) and shares no code
 with it.
@@ -16,6 +17,20 @@ questions, the verification log). It is gitignored: never commit it.
 **Built on an early-access API.** The bundled `plugin-authoring` types and `reference.md` still
 say "EARLY ACCESS"; the maintainer chose to build anyway and take the churn. Settle an item in
 DESIGN.md "Unsettled" with a throwaway mod before building on it.
+
+## Code boundaries
+
+- `src/core`, `src/render`, `src/theme`, `src/i18n` and `src/options.ts` hold shared values and
+  presentation. They import no host API, host module or output adapter.
+- `src/hosts/claude` owns the mod, its collectors, state contract integration and detail pane.
+  Its `launch-node.ts` is Node-side only and must stay outside the mod's import graph.
+- `src/hosts/codex` owns Codex protocol collection and transport. Host adapters do not import
+  each other or a display adapter.
+- `src/outputs` owns display encoding and tmux lifecycle; it imports no host code.
+  `src/cli.ts` wires a host to an output. Check these boundaries with `npm test`.
+- For the Node launcher run `npm run build` and `npm test`; for Claude run
+  `npm run test:claude`. Codex protocol fixtures complement, rather than establish, live model
+  behavior: keep the live verification limits in DESIGN.md current.
 
 ## Working rules
 
