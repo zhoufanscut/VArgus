@@ -38,7 +38,7 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
 - `core`, `render`, `theme`, `i18n` and `options` import no host API or output adapter.
   Shared readings use VArgus types, including `RateLimit`, rather than Claude's engine types.
 - Claude and Codex collectors do not import each other or an output adapter.
-- Output adapters import no host code. `src/cli.ts` wires collection to display.
+- Output adapters import no host code. `src/cli.ts` and `src/cli` wire collection to display.
 - The Claude mod imports no Node code. The manifest points directly to its register module:
   Claude Code 2.1.319 validation rejects a re-exported `register` entry point.
 - The normal Claude plugin needs no Node package install. Node dependencies serve the launcher
@@ -118,7 +118,7 @@ Selection is scoped to the default server, or an explicit `--socket`. One
 matching pane may be selected automatically; ambiguous targets require `--pane`.
 An inherited environment does not prove which terminal invoked a shared-daemon
 command. Custom servers therefore require their socket explicitly. The CLI stores
-a thread/pane binding and worker PID/token under the temporary control directory.
+a pane/TUI binding, root thread and worker PID/token under the temporary control directory.
 It checks the token in the worker command line before signalling it, so a stale PID
 record cannot stop an unrelated process after PID reuse. The existing tmux owner
 lock arbitrates concurrent attachment. Each pane gets one owner and existing bar
@@ -133,18 +133,31 @@ into the existing Codex collector: session metadata for creation time and cwd,
 `token_count` for cumulative usage, native context-window gauge and quota snapshots,
 and completed visible items for tools. User-shell controls are excluded from tool
 counts. Explicitly attributed settings/items for another thread are ignored.
-Compaction drops the old context reading until new usage arrives. Child token
-histories and agent/skill/workflow counts are not reconstructed in this mode.
-The helper polls once per second and uses the existing git poll/hold-off rule.
+Compaction drops the old context reading until new usage arrives. Token totals
+remain within the selected thread; child histories are not aggregated into the
+parent. Agent/skill/workflow counts are not reconstructed in this mode.
+The pane helper checks the view on a 250 ms loop. Readings refresh once per second
+or when the recognized view changes; new saved sessions are discovered once per
+second. It uses the existing git poll/hold-off rule.
 
 The official [hooks documentation](https://learn.chatgpt.com/docs/hooks#common-input-fields)
 says the transcript format "isn't a stable interface". No hook installation is
 required for these controls: their environment supplies the exact thread identity.
 Compatibility comes from the versioned log fixtures and the real official TUI
 with a localhost mock provider. Ephemeral chats have no required saved log and
-are refused. Changes not yet written to the log remain unknown. The binding is to
-one thread; after a thread switch the user activates `on` again. Future host format
-changes must be rechecked against these limits.
+are refused. Changes not yet written to the log remain unknown. `hosts/codex/views.ts`
+matches the contextual footer below the composer to `session_meta` child paths and
+parent relationships. In checked source `tui/src/app/agent_navigation.rs`,
+`active_agent_label` returns a backtick-wrapped `agent_path` for a child and
+`Main [default]` for the primary thread. `bottom_pane/footer.rs` retains this label
+when configurable items are cleared. The catalog rejects ambiguous/reused paths
+within the bound family; unrelated families do not select a child. Clipped labels,
+popups and other unrecognized views blank the row and pause footer commands. Log
+mtime is never a selection signal. The writable primary prompt uses the activation's
+thread identity when its Main label is absent; parent-owned child views use the
+read-only prompt. `/new` and `/resume` still require `on` again; this is not a general
+external frontend-selection API. Future host format changes must
+be rechecked against these limits.
 
 #### Native footer control
 
@@ -167,36 +180,66 @@ that editing the saved config did not change the displayed footer; native slash
 commands did. These findings select tmux composer delivery rather than config
 rewrites or a custom Codex binary.
 
-The CLI backs up the saved selection before row startup, and sends the clear command
-only after successful attachment. `off` submits the restore command before stopping
-the row. A backup is keyed by socket, pane, TUI PID and thread, separately from the
-worker PID record. Repeated `on` retains it; startup attachment failure removes a
-new backup without touching the footer. Delivery failure keeps it for retry. After
-a worker crash, `off` can find the backup, restore the footer, and prune abandoned
-tmux owners while retaining other live panes. A thread switch leaves that thread's
-backup available when the user switches back. A new TUI PID does not inherit it;
-no saved config needs repair on TUI exit. Runtime backups remain in OS temporary
-storage until restored or that storage is cleared.
+The CLI backs up the saved selection before row startup and sends the clear command
+only after successful attachment. Each recognized child gets a separate saved-layout
+backup before its footer changes. A backup is keyed by socket, pane, TUI PID and
+thread, separately from the worker record. Repeated `on` retains original backups.
+Startup attachment failure removes a new backup without touching the footer;
+uncertain delivery retains it. A versioned pane controller serializes footer work
+and control requests. Request admission publishes a prepared PID-owned lock; a
+later caller can reclaim it after cancellation, while live callers retain exclusion.
+Re-enabling a pending restore reuses that controller. An old
+pre-follow worker is stopped and replaced while its existing backups are retained.
+
+In checked source, `StatusSurfaceOverrides` is retained in per-thread input state;
+`select_agent_thread` restores that state into the replacement widget. The native
+command changes the selected view only. A real engine-created child probe confirmed
+that restoring the parent leaves a previously cleared child hidden, and the same
+restore command in the child restores it. This rules out claiming immediate all-view
+restoration from a single native command.
+
+The user chose restoration on the next visit: `off` detaches the tmux row immediately
+and changes the helper to restore mode. It restores each affected view when selected
+and recognizably empty, then deletes that view's backup. The helper exits when no
+backups remain or its TUI process exits. Drafts, unknown views and visible native
+errors leave restoration pending; `status` reports the pending count and current
+pause. This can keep a helper alive until Codex exits if a view is never revisited.
+No navigation keys are injected. After a worker crash, `off` restarts restoration
+and prunes abandoned tmux owners while retaining other live panes. A new TUI PID
+does not inherit old backups; saved config needs no repair on TUI exit.
 
 `outputs/tmux/input.ts` handles generic capture and key delivery without host
-imports. The Codex host recognizes the cursor at the dimmed empty placeholder;
-a draft with those same words is rejected. The input adapter rechecks before
+imports. The Codex host recognizes the cursor at the complete dimmed parent or
+read-only child placeholder; a draft with those same words is rejected. The input
+adapter rechecks before
 insertion, verifies the entire command and cursor before Enter, and observes the
-empty prompt again. Any visible native statusline parse error makes completion
-inconclusive and retains the backup/row, even when it predates the command. A finite
+empty prompt again. View identity is checked with that empty prompt before and
+after delivery; the contextual label can disappear while the command draft is
+present, so the exact draft/cursor check guards Enter. Any visible native statusline
+parse error makes completion
+inconclusive and retains the backup, even when it predates the command. A finite
 viewport cannot reliably distinguish repeated identical errors from old ones. The
 user resolves the error and moves it out of view before retrying. The adapter sends
 no erase keys. Unrecognized UI or a restore command wider than the pane fails with
 a retry message. Existing drafts are preserved in
 the live tests; simultaneous typing still races with terminal observations because
 there is no atomic editor lock. Users must wait for a control to finish before
-typing. Codex's shortcut/context hint row remains after clearing footer items.
+typing or navigating. Codex's shortcut/context hint row remains after clearing footer items.
+A confirmed view transition requests one full tmux client redraw; ordinary updates
+still use status-only refresh. This is a scoped refresh policy, not a claim that the
+initial reported painting failure had a proven cause.
 
 The live local-mock suite exercises saved defaults, explicit empty/custom layouts,
 repeated on after a saved setting change, two panes, blocked draft restoration,
 row startup failure, restoration after a killed helper and repeated native restore
-rejections without losing the backup. In the fresh-chat runs,
-the provider POST counter stays at zero through controls and increases after a
+rejections without losing the backup. The sibling-view engine test creates two real
+child threads through a localhost mock, assigns distinct token usage, navigates
+between them, checks the attached tmux client, preserves a draft, and verifies
+restore-on-visit ends the helper. An isolated probe also migrates the committed
+pre-follow worker while retaining its backup. These are official engine/UI checks
+with deliberately supplied tool calls, not evidence of a model choosing delegation.
+In the fresh-chat runs, the provider POST counter stays at zero through controls and
+increases after a
 user prompt through the same provider as a positive control. This establishes the
 checked 0.167.0 behavior; other composer layouts, macOS and billed endpoints remain
 unverified.
@@ -336,7 +379,8 @@ src/hosts/claude/write.ts         Claude native line and optional tmux alias
 src/hosts/claude/paths.ts         pure Claude config/data path rules
 src/hosts/claude/view/            existing /vargus pane
 src/hosts/claude/launch-node.ts   Node launcher; outside the mod import graph
-src/hosts/codex/                 Codex protocol/log observers, bridge and git I/O
+src/hosts/codex/                 Codex protocol/log observers, view recognition, footer policy
+src/cli/                        Node-side host/output wiring and standalone controller
 src/core/                       shared readings, defaults and pure git parsers
 src/options.ts                  shared options (defaults match userConfig)
 src/render/                     shared fragment composition, text and width
@@ -344,7 +388,7 @@ src/theme/                      palettes and ANSI colour encoding
 src/i18n/                       labels
 src/outputs/ansi.ts             decode the renderer's SGR vocabulary
 src/outputs/tmux/                tmux encoding, pane ownership and row lifecycle
-src/cli.ts                      standalone controls/worker and optional host launcher
+src/cli.ts                      CLI dispatch and optional host launcher
 bin/vargus                      Bash symlink entry for the built Node CLI
 types/index.d.ts                self-contained Claude $.state contract
 tests/*.test.ts                 Claude engine and shared rendering tests
@@ -852,7 +896,7 @@ What the types and docs alone can't settle and no live session has settled yet; 
 
 - `npm ci && npm run build` builds the optional launcher. `npm test` type-checks its graph and
   runs boundary, protocol/log, real app-server/localhost mock-provider turns and isolated tmux
-  lifecycle tests.
+  lifecycle tests. Daemon-heavy Node cases run serially to bound resource use.
 - `npm run test:claude` runs the existing Claude checks listed below. In this development
   environment the engine test workers require execution outside the restricted sandbox; the
   unchanged baseline failed inside and passed outside.

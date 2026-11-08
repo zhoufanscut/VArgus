@@ -1,24 +1,18 @@
-import { spawn, execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { mkdtemp, readFile, rm, mkdir, writeFile, readdir } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir, homedir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { randomBytes, createHash } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
+import { codexLine } from './cli/line'
+import { standalone, rowWorker } from './cli/codex'
 import { TmuxOutput } from './outputs/tmux/client'
 import { CodexCollector } from './hosts/codex/collect'
 import { startBridge } from './hosts/codex/bridge'
-import { readGit } from './hosts/codex/vcs'
 import { claudeLaunch } from './hosts/claude/launch-node'
 import { resolveOptions } from './options'
-import { render } from './render'
 import { makeTheme } from './theme'
-import { en } from './i18n/en'
-import { findRollout, RolloutReader } from './hosts/codex/rollout'
-import { applicationTarget, type Target } from './outputs/tmux/target'
-import { PaneInput } from './outputs/tmux/input'
-import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, type FooterSelection } from './hosts/codex/footer'
 
 const HELP = `Usage:
   vargus on|off|status [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
@@ -27,7 +21,8 @@ const HELP = `Usage:
   vargus tmux-reset
 
 The tmux row is opt-in. Standalone on/off hide/restore Codex's saved footer
-through tmux /statusline commands. Leave the composer empty until they finish.
+through tmux /statusline commands. Off removes the row; inactive views restore
+on their next empty-composer visit. The helper exits after restoration or TUI exit.
 FILE is a JSON object of VArgus options; no saved host settings change.
 Exit the wrapped CLI to restore the original tmux bar. After a crash, tmux-reset
 cleans up an abandoned row when no wrapped session is still running.
@@ -55,190 +50,6 @@ export function codexServerArgs(args: string[]): { args: string[]; cwd: string }
   return { args: out, cwd }
 }
 
-function codexLine(collector: CodexCollector, o: ReturnType<typeof resolveOptions>, t: ReturnType<typeof makeTheme>) {
-  let line: (width: number) => Promise<string>
-      let gitAt = 0
-      let gitCwd = ''
-      let gitReading: Promise<void> | undefined
-      line = async width => {
-        const v = collector.snapshot()
-        if (!v) return ''
-        v.core.columns = width
-        if (!gitReading && (v.core.cwd !== gitCwd || Date.now() >= gitAt)) {
-          const cwd = v.core.cwd
-          gitCwd = cwd
-          const start = Date.now()
-          gitReading = readGit(cwd).then(value => {
-            if (v.core.cwd === cwd) v.vcs = value
-          }).finally(() => {
-            gitAt = Date.now() + Math.max(5000, (Date.now() - start) * 10)
-            gitReading = undefined
-          })
-        }
-        return render({ v, o, l: en, t, now: Date.now() })
-      }
-  return line
-}
-
-type Running = { pid: number; thread: string; target: Target; token: string }
-type FooterBackup = { thread: string; target: Target; selection: FooterSelection }
-const exec = promisify(execFile)
-const controlRoot = () => join(tmpdir(), `vargus-control-${process.getuid?.() ?? 'user'}`)
-const running = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
-const recordPath = (target: Target) => join(controlRoot(), createHash('sha256').update(target.socket + '\0' + target.pane).digest('hex') + '.json')
-async function readRunning(file: string): Promise<Running | undefined> {
-  try {
-    const r = JSON.parse(await readFile(file, 'utf8')) as Running
-    if (!running(r.pid)) return undefined
-    // Do not signal an unrelated process after a PID has been reused.
-    const args = (await exec('ps', ['-ww', '-p', String(r.pid), '-o', 'args='])).stdout
-    return args.includes('__row') && args.includes(`"token":"${r.token}"`) ? r : undefined
-  }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as any).code === 1) return undefined; throw error }
-}
-
-
-const footerRoot = () => join(controlRoot(), 'footers')
-const footerPath = (target: Target, thread: string) => join(footerRoot(), createHash('sha256').update(JSON.stringify([target.socket, target.pane, target.pid, thread])).digest('hex') + '.json')
-async function readFooter(file: string): Promise<FooterBackup | undefined> {
-  try { return JSON.parse(await readFile(file, 'utf8')) as FooterBackup }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
-}
-async function changeFooter(target: Target, command: string): Promise<void> {
-  const live = await applicationTarget('codex', target.socket, target.pane)
-  if (live.pid !== target.pid) throw new Error('Footer automation stopped: the Codex process in this pane changed.')
-  const input = new PaneInput(target)
-  const after = await input.submit(command, codexComposer)
-  if (footerCommandError(after.lines)) throw new Error('Footer command completion is inconclusive: a native statusline error remains visible. The saved backup is retained; row cleanup was skipped. Resolve the error and move it out of view before retrying.')
-}
-
-async function standalone(args: string[]): Promise<number> {
-  const [action, ...flags] = args
-  let socket: string | undefined, pane: string | undefined
-  let options: Record<string, unknown> = {}
-  for (let i = 0; i < flags.length; i++) {
-    const flag = flags[i]!, value = flags[++i]
-    if (value === undefined) throw new Error(`Missing value for ${flag}.`)
-    if (flag === '--pane') pane = value
-    else if (flag === '--socket') socket = value
-    else if (flag === '--theme') options.theme = value
-    else if (flag === '--config') options = { ...options, ...JSON.parse(await readFile(value, 'utf8')) }
-    else throw new Error(`Unknown VArgus option: ${flag}.`)
-  }
-  const thread = process.env.CODEX_THREAD_ID
-  if (action === 'on' && !thread) throw new Error('Inside Codex, run !vargus on. CODEX_THREAD_ID identifies the conversation.')
-  await mkdir(footerRoot(), { recursive: true, mode: 0o700 })
-  // An existing explicit thread binding also makes off/status work after focus changes.
-  const bindings = new Map<string, { target: Target; thread: string }>()
-  if (thread && !pane && !socket) {
-    for (const name of await readdir(controlRoot())) {
-      if (!name.endsWith('.json')) continue
-      const value = await readRunning(join(controlRoot(), name))
-      if (value?.thread === thread) bindings.set(recordPath(value.target), value)
-    }
-    // A crashed helper must not lose the saved footer or make off unable to retry.
-    for (const name of await readdir(footerRoot())) {
-      const value = await readFooter(join(footerRoot(), name))
-      if (value?.thread === thread && running(value.target.pid)) bindings.set(recordPath(value.target), value)
-    }
-  }
-  if (bindings.size > 1) throw new Error('This thread has multiple rows; select one with --pane and --socket.')
-  const existing = [...bindings.values()][0]
-  if (action !== 'on' && !existing && !pane && !socket) {
-    console.log('VArgus is off for this Codex thread.'); return 0
-  }
-  const target = existing?.target ?? await applicationTarget('codex', socket, pane)
-  const file = recordPath(target)
-  const current = await readRunning(file)
-  const backupFile = thread ? footerPath(target, thread) : undefined
-  let backup = backupFile ? await readFooter(backupFile) : undefined
-  if (action === 'status') { console.log(current ? `VArgus is on in ${target.pane} (thread ${current.thread}).` : backup ? 'VArgus row is off; footer restoration is pending. Run !vargus off with an empty composer.' : 'VArgus is off.'); return 0 }
-  if (action === 'off') {
-    if (backup) {
-      await changeFooter(target, restoreFooter(backup.selection))
-      await rm(backupFile!, { force: true })
-    } else if (!thread && current) throw new Error('Inside the Codex conversation, run !vargus off so its saved footer can be restored.')
-  }
-  if (action === 'on' && current?.thread === thread) {
-    if (!backup) {
-      backup = { target, thread: thread!, selection: await savedFooter(process.cwd()) }
-      restoreFooter(backup.selection)
-      await writeFile(backupFile!, JSON.stringify(backup), { mode: 0o600 })
-    }
-    await changeFooter(target, clearFooter)
-    console.log(`VArgus is already on in ${target.pane}.`); return 0
-  }
-  if (current) {
-    process.kill(current.pid, 'SIGTERM')
-    const until = Date.now() + 6000
-    while (await readRunning(file) && Date.now() < until) await new Promise(r => setTimeout(r, 50))
-    if (await readRunning(file)) throw new Error('VArgus did not finish stopping; retry shortly.')
-  }
-  if (action === 'off') {
-    if (!current) await new TmuxOutput(target.socket, target.pane).cleanupAbandoned()
-    console.log('VArgus is off.'); return 0
-  }
-  const home = process.env.CODEX_HOME ?? join(homedir(), '.codex')
-  const transcript = await findRollout(home, thread!)
-  const newBackup = !backup
-  if (!backup) {
-    backup = { target, thread: thread!, selection: await savedFooter(process.cwd()) }
-    // Validate the saved command before starting or hiding anything.
-    restoreFooter(backup.selection)
-    await writeFile(backupFile!, JSON.stringify(backup), { mode: 0o600 })
-  }
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '__row', JSON.stringify({ target, thread, transcript, options, token: randomBytes(16).toString('hex') })], {
-    detached: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'], env: { ...process.env, VARGUS_CLI_MAIN: '1' },
-  })
-  let errors = ''
-  child.stderr!.on('data', chunk => { errors += String(chunk) })
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`VArgus startup timed out. ${errors}`)), 8000)
-      child.once('error', reject)
-      child.once('exit', code => { clearTimeout(timer); reject(new Error(`VArgus could not start (${code}). ${errors}`)) })
-      child.once('message', () => { clearTimeout(timer); resolve() })
-    })
-  } catch (error) { child.kill('SIGTERM'); if (newBackup) await rm(backupFile!, { force: true }); throw error }
-  child.stderr!.destroy()
-  child.disconnect(); child.unref()
-  // Only a successfully attached row may hide the native footer. Keep the backup
-  // on delivery failure so off can retry independently of the helper's lifetime.
-  await changeFooter(target, clearFooter)
-  console.log(`VArgus is on in ${target.pane}.`)
-  return 0
-}
-
-async function rowWorker(spec: { target: Target; thread: string; transcript: string; options: Record<string, unknown>; token: string }): Promise<number> {
-  const { target, thread } = spec
-  const file = recordPath(target)
-  const reader = new RolloutReader(spec.transcript, thread, process.cwd(), homedir())
-  const options = resolveOptions({ ...spec.options, tmuxOutput: true })
-  const line = codexLine(reader.collector, options, makeTheme(options.theme, !!process.env.NO_COLOR))
-  const output = new TmuxOutput(target.socket, target.pane)
-  let stop!: () => void, stopping = false
-  const stopped = new Promise<void>(resolve => { stop = () => { stopping = true; resolve() } })
-  process.on('SIGTERM', stop); process.on('SIGHUP', stop)
-  let owned = false
-  try {
-    await reader.poll()
-    await output.attach()
-    await writeFile(file, JSON.stringify({ pid: process.pid, thread, target, token: spec.token }), { mode: 0o600 })
-    owned = true
-    await output.update(await line(await output.width()))
-    process.send?.({ ready: true })
-    while (!stopping && running(target.pid)) {
-      await Promise.race([stopped, new Promise(r => setTimeout(r, 1000))])
-      if (stopping || !running(target.pid)) break
-      await reader.poll()
-      await output.update(await line(await output.width()))
-    }
-    return 0
-  } finally {
-    try { await output.detach() } finally { if (owned) await rm(file, { force: true }) }
-    process.off('SIGTERM', stop); process.off('SIGHUP', stop)
-  }
-}
 
 export async function main(argv: string[]): Promise<number> {
   if (argv[0] === '--help' || !argv.length) { console.log(HELP); return 0 }

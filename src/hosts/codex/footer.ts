@@ -53,7 +53,8 @@ export function codexComposer(screen: { lines: string[]; x: number; y: number; v
   const line = screen.lines[screen.y] ?? ''
   const content = plain(line)
   if (text) return content.slice(2) === text && content.length === text.length + 2
-  return content.slice(2) === 'Ask Codex to do anything' && /\x1b\[(?:[0-9]+;)*2mAsk Codex to do anything/.test(line)
+  return ['Ask Codex to do anything', 'Viewing sub-agent — direct input is disabled'].includes(content.slice(2))
+    && /\x1b\[(?:[0-9]+;)*2m(?:Ask Codex to do anything|Viewing sub-agent — direct input is disabled)/.test(line)
     && !screen.lines.slice(Math.max(0, screen.y - 3), screen.y).some(line => /Image #\d|\[Pasted Content/.test(plain(line)))
 }
 

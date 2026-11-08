@@ -27,7 +27,7 @@ DESIGN.md "Unsettled" with a throwaway mod before building on it.
 - `src/hosts/codex` owns Codex protocol collection and transport. Host adapters do not import
   each other or a display adapter.
 - `src/outputs` owns display encoding and tmux lifecycle; it imports no host code.
-  `src/cli.ts` wires a host to an output. Check these boundaries with `npm test`.
+  `src/cli.ts` and `src/cli` wire a host to an output. Check these boundaries with `npm test`.
 - For the Node launcher run `npm run build` and `npm test`; for Claude run
   `npm run test:claude`. Codex protocol fixtures complement, rather than establish, live model
   behavior: keep the live verification limits in DESIGN.md current.

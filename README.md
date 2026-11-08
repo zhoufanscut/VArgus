@@ -89,7 +89,7 @@ mkdir -p "$HOME/.local/bin"
 ln -s /absolute/path/to/VArgus/bin/vargus "$HOME/.local/bin/vargus"
 ```
 
-Start ordinary `codex` in tmux. Inside Codex, use:
+Start ordinary `codex` in tmux. Run controls from its primary conversation view:
 
 ```text
 !vargus on
@@ -114,33 +114,38 @@ can inherit another terminal's environment, so pane selection does not trust
 `TMUX_PANE`. Once attached, `off` and `status` use the saved thread binding.
 `--theme ember` and `--config /path/to/options.json` apply on activation.
 
-The helper follows that conversation until `off` or its Codex terminal process exits.
-After `/new`, `/resume` or switching to a different thread, run `!vargus on` again
-(with the pane selection if needed) to bind the new conversation. Its token total
-covers the selected thread's recorded uncached input and output; child totals are
-not aggregated. Tool counts replay completed visible items and exclude `!` controls;
+The helper follows the displayed parent or subagent through Alt+Left/Right and
+`/subagents`. Each view shows its own recorded readings; child totals are not
+aggregated. VArgus matches Codex's contextual agent label to saved session metadata.
+If a popup, clipped label or ambiguous agent path prevents identification, the row
+is blank until the view can be identified again. `status` reports that pause.
+After `/new` or `/resume`, run `!vargus on` again (with pane selection if needed)
+to bind the new conversation. Its token total covers recorded uncached input and output. Tool counts replay completed visible items and exclude `!` controls;
 agent, skill and workflow counts are omitted. Missing readings stay hidden.
 Ephemeral chats without a saved transcript are unsupported. Log-backed readings
 update when Codex writes them; model/effort picks are not inferred ahead of that.
 
-`on` also hides Codex's configurable footer; `off` restores the saved footer layout.
-VArgus reads the saved config through Codex and sends session-only `/statusline`
-commands through tmux. Codex's shortcut/context hint row remains. Saved config files
-are not rewritten. The backup survives a helper crash, so `!vargus off` can retry.
-Repeated `on` keeps the original backup. An already-empty saved footer stays empty.
+`on` also hides Codex's configurable footer in each recognized view you visit.
+`off` removes the tmux row immediately. A small helper restores the saved footer
+layout as you visit affected views with an empty composer; it exits once all pending
+views are restored or the Codex terminal process exits. Inactive views cannot be
+restored immediately through Codex's session-only command. `!vargus status` reports
+pending restorations. Running `on` again reuses the helper and original backups.
 
-Leave the composer empty and wait for the control to finish before typing. If the
-empty prompt cannot be recognized, automation stops with an error; it does not erase
-the draft. `off` keeps the tmux row until footer restoration succeeds. A narrow pane
-may need widening to fit the restore command. A visible native statusline error
+VArgus reads saved config through Codex and sends session-only `/statusline` commands
+through tmux, including in read-only subagent views. Codex's shortcut/context hint
+row remains. Saved config files are not rewritten. Backups survive a helper crash;
+`!vargus off` restarts restoration. An already-empty saved footer stays empty.
+
+Leave the composer empty when switching views and wait for footer automation before
+typing. Drafts pause automation and are preserved. A narrow pane may need widening
+to fit the restore command or identify the agent. A visible native statusline error
 makes completion inconclusive, including an error from an earlier attempt: the
-backup and row remain. Resolve the error and move it out of view before retrying.
-This is TUI automation, with a check
-before submission; tmux does not provide an atomic lock on Codex's editor. Temporary
-session-only `/statusline` selections and launch-time config overrides cannot be
-read back reliably: restoration uses saved configuration, including its default
-layout when unset. Backups belong to the conversation and terminal process; switch
-back to a conversation and run `off` there to restore its footer.
+backup remains. Resolve the error and move it out of view before retrying. This is
+TUI automation; tmux does not provide an atomic lock on Codex's editor. Simultaneous
+typing or navigation can still race the observations. Temporary session-only
+`/statusline` selections and launch-time overrides cannot be read back reliably:
+restoration uses saved configuration, including its default layout when unset.
 
 Saved session logs and composer recognition are version-sensitive interfaces.
 Compatibility is checked with fixtures and a live official-Codex/local-mock test

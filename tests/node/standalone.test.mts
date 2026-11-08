@@ -194,7 +194,9 @@ trust_level = "trusted"
     await delay(100)
     const input = new PaneInput(active.target)
     const draftScreen = await input.snapshot()
-    await assert.rejects(exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } }), /composer is not recognizably empty/)
+    const deferred = await exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+    assert.match(deferred.stdout, /VArgus is off;.*pending restoration/)
+    assert.equal(await row(), '')
     const afterDraft = await input.snapshot()
     assert.equal(afterDraft.lines[afterDraft.y], draftScreen.lines[draftScreen.y], 'draft with placeholder words must be preserved')
     assert.equal(afterDraft.x, draftScreen.x)
@@ -228,7 +230,7 @@ trust_level = "trusted"
       for (let attempt = 0; attempt < 2; attempt++) {
         await submit(command('off'))
         await wait(screen, /completion is inconclusive/)
-        assert.ok(await row(), 'rejected restoration must retain the row on every attempt')
+        assert.equal(await row(), '', 'off removes the row while restoration remains pending')
         const names = await readdir(footerDir)
         assert.equal(names.length, 1)
         assert.deepEqual(JSON.parse(await readFile(join(footerDir, names[0]!), 'utf8')).selection, staleSelection)
@@ -246,6 +248,6 @@ trust_level = "trusted"
     await tmux('kill-server').catch(() => {})
     await exec('codex', ['app-server', 'daemon', 'stop'], { env }).catch(() => {})
     provider.closeAllConnections(); await new Promise<void>(done => provider.close(() => done()))
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
 })

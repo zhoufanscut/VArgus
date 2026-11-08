@@ -40,6 +40,12 @@ export class TmuxOutput {
     return stdout.replace(/\n$/, '')
   }
 
+  async redraw(): Promise<void> {
+    for (const client of (await this.command('list-clients', '-t', this.pane, '-F', '#{client_name}')).split('\n').filter(Boolean)) {
+      await this.command('refresh-client', '-t', client)
+    }
+  }
+
   private async initialize(): Promise<void> {
     if (this.directory) return
     this.session = await this.command('display-message', '-p', '-t', this.pane, '#{session_id}')

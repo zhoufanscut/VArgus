@@ -28,6 +28,10 @@ Notable changes to this project. The format follows
 
 ### Fixed
 
+- Standalone Codex follows parent/subagent navigation with per-view readings and
+  footer suppression. `off` removes the tmux row immediately and restores affected
+  views on their next visit; a helper remains until restoration completes or Codex
+  exits. Unknown view identities pause automation instead of selecting by log activity.
 - `ctx:` could keep the pre-compact fill until the next turn ended, which a long turn could
   stretch for minutes. The collector drops that fill when a compaction stands (`/compact`,
   auto-compact or a plugin's), then reads `$.session.usage()` after every main-loop `turn.step`.

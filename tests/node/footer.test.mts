@@ -19,3 +19,10 @@ test('composer guard requires the dim placeholder, live cursor, and complete com
   assert.equal(codexComposer(screen('› /statusline --clear extra', 27), '/statusline --clear'), false)
   assert.equal(codexComposer({ ...screen('› /statusline --clear', 21), visible: false }, '/statusline --clear'), false)
 })
+
+test('child local commands require the complete dim read-only placeholder', () => {
+  const child = 'Viewing sub-agent — direct input is disabled'
+  assert.ok(codexComposer(screen('› \x1b[2m' + child + '\x1b[0m'), ''))
+  assert.equal(codexComposer(screen('› ' + child), ''), false)
+  assert.equal(codexComposer(screen('› \x1b[2mViewing sub-agent — direct input is d\x1b[0m'), ''), false)
+})
