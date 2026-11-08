@@ -135,7 +135,19 @@ and completed visible items for tools. User-shell controls are excluded from too
 counts. Explicitly attributed settings/items for another thread are ignored.
 Compaction drops the old context reading until new usage arrives. Token totals
 remain within the selected thread; child histories are not aggregated into the
-parent. Agent/skill/workflow counts are not reconstructed in this mode.
+parent. Subagent starts and observed skill loads are replayed as described below;
+workflow counts are not reconstructed.
+The reader initially rejects foreign `session_meta`, including copied parent
+metadata observed in a real 0.167.0 `spawn_agent` child with `fork_turns:all`.
+`status` can expose `The transcript belongs to another Codex thread.` The existing
+poller advances its file offset before parsing and can resume buffered/copied
+records on later polls, clearing that transient error and returning readings.
+These mixed histories remain outside the supported reader contract. On foreign
+metadata, the new agent/skill counters are cleared and omitted for that reader's
+lifetime, including retries, so copied parent injections cannot become child
+skill loads. The remaining reader behavior is unchanged; fixing attribution of
+its other readings is separate work. This limit was measured by repeated polls
+of a real child log and by settled official-TUI refresh checkpoints.
 The pane helper checks the view on a 250 ms loop. Readings refresh once per second
 or when the recognized view changes; new saved sessions are discovered once per
 second. It uses the existing git poll/hold-off rule.
@@ -176,8 +188,9 @@ observation. Views in the same workspace share cached settings, while restore ba
 thread. Explicit `on` starts a fresh settings cache without replacing existing
 backups; failed workspace reads can retry without discarding other cached values.
 No config/read call sits between recognizing a new view and backing it up/clearing
-its footer. Worker v3 replaces older on-mode workers while retaining their backups;
-`off` can still talk to a v2 worker.
+its footer. Worker v4 replaces older on-mode workers while retaining their backups,
+so an explicit `on` after rebuilding loads the model/counter changes. `off` can
+still talk to v2 and v3 workers.
 
 A read-only trace on 2026-11-08 captured the first-visit failure with a populated
 fullscreen footer: the full child path appeared, Git counts arrived and clipped it,
@@ -320,6 +333,53 @@ user turns and background title generation report different usage, so it catches
 selection errors and checks tokens, context and quota delivery through the real engine/bridge.
 Compaction, selected-child and V2-agent accounting use protocol fixtures; an actual generated
 subagent turn and billed model endpoints have not been used for those checks.
+
+### Codex model names and call counts
+
+The maintainer explicitly chose on-by-default Codex naming and counters. The
+separate `codexShortModel`, `codexAgentCounts` and `codexSkillCounts` userConfig
+switches default to true and have no effect on Claude. The existing `model` and
+`callCounts` switches still gate their whole fragments. Names shorten only GPT
+version IDs ending in the checked families `astra`, `sol`, `terra` or `luna`;
+unknown IDs remain whole. Both `gpt-6-sol` and `gpt-6.1-sol` become `sol`. This is
+presentation only: the collector retains the full ID for quota matching and
+recorded settings. The local model catalog checked on 2026-11-08 contains those
+five IDs, and the official [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+gives `gpt-6.1-sol` as its ID.
+
+The standalone reader maps completed `SubAgentActivity` records with
+`kind:started` to the collector's existing agent-start path. Legacy completed
+`CollabAgentToolCall` records use raw `tool:spawn_agent` (the app-server spelling
+is `spawnAgent`). Canonical item IDs deduplicate starts. Interactions, completion
+notifications and failed legacy spawns do not add starts. These mappings do not
+add tools: the previous completed-visible-tool total is preserved. Counts belong
+to the displayed log; child logs are not summed into a parent.
+
+`hosts/codex/skills.ts` counts observed local skill loads, not successful execution
+of a skill's instructions. In checked Codex source `c2bd770ca7`,
+`ext/skills/src/fragments.rs` gives selected instructions the content kind
+`"skills.selected_skill_instructions"` and markers `("<skill>", "</skill>")`;
+`core/src/session/turn.rs` records these injected response items. A load comes
+from that marked user instruction block, or a completed, exit-zero
+`CommandExecution` with a parsed `read` of a catalogued `SKILL.md`. The latter
+uses the recorded developer catalog (`host_skills.instructions` / `skills.catalog`)
+and expands its host root aliases. Paths resolve against the recorded command cwd,
+including file URIs. The deduplication key is the normalized recorded path and
+turn ID. Injection and reads in one turn count once, and later turns can add
+another load. Catalog discovery, ordinary text mentions, references, user-shell
+commands and failed reads do not add loads. Polling/replaying the same history
+does not add another copy of its count. The icon is shown directly (`⚡3`), by
+maintainer choice. Unknown shell parses, cached reuse without a new load, cloud
+and executor loaders, symlink aliases, and catalog formats outside the checked
+version are outside this observed-load contract. The transport launcher still
+has no skill counter; it does not receive these saved raw instruction records.
+
+The real 0.167.0 app-server/localhost-provider skill test loads two scratch skills:
+explicit alpha, automatic alpha read twice in the next turn, then explicit alpha
+plus alpha/beta reads in a third turn. Its observed skill totals are 1, 2 and 4;
+the four shell reads stay four tool calls, and a fresh reader reconstructs 4 from
+the log without another provider request. These are engine-record checks with
+deliberately supplied local tool calls, not proof of a model choosing skills.
 
 ## Scope
 
@@ -796,7 +856,8 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 ## Config
 
 - Flags and simple values are `userConfig` fields in `.claude-plugin/plugin.json`: shown in
-  `/config`, stored under `pluginConfigs`. Each new feature's flag defaults to off.
+  `/config`, stored under `pluginConfigs`. New features default to off, except the
+  explicitly chosen Codex model/counter defaults described above.
 - 0.1.0's options: one boolean per fragment and sub-option ([Fragments](#fragments)), and
   `theme`, a picker (`options`) of VantageHUD's five palettes (`aurora`, `ember`, `nebula`,
   `graphite`, `daylight`), default `graphite`.

@@ -3,6 +3,7 @@
 import { open, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { CodexCollector } from './collect'
+import { SkillLoads } from './skills'
 import type { Usage } from './protocol'
 
 type RecordLine = { type: string; timestamp?: string; payload: any }
@@ -25,6 +26,8 @@ export class RolloutReader {
   private pending = ''
   private selected = false
   private decoder = new TextDecoder()
+  private skills = new SkillLoads()
+  private countersAttributed = true
   constructor(private file: string, private thread: string, cwd: string, home: string) {
     this.collector = new CodexCollector(cwd, home)
   }
@@ -32,14 +35,28 @@ export class RolloutReader {
   observe(record: RecordLine): void {
     const p = record.payload
     if (record.type === 'session_meta') {
-      if (p.id !== this.thread) throw new Error('The transcript belongs to another Codex thread.')
+      if (p.id !== this.thread) {
+        // A retry can advance past copied parent metadata. The existing reader
+        // may then expose inherited records; do not count their agents/skills.
+        this.countersAttributed = false
+        const counts = this.collector.snapshot()?.session.counts
+        if (counts) { counts.agents = 0; counts.skills = 0 }
+        throw new Error('The transcript belongs to another Codex thread.')
+      }
       this.collector.selectThread({ id: p.id, cwd: p.cwd,
         createdAt: Date.parse(p.timestamp ?? record.timestamp!) / 1000 })
       this.selected = true
     }
     if (!this.selected) return
     const v = this.collector.snapshot()!
-    if (record.type === 'turn_context' || (record.type === 'event_msg' && p.type === 'thread_settings_applied')) {
+    if (record.type === 'event_msg' && p.type === 'task_started') {
+      this.skills.start(p.turn_id)
+    } else if (record.type === 'response_item' && p.type === 'message') {
+      if (this.countersAttributed) {
+        this.skills.message(p)
+        v.session.counts.skills = this.skills.count
+      }
+    } else if (record.type === 'turn_context' || (record.type === 'event_msg' && p.type === 'thread_settings_applied')) {
       if (p.thread_id && p.thread_id !== this.thread) return
       const settings = record.type === 'turn_context' ? p : p.thread_settings
       v.core.cwd = settings.cwd
@@ -61,6 +78,17 @@ export class RolloutReader {
       if (p.thread_id && p.thread_id !== this.thread) return
       const item = p.item
       if (item.source === 'user_shell') return
+      if (this.countersAttributed && item.type === 'CommandExecution') {
+        this.skills.command(item, p.turn_id)
+        v.session.counts.skills = this.skills.count
+      }
+      // Spawn activity is separate from tool accounting: existing tool totals
+      // retain their completed-visible-item contract.
+      const spawn = item.type === 'SubAgentActivity' && item.kind === 'started'
+        || item.type === 'CollabAgentToolCall' && item.tool === 'spawn_agent' && item.status === 'completed'
+      if (this.countersAttributed && spawn) this.collector.fromServer({ method: 'item/started', params: {
+        threadId: this.thread, item: { id: item.id, type: 'subAgentActivity', kind: 'started' },
+      } })
       const types: Record<string, string> = { CommandExecution: 'commandExecution', FileChange: 'fileChange',
         McpToolCall: 'mcpToolCall', DynamicToolCall: 'dynamicToolCall', WebSearch: 'webSearch',
         ImageGeneration: 'imageGeneration', ImageView: 'imageView', ContextCompaction: 'contextCompaction' }

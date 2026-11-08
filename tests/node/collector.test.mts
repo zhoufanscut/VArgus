@@ -19,7 +19,7 @@ const usage = (threadId: string, inputTokens = 20000, cachedInputTokens = 16000,
   } },
 })
 
-test('Codex readings: repeated cumulative totals, child attribution, full model and native context gauge', () => {
+test('Codex readings: repeated cumulative totals, child attribution, short display and native context gauge', () => {
   const c = new CodexCollector('/repo', '/home/u', () => 60000)
   assert.equal(c.snapshot(), undefined)
   start(c)
@@ -34,7 +34,8 @@ test('Codex readings: repeated cumulative totals, child attribution, full model 
   assert.equal(c.snapshot()!.session.counts.tokens, 4700)
   const v = c.snapshot()!
   const text = render({ v, o: DEFAULTS, l: en, t: makeTheme('graphite', true), now: 60000 })
-  assert.match(text, /gpt-6\.1-sol:high/)
+  assert.match(text, /sol:high/)
+  assert.equal(v.session.model, 'gpt-6.1-sol')
   assert.match(text, /ctx:15%/)
   assert.match(text, /token:4\.7k/)
   c.fromServer({ method: 'item/started', params: { threadId: 'main', item: { id: 'compact1', type: 'contextCompaction' } } })

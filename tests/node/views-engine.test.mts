@@ -189,7 +189,7 @@ trust_level = "trusted"
     await wait(row, /session:/)
     assert.equal(posts, 0)
     let active = (await records())[0]
-    assert.equal(active.version, 3)
+    assert.equal(active.version, 4)
     if (!crowded) {
       const fake = join(dir, 'fake'), trace = join(dir, 'ps-trace.jsonl')
       await mkdir(fake)
@@ -212,6 +212,8 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     await submit('Use two subagents for this local fixture.')
     await wait(screen, /LOCAL CONTROL RESPONSE/)
     await wait(row, /token:4\.2k/)
+    assert.match(await wait(row, /🤖2/), /sol:/)
+    assert.doesNotMatch(await row(), /gpt-6\.1-sol/)
     await delay(1000)
     const metas: any[] = []
     for (const name of await readdir(join(cfg, 'sessions'), { recursive: true })) if (name.endsWith('.jsonl')) {
@@ -247,6 +249,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
       lastPath = path
       const value = expected.get(path)!
       await wait(row, new RegExp('token:' + value.tokens.replace('.', '\\.')))
+      assert.doesNotMatch(await row(), /🤖\d+/, 'a child view must not inherit the parent spawn count')
       await delay(300)
       assert.doesNotMatch((await screen()).slice((await screen()).lastIndexOf('Viewing sub-agent')), new RegExp(value.id))
       if (crowded) assert.doesNotMatch(await childFooter(), /GPT-6\.1-Sol|Context \d+% used/, 'configured native footer must be hidden on the first visit')
@@ -268,6 +271,8 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
       await submit('/exit')
       await wait(() => tmux('display-message', '-p', '-t', pane, '#{pane_dead}'), /^1$/)
       await wait(async () => String((await records()).length), /^0$/)
+      // The worker removes its runtime record before finishing backup cleanup.
+      await wait(async () => String((await readdir(join(controlRoot, 'footers'))).length), /^0$/)
       assert.deepEqual(await readdir(join(controlRoot, 'footers')), [])
       assert.equal(await readFile(join(cfg, 'config.toml'), 'utf8'), savedConfig)
       assert.equal(posts, afterTurns)

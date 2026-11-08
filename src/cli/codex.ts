@@ -140,7 +140,7 @@ export async function standalone(args: string[]): Promise<number> {
     console.log(current ? description(current) : (await backups(target)).length ? 'VArgus is off; footer restoration is pending. Run !vargus off.' : 'VArgus is off.')
     return 0
   }
-  if (current && ((action === 'off' && (current.version === 2 || current.version === 3)) || (current.version === 3 && current.thread === thread))) {
+  if (current && ((action === 'off' && [2, 3, 4].includes(current.version!)) || (current.version === 4 && current.thread === thread))) {
     const reply = await request(current, action as 'on' | 'off')
     console.log(action === 'on' ? `VArgus is already on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))
     return 0
@@ -193,7 +193,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
   let lastConfirmed: string | undefined, readingError: string | undefined, published = ''
   const stop = () => { stopping = true }
   process.on('SIGTERM', stop); process.on('SIGHUP', stop)
-  const state = async (): Promise<Running> => ({ pid: process.pid, thread, target, token: spec.token, version: 3,
+  const state = async (): Promise<Running> => ({ pid: process.pid, thread, target, token: spec.token, version: 4,
     mode, selected, pending: (await backups(target)).length, error })
   const step = async () => {
     if (Date.now() >= refreshAt) {

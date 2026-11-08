@@ -57,6 +57,55 @@ test('rollout polling waits for complete UTF-8 JSONL records and selects the exa
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
+test('recorded subagent starts count once without changing tool totals or summing child histories', () => {
+  const r = new RolloutReader('/unused', 'thread-a', '/repo', '/home/user')
+  r.observe(meta)
+  const item = (id: string, extra: Record<string, unknown>) => ({ type: 'event_msg', payload: {
+    type: 'item_completed', thread_id: 'thread-a', item: { id, ...extra },
+  } })
+  const spawn = item('first', { type: 'SubAgentActivity', kind: 'started', agent_thread_id: 'child' })
+  r.observe(spawn); r.observe(spawn)
+  r.observe(item('first', { type: 'CollabAgentToolCall', tool: 'spawn_agent', status: 'completed' }))
+  r.observe(item('second', { type: 'CollabAgentToolCall', tool: 'spawn_agent', status: 'completed' }))
+  r.observe(item('failed', { type: 'CollabAgentToolCall', tool: 'spawn_agent', status: 'failed' }))
+  r.observe(item('interaction', { type: 'SubAgentActivity', kind: 'interacted' }))
+  r.observe({ type: 'event_msg', payload: { ...spawn.payload, thread_id: 'child', item: { ...spawn.payload.item, id: 'nested' } } })
+  assert.deepEqual(r.collector.snapshot()!.session.counts, { tokens: 0, tools: 0, agents: 2, skills: 0, workflows: 0 })
+})
+
+test('skill loads use marked injections or successful catalogued reads, once per skill per turn', () => {
+  const r = new RolloutReader('/unused', 'thread-a', '/repo', '/home/user')
+  r.observe(meta)
+  const start = (turn_id: string) => r.observe({ type: 'event_msg', payload: { type: 'task_started', turn_id } })
+  const message = (role: string, kind: string, text: string, turn_id = 'one') => r.observe({ type: 'response_item', payload: {
+    type: 'message', role, content: [{ type: 'input_text', text }],
+    internal_chat_message_metadata_passthrough: { turn_id, content_item_kinds: [kind] },
+  } })
+  message('developer', 'host_skills.instructions', '<skills_instructions>\n### Skill roots\n- `r0` = `/repo/.agents/skills`\n### Available skills\n- alpha: Fixture. (file: r0/alpha/SKILL.md)\n- beta: Fixture. (file: /repo/.agents/skills/beta/SKILL.md)\n</skills_instructions>')
+  start('one')
+  const injection = '<skill>\n<name>alpha</name>\n<path>/repo/.agents/skills/alpha/SKILL.md</path>\ninstructions\n</skill>'
+  message('user', 'skills.selected_skill_instructions', injection)
+  message('user', 'skills.selected_skill_instructions', injection)
+  message('user', 'user.text', injection.replaceAll('alpha', 'beta'))
+  const read = (path: string, id = path, extra: Record<string, unknown> = {}, thread_id = 'thread-a', turn_id = 'one') => r.observe({ type: 'event_msg', payload: {
+    type: 'item_completed', thread_id, turn_id, item: { id, type: 'CommandExecution', source: 'unified_exec_startup',
+      cwd: 'file:///repo', parsed_cmd: [{ type: 'read', path }], status: 'completed', exit_code: 0, ...extra },
+  } })
+  read('.agents/skills/alpha/SKILL.md')
+  read('.agents/skills/beta/SKILL.md', 'failed', { exit_code: 1 })
+  read('.agents/skills/beta/SKILL.md', 'child', {}, 'child')
+  read('.agents/skills/beta/SKILL.md', 'control', { source: 'user_shell' })
+  read('/other/SKILL.md')
+  read('.agents/skills/alpha/references/details.md')
+  assert.equal(r.collector.snapshot()!.session.counts.skills, 1)
+  read('.agents/skills/beta/SKILL.md'); read('.agents/skills/beta/SKILL.md')
+  assert.equal(r.collector.snapshot()!.session.counts.skills, 2)
+  start('two')
+  read('.agents/skills/alpha/SKILL.md', 'later', {}, 'thread-a', 'two')
+  message('user', 'skills.selected_skill_instructions', injection, 'two')
+  assert.equal(r.collector.snapshot()!.session.counts.skills, 3)
+})
+
 test('the Bash entry resolves an external symlink and runs from a different cwd', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus entry '))
   try {
@@ -64,5 +113,35 @@ test('the Bash entry resolves an external symlink and runs from a different cwd'
     await symlink(resolve('bin/vargus'), link)
     const { stdout } = await promisify(execFile)(link, ['--help'], { cwd: dir })
     assert.match(stdout, /vargus on\|off\|status/)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('mixed-thread history omits agent and skill counts across later polling retries', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-mixed-history-'))
+  const file = join(dir, 'history.jsonl')
+  const start = (turn_id: string) => ({ type: 'event_msg', payload: { type: 'task_started', turn_id } })
+  const injection = (turn_id: string) => ({ type: 'response_item', payload: {
+    type: 'message', role: 'user', content: [{ type: 'input_text', text: '<skill>\n<name>alpha</name>\n<path>/repo/alpha/SKILL.md</path>\ninstructions\n</skill>' }],
+    internal_chat_message_metadata_passthrough: { turn_id, content_item_kinds: ['skills.selected_skill_instructions'] },
+  } })
+  const spawn = (id: string) => ({ type: 'event_msg', payload: { type: 'item_completed', thread_id: 'thread-a',
+    item: { type: 'SubAgentActivity', kind: 'started', id },
+  } })
+  const jsonl = (records: unknown[]) => records.map(record => JSON.stringify(record) + '\n').join('')
+  try {
+    await writeFile(file, jsonl([meta, start('own'), injection('own'), spawn('own')]))
+    const r = new RolloutReader(file, 'thread-a', '/repo', dir)
+    await r.poll()
+    assert.equal(r.collector.snapshot()!.session.counts.skills, 1)
+    assert.equal(r.collector.snapshot()!.session.counts.agents, 1)
+    await appendFile(file, jsonl([{ ...meta, payload: { ...meta.payload, id: 'parent' } }, start('copied'), injection('copied')]))
+    await assert.rejects(r.poll(), /another Codex thread/)
+    assert.equal(r.collector.snapshot()!.session.counts.skills, 0)
+    assert.equal(r.collector.snapshot()!.session.counts.agents, 0)
+    // New bytes make the existing reader resume its buffered records.
+    await appendFile(file, jsonl([start('later'), injection('later'), spawn('later')]))
+    await r.poll(); await r.poll()
+    assert.equal(r.collector.snapshot()!.session.counts.skills, 0)
+    assert.equal(r.collector.snapshot()!.session.counts.agents, 0)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

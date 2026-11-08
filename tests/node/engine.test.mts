@@ -104,7 +104,8 @@ trust_level = "trusted"
         await delay(100)
       }
       assert.match(got.row, new RegExp(`token:${tokens.replace('.', '\\.')}`), JSON.stringify(got))
-      assert.match(got.row, /gpt-6\.1-sol:low/)
+      assert.match(got.row, /sol:low/)
+      assert.doesNotMatch(got.row, /gpt-6\.1-sol/)
       assert.match(got.row, /ctx:18%/)
       assert.match(got.row, /5h:28%.*7d:61%/)
       assert.match(got.screen, /82% context left/)

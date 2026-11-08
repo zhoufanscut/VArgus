@@ -153,7 +153,8 @@ trust_level = "trusted"
     assert.equal(posts, beforeControls)
     await submit('Print a local test reply.')
     await wait(screen, /LOCAL CONTROL RESPONSE/)
-    const metrics = await wait(row, new RegExp('gpt-6\\.1-sol:low.*5h:28%.*ctx:18%.*token:' + expectedTokens.replace('.', '\\.')))
+    const metrics = await wait(row, new RegExp('sol:low.*5h:28%.*ctx:18%.*token:' + expectedTokens.replace('.', '\\.')))
+    assert.doesNotMatch(metrics, /gpt-6\.1-sol/)
     await delay(1000); let afterTurn = posts
     assert.ok(afterTurn > 0, 'Positive control: a user turn reaches the same local model counter')
     // A second official TUI makes automatic pane selection ambiguous.

@@ -26,6 +26,12 @@ const AFTER_CLAUDE = /claude[-\s]+([a-z][a-z0-9.]*)/
 // A legacy id puts the version first: the leftmost family name in it.
 const LEGACY_FAMILY = /opus|sonnet|haiku|fable/
 
+// Only the named GPT families in the checked Codex catalog are shortened.
+// Preserve other providers and model IDs rather than guessing from a suffix.
+export function shortCodexModelName(model: string): string {
+  return /^gpt-\d+(?:\.\d+)*-(astra|sol|terra|luna)$/i.exec(model.trim())?.[1]?.toLowerCase() ?? model
+}
+
 // Effort mapped onto the three tier colours, inverted so more effort reads
 // calmer: max → gradLow ... low → gradHigh, each level its own hue
 // (VantageHUD's EFFORT_COLOR). An unknown level or a numeric budget → gradLow.
@@ -41,7 +47,8 @@ export function effortColor(t: Theme, effort: string | number | undefined): Rgb 
 }
 
 export const model: Fragment = ({ v, o, t }) => {
-  const name = v.session.model === undefined ? null : v.core.host === 'codex' ? cleanText(v.session.model) : shortModelName(cleanText(v.session.model))
+  const id = v.session.model === undefined ? '' : cleanText(v.session.model)
+  const name = v.core.host === 'codex' ? (o.codexShortModel ? shortCodexModelName(id) : id) : shortModelName(id)
   if (!name) return null
   const effort = o.effort ? v.session.effort : undefined
   if (effort === undefined || effort === '') return t.paint(effortColor(t, undefined), name)

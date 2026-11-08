@@ -129,6 +129,24 @@
       "title": "tmux output",
       "description": "Publish a separate line for an explicitly launched VArgus tmux companion",
       "default": false
+    },
+    "codexShortModel": {
+      "type": "boolean",
+      "title": "Codex: short model name",
+      "description": "Shorten known Codex model IDs to astra, sol, terra or luna; has no effect in Claude",
+      "default": true
+    },
+    "codexAgentCounts": {
+      "type": "boolean",
+      "title": "Codex: subagent count",
+      "description": "Show agents started by the displayed Codex conversation; has no effect in Claude",
+      "default": true
+    },
+    "codexSkillCounts": {
+      "type": "boolean",
+      "title": "Codex: skill count",
+      "description": "Show observed skill loads in standalone Codex, once per skill per user turn; has no effect in Claude",
+      "default": true
     }
   }
 }

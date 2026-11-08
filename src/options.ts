@@ -20,6 +20,9 @@ export const DEFAULTS = {
   blankStopped: false,
   detailView: false,
   tmuxOutput: false,
+  codexShortModel: true,
+  codexAgentCounts: true,
+  codexSkillCounts: true,
 }
 
 export type Options = typeof DEFAULTS

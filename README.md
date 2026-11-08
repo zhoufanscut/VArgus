@@ -120,10 +120,32 @@ aggregated. VArgus matches Codex's contextual agent label to saved session metad
 If a popup, clipped label or ambiguous agent path prevents identification, the row
 is blank until the view can be identified again. `status` reports that pause.
 After `/new` or `/resume`, run `!vargus on` again (with pane selection if needed)
-to bind the new conversation. Its token total covers recorded uncached input and output. Tool counts replay completed visible items and exclude `!` controls;
-agent, skill and workflow counts are omitted. Missing readings stay hidden.
+to bind the new conversation. Its token total covers recorded uncached input and output.
+Tool counts replay completed visible items and exclude `!` controls. `🤖2` counts
+recorded subagent starts in the displayed conversation; `⚡3` counts observed skill
+loads, once per skill path per user turn. Workflow counts are omitted. Missing readings stay hidden.
 Ephemeral chats without a saved transcript are unsupported. Log-backed readings
 update when Codex writes them; model/effort picks are not inferred ahead of that.
+Child logs that copy parent session metadata, as observed with `fork_turns:all`,
+can initially report `The transcript belongs to another Codex thread.` through
+`status`. Later refreshes can advance past that error. Readings from these mixed
+logs remain unsupported; VArgus omits their subagent and skill counts.
+
+Codex displays known model families as `astra`, `sol`, `terra` or `luna`, for example
+`sol:xhigh`. Both `gpt-6-sol` and `gpt-6.1-sol` display `sol`; unfamiliar IDs remain
+whole. Short names, subagent counts and skill counts default to on for Codex and
+have individual switches: `codexShortModel`, `codexAgentCounts`, `codexSkillCounts`.
+Set any to `false` in a JSON options file passed with `--config` when starting the
+helper. These switches do not affect Claude. `model` and `callCounts` still control
+their whole fragments.
+
+Skill loads come from Codex's marked instruction injections or successful,
+recognizable reads of a catalogued local `SKILL.md`. Repeated loads in the same
+turn count once; loading it in a later turn counts again. Catalog entries, ordinary
+mentions, references and failed reads do not add loads. This is an observed-load
+count: cached reuse without a new load, unrecognized shell commands, and cloud or
+executor skill loaders are not covered. It does not prove the instructions were
+followed. The display uses the icon and count directly, such as `⚡3`.
 
 `on` also hides Codex's configurable footer in each recognized view you visit.
 `off` removes the tmux row immediately. A small helper restores the saved footer
@@ -196,7 +218,7 @@ plus output for observed threads, including descendants whose updates reach this
 old or unobserved child totals are not rebuilt. This differs from Claude's per-request counter
 since mod load/clear/resume. Codex tool counts cover visible lead-thread items of this launch;
 skill/workflow counts, SVN, detached-HEAD names, worktree names and the detail pane are not
-implemented for Codex. The stock-Codex launcher rejects `--profile` and an explicit `--remote`;
+implemented in this transport mode. The stock-Codex launcher rejects `--profile` and an explicit `--remote`;
 use `-c` config overrides. The bridge uses Codex's experimental Unix WebSocket transport.
 
 Startup and cleanup were checked with both real CLIs. Codex turns also run against a localhost
@@ -298,8 +320,9 @@ of the reply. If the row stays empty:
 
 ## Configure
 
-Options are shown in `/config` under the plugin. Every option that adds something is off by
-default, so an update never changes your line without you asking.
+Options are shown in `/config` under the plugin. New Claude display options default
+to off. The Codex model/counter defaults are described [above](#inside-official-codex);
+their switches have no effect on the Claude line.
 
 - **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only the usage
   colours carry hue). All but `daylight` assume a dark terminal.

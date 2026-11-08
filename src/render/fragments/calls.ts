@@ -13,9 +13,9 @@ export const calls: Fragment = ({ v, o, l, t }) => {
   const text = v.core.isWsl
   const items: [keyof typeof ICONS, number][] = [
     ['tool', c.tools],
-    ['agent', c.agents],
+    ['agent', v.core.host === 'codex' && !o.codexAgentCounts ? 0 : c.agents],
     ['workflow', o.workflowRuns ? c.workflows : 0],
-    ['skill', c.skills],
+    ['skill', v.core.host === 'codex' && !o.codexSkillCounts ? 0 : c.skills],
   ]
   const parts = items
     .filter(([, n]) => n > 0)
