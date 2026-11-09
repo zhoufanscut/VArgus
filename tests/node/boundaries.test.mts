@@ -12,9 +12,11 @@ test('shared modules have no host, display, Node or Claude API imports; host col
   const checked = await files('src')
   assert.ok(checked.includes('src/hosts/claude/register.ts'))
   assert.ok(checked.includes('src/hosts/codex/collect.ts'))
+  assert.ok(checked.includes('src/cli.ts'))
   for (const file of checked) {
     const text = await readFile(file, 'utf8')
-    const imports = [...text.matchAll(/(?:from\s+|import\s*)['"]([^'"]+)['"]/g)].map(m => m[1]!)
+    const imports = [...text.matchAll(/(?:from\s+|import\s*(?:\(\s*)?)['"]([^'"]+)['"]/g)].map(m => m[1]!)
+    for (const spec of imports) assert.ok(spec.startsWith('.') || spec.startsWith('node:') || spec === 'claude-code', `${file} imports an npm package: ${spec}`)
     if (/^src\/(core|render|theme|i18n)\//.test(file) || file === 'src/options.ts') {
       for (const spec of imports) assert.ok(!/hosts|outputs|claude-code|^node:/.test(spec), `${file} imports ${spec}`)
     }
@@ -51,4 +53,11 @@ test('the reachable Claude mod graph excludes Node code and its Node-side launch
   }
   assert.ok(visited.has(resolve('src/hosts/claude/register.ts')))
   assert.ok(visited.has(resolve('src/render/index.ts')))
+})
+
+test('user installs declare no npm runtime dependencies', async () => {
+  const pkg = JSON.parse(await readFile('package.json', 'utf8'))
+  for (const key of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
+    assert.deepEqual(pkg[key] ?? {}, {}, key)
+  }
 })

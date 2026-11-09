@@ -11,18 +11,17 @@ Notable changes to this project. The format follows
 - Standalone `!vargus on|off|status` controls inside official Codex, using a repo-local
   Bash entry, one PATH symlink and a background log reader. Explicit pane/socket
   selection handles multiple panes and custom tmux servers; TUI exit restores the bar.
-- Opt-in tmux output for Codex CLI and Claude Code through `bin/vargus <host> --tmux`.
-  The active pane supplies the row; the last wrapper restores the original tmux bar.
-- Codex app-server observer for model/effort, context, token usage, quota windows and visible
-  tool/agent items. The normal Codex TUI runs through a private local transport bridge.
+- Opt-in tmux output for Claude Code through `bin/vargus claude --tmux`, sharing
+  row lifecycle with standalone Codex. The active pane supplies the row; the last
+  owner restores the original tmux bar.
 - Claude `tmuxOutput` option (off by default), publishing a launch-local line for the wrapper.
 
 ### Changed
 
 - Run the Node CLI, hooks and background helpers directly from `.ts` source with
-  Node.js 24.12 or later. Standalone Codex controls need no npm install or build;
-  after updating, use `!vargus reload`. The optional Codex transport launcher still
-  needs `ws`; npm supplies the remaining development tools.
+  Node.js 24.12 or later. User commands need no npm install, `node_modules` folder
+  or build; after updating, use `!vargus reload`. npm dependencies are for
+  development/tests only.
 - Standalone Codex `on` hides the native footer through tmux; `off` restores its
   saved layout. Backups survive helper crashes, and composer checks block delivery
   into an existing draft. Inconclusive native commands retain recovery state. Saved
@@ -45,6 +44,11 @@ Notable changes to this project. The format follows
   Every main response now updates `ctx:` while the turn is running; a fresh session, `/clear` or
   an in-session resume starts at `ctx:0%`, and a measure just after a compaction cannot restore
   the old fill. The one-second usage poll is gone.
+
+### Removed
+
+- Experimental `vargus codex --tmux` transport launcher and its RPC observer. Start
+  ordinary Codex in tmux and use `!vargus on` instead.
 
 ## [0.3.0] - 2026-10-17
 

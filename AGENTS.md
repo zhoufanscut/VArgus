@@ -24,7 +24,7 @@ DESIGN.md "Unsettled" with a throwaway mod before building on it.
   presentation. They import no host API, host module or output adapter.
 - `src/hosts/claude` owns the mod, its collectors, state contract integration and detail pane.
   Its `launch-node.ts` is Node-side only and must stay outside the mod's import graph.
-- `src/hosts/codex` owns Codex protocol collection and transport. Host adapters do not import
+- `src/hosts/codex` owns Codex saved-session collection and metadata reads. Host adapters do not import
   each other or a display adapter.
 - `src/outputs` owns display encoding and tmux lifecycle; it imports no host code.
   `src/cli.ts` and `src/cli` wire a host to an output. Check these boundaries with `npm test`.

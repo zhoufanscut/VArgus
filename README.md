@@ -80,7 +80,7 @@ The sections below this one describe the existing Claude inline plugin.
 ### Inside official Codex
 
 VArgus stays in this clone. Requires Bash, Node.js 24.12+ and tmux. It runs the
-`.ts` source directly; no npm install or build is needed. Expose the Bash entry
+`.ts` source directly; no npm install, `node_modules` folder or build is needed. Expose the Bash entry
 through a symlink in a directory on your PATH:
 
 ```sh
@@ -128,7 +128,7 @@ An older helper without reload metadata stays running and reports how to migrate
 run `!vargus off`, then `!vargus on` with your original options once. Unreadable
 history leaves a healthy helper running. Failed replacement retains backups and
 options for another `reload`; `off` remains available for footer recovery. Reload
-does not build or install anything, and does not support `vargus codex --tmux`.
+does not build or install anything.
 
 The helper follows the displayed parent or subagent through Alt+Left/Right and
 `/subagents`. Each view shows its own recorded readings; child totals are not
@@ -195,8 +195,8 @@ Live readings resume when the view is identified again. This needs a previously
 rendered snapshot in the current helper plus the native `% context left` or matched
 `Shell mode` hint. Dialogs, explicit foreign/clipped identities and unsupported
 layouts still blank the row. Reloading discards the snapshot until a view is
-recognized again. A narrow pane may need widening
-to fit the restore command or identify the agent. A visible native statusline error
+recognized again. See [Narrow terminals and SSH](#narrow-terminals-and-ssh) for
+footer clipping and restore commands that would wrap. A visible native statusline error
 makes completion inconclusive, including an error from an earlier attempt: the
 backup remains. Resolve the error and move it out of view before retrying. This is
 TUI automation; tmux does not provide an atomic lock on Codex's editor. Simultaneous
@@ -211,6 +211,26 @@ it does not pick the newest filename. The root view stays pinned to that path.
 Saved session logs and composer recognition are version-sensitive interfaces.
 Compatibility is checked with fixtures and a live official-Codex/local-mock test
 on 0.167.0. Other prompt layouts can require a compatibility update.
+
+#### Narrow terminals and SSH
+
+Check the tmux pane's column width when switching terminals or SSH clients. A
+footer that fits one terminal can be clipped in another. There are two separate
+width limits:
+
+- **`on` reports an unknown view:** a clipped session ID can prevent recognition.
+  Shorten the native footer or widen the pane. `session-id` need not be first if
+  the entire footer fits without clipping. Putting it first in the saved layout
+  tolerates clipped later items, provided the full ID remains visible.
+- **`off` asks for a wider pane:** VArgus restores the saved layout by typing
+  `/statusline <item names>` into Codex. That command can be longer than the footer
+  it produces. VArgus currently rejects commands that would wrap; this is an
+  automation limit. The tmux row is removed immediately, but restoration stays
+  pending. Widen the pane, leave the composer empty and retry `!vargus off`.
+
+For future activations, keep the saved footer short enough for both limits.
+Changing saved settings does not replace an existing restoration backup; finish
+the pending restore before relying on a shorter layout for a new `on`/`off` cycle.
 
 ### Automatic startup in Codex
 
@@ -258,7 +278,8 @@ Add this entry to Codex's `~/.codex/hooks.json`, preserving any existing hooks:
 }
 ```
 
-Include `session-id` in your saved Codex footer selection; it can go at the tail.
+Include `session-id` in your saved Codex footer selection; it can go at the tail
+when the entire footer fits. See [Narrow terminals and SSH](#narrow-terminals-and-ssh).
 For example, merge this into the existing `[tui]` table in `~/.codex/config.toml`, retaining any other
 footer items you want restored by `!vargus off`:
 
@@ -279,11 +300,8 @@ SessionStart scans foreground Codex panes on the selected tmux server,
 with an eight-second retry deadline. It requires one full ID below a recognizably
 empty composer that matches the event's saved transcript. It then uses the normal helper to
 hide the native footer and attach the tmux row. `!vargus off` restores the saved
-selection, including its ID. For a tail ID, keep the entire native footer line
-untruncated; widen the pane or remove other items if needed. A clipped row could
-otherwise leave a UUID-valued branch or title visible after the real ID disappears.
-VArgus skips that ambiguous row. A saved first-item ID can still be recognized
-from its complete prefix when later fields are clipped. Avoid invocation or
+selection, including its ID. The [terminal-width notes](#narrow-terminals-and-ssh)
+explain when to shorten the footer or put the ID first. Avoid invocation or
 session-only footer overrides: automatic matching uses the saved layout.
 Restart Codex after changing the saved item order so its displayed layout matches.
 
@@ -314,22 +332,17 @@ through `/hooks`; use
 `!vargus off` to remove an active row. Saved footer settings are changed only by
 the setup step above; on/off still use session-only commands.
 
-### Launcher for stock Codex or Claude
+### Claude tmux launcher
 
-Both launchers run the `.ts` source directly. The Codex transport launcher needs
-its WebSocket dependency; install it once in this clone:
+Run from this clone; no npm install or `node_modules` folder is needed:
 
 ```sh
-npm ci --omit=dev
-./bin/vargus codex --tmux
-# The Claude launcher needs no npm install:
 ./bin/vargus claude --tmux
 ```
 
-Put host CLI arguments after `--`; VArgus options go before it:
+Put Claude arguments after `--`; VArgus options go before it:
 
 ```sh
-./bin/vargus codex --tmux --theme ember -- -C /path/to/project
 ./bin/vargus claude --tmux --theme ember -- --model sonnet
 ```
 
@@ -340,32 +353,14 @@ five rows is left alone. If you change its status formats while VArgus runs, you
 are kept. After a killed/crashed wrapper, run `./bin/vargus tmux-reset` inside that tmux session;
 it refuses while a wrapped process is still running.
 
-The launcher hides the host's configurable inline status line for that launch. Codex's own
-shortcut/context hint row remains. Saved settings are not edited. Claude's `tmuxOutput` option
+The launcher hides Claude's configurable inline status line for that launch. Saved settings
+are not edited. Claude's `tmuxOutput` option
 defaults to off; the wrapper enables it through command-line settings and loads this clone's
 mod with `--plugin-dir`. Enabling that option alone does not create a tmux row.
 
 Use `--config /path/to/vargus.json` for a JSON object of fragment switches and theme, with the
 same keys as the Claude plugin's `userConfig`. `NO_COLOR` disables VArgus colours. The Claude
 wrapper's explicit options apply to its inline-loaded copy, so pass your preferred theme here.
-
-Codex reads model/effort, context, usage, rate limits and visible tool/agent items from its
-app-server messages. It follows cached parent/child view switches through the visible
-contextual footer; an unrecognized or clipped view blanks the row. Missing readings
-stay hidden. Token counts are cumulative uncached input
-plus output for observed threads, including descendants whose updates reach this connection;
-old or unobserved child totals are not rebuilt. This differs from Claude's per-request counter
-since mod load/clear/resume. Codex tool counts cover visible lead-thread items of this launch;
-skill/workflow counts, SVN, detached-HEAD names, worktree names and the detail pane are not
-implemented in this transport mode. The stock-Codex launcher rejects `--profile` and an explicit `--remote`;
-use `-c` config overrides. The bridge uses Codex's experimental Unix WebSocket transport.
-
-Startup and cleanup were checked with both real CLIs. Codex turns also run against a localhost
-mock provider in the tests, checking that user metrics survive background title generation.
-Sibling subagents and repeated parent/child view switches are checked through the real
-engine with supplied mock tool calls. Compaction and V2 agent accounting also have
-protocol-fixture coverage; billed provider turns and model-chosen delegation remain unchecked.
-[DESIGN.md](DESIGN.md#hosts-and-outputs) has the source contracts and verification limits.
 
 ## Requirements
 
@@ -522,6 +517,7 @@ from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-
 - [DESIGN.md](DESIGN.md): how VArgus works, every rule with its reason, and what is still to be
   checked.
 - [AGENTS.md](AGENTS.md): working rules for coding agents in this repo.
-- Node development: `npm ci`, `npm test` (tests require Codex CLI and tmux).
+- Node development only: `npm ci`, `npm test` (tests require Codex CLI and tmux).
+  All npm dependencies are development/test tools; users run the source directly.
 - Claude checks: `claude plugin validate .`, `tsc -p .`, `claude plugin test .`,
   `sh tests/reader.test.sh`, `sh tests/manifest.test.sh` (DESIGN.md "Tests" has the details).

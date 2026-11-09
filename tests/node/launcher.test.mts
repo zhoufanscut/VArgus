@@ -1,15 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { codexServerArgs } from '../../src/cli.ts'
+import { main } from '../../src/cli.ts'
 import { claudeLaunch } from '../../src/hosts/claude/launch-node.ts'
 
-test('Codex startup config overrides reach the backend; model arguments remain TUI-owned', () => {
-  assert.deepEqual(codexServerArgs(['-c', 'model="gpt-6.1-sol"', '--enable', 'hooks', '--disable=memories', '-cfoo=true', '-m', 'gpt-6-luna']).args,
-    ['-c', 'model="gpt-6.1-sol"', '--enable', 'hooks', '--disable=memories', '-c', 'foo=true'])
-  assert.throws(() => codexServerArgs(['--profile', 'custom']), /--profile/)
-  assert.throws(() => codexServerArgs(['-pcustom']), /--profile/)
-  assert.throws(() => codexServerArgs(['--remote', 'ws://example']), /--remote/)
-  assert.equal(codexServerArgs(['-C/tmp']).cwd, '/tmp')
+test('removed Codex launcher directs users to standalone controls', async () => {
+  await assert.rejects(main(['codex', '--tmux']), /Start Codex normally in tmux and run !vargus on/)
 })
 
 test('Claude launcher enables only its launch-local publisher and hides its native command for that launch', () => {

@@ -146,7 +146,7 @@ export function hiddenDraft(screen: ViewScreen): boolean {
     && !draft.footer.some(line => line.split(' · ').some(field => isId(field.trim())))
 }
 
-// Both saved-log and transport catalogs use the same versioned UI recognition.
+// Resolve the displayed saved-log family through the versioned Codex UI.
 export function selectedView<T extends { thread: string; path?: string }>(screen: ViewScreen,
   family: T[], root: string, identity: 'first' | 'whole' | 'none' = 'whole'): T | undefined {
     if (!screen.visible || screen.command !== 'codex') return

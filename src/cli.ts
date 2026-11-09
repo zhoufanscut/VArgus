@@ -1,24 +1,17 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir, homedir } from 'node:os'
-import { join, resolve, dirname, basename } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
-import { codexLine } from './cli/line.ts'
 import { standalone, rowWorker } from './cli/codex.ts'
 import { hook } from './cli/hooks.ts'
 import { TmuxOutput } from './outputs/tmux/client.ts'
-import { CodexCollector } from './hosts/codex/collect.ts'
-import type { startBridge } from './hosts/codex/bridge.ts'
 import { claudeLaunch } from './hosts/claude/launch-node.ts'
-import { resolveOptions } from './options.ts'
-import { makeTheme } from './theme/index.ts'
 
 const HELP = `Usage:
   vargus on|off|status|reload [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
   vargus hook session-start|prompt [--config FILE] [--pane %ID] [--socket PATH]
-  vargus codex --tmux [--theme NAME] [--config FILE] -- [codex arguments]
   vargus claude --tmux [--theme NAME] [--config FILE] -- [claude arguments]
   vargus tmux-reset
 
@@ -34,29 +27,6 @@ Exit the wrapped CLI to restore the original tmux bar. After a crash, tmux-reset
 cleans up an abandoned row when no wrapped session is still running.
 `
 
-// Only server-side configuration switches are copied to app-server. Model and
-// working-directory overrides also travel in the TUI's normal thread requests.
-export function codexServerArgs(args: string[]): { args: string[]; cwd: string } {
-  const out: string[] = []
-  let cwd = process.cwd()
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!
-    if (arg === '--remote' || arg.startsWith('--remote=') || arg.startsWith('--remote-auth-token-env')) throw new Error('VArgus owns the local Codex transport; --remote is not supported.')
-    if ((arg.startsWith('-p') && !arg.startsWith('--')) || arg === '--profile' || arg.startsWith('--profile=')) throw new Error('Codex --profile is not supported by this launcher yet; use -c overrides.')
-    if (['-c', '--config', '--enable', '--disable'].includes(arg)) {
-      const value = args[++i]
-      if (value === undefined) throw new Error(`Missing value for ${arg}.`)
-      out.push(arg, value)
-    } else if (/^--(config|enable|disable)=/.test(arg)) out.push(arg)
-    else if (arg.startsWith('-c') && arg.length > 2) out.push('-c', arg.slice(2))
-    else if (arg === '-C' || arg === '--cd') cwd = resolve(args[++i] ?? cwd)
-    else if (arg.startsWith('-C') && arg.length > 2) cwd = resolve(arg.slice(2))
-    else if (arg.startsWith('--cd=')) cwd = resolve(arg.slice(5))
-  }
-  return { args: out, cwd }
-}
-
-
 export async function main(argv: string[]): Promise<number> {
   if (argv[0] === '--help' || !argv.length) { console.log(HELP); return 0 }
   if (['on', 'off', 'status', 'reload'].includes(argv[0]!)) return standalone(argv)
@@ -65,7 +35,8 @@ export async function main(argv: string[]): Promise<number> {
   if (argv[0] === '__row') return rowWorker(JSON.parse(argv[1]!))
   const [host, ...rest] = argv
   if (host === 'tmux-reset') { await TmuxOutput.environment().reset(); return 0 }
-  if (host !== 'codex' && host !== 'claude') throw new Error(HELP)
+  if (host === 'codex') throw new Error('Start Codex normally in tmux and run !vargus on. The Codex transport launcher was removed.')
+  if (host !== 'claude') throw new Error(HELP)
   const split = rest.indexOf('--')
   const flags = split < 0 ? rest : rest.slice(0, split)
   const args = split < 0 ? [] : rest.slice(split + 1)
@@ -80,13 +51,9 @@ export async function main(argv: string[]): Promise<number> {
     else throw new Error(`Unknown VArgus option: ${flag}. Put CLI arguments after --.`)
   }
   if (!enabled) throw new Error('The tmux output is off by default. Add --tmux to enable it.')
-  const o = resolveOptions({ ...given, tmuxOutput: true })
-  const t = makeTheme(o.theme, !!process.env.NO_COLOR)
   const tmux = TmuxOutput.environment()
-  const directory = await mkdtemp(join(tmpdir(), 'vargus-run-'))
   const runId = randomBytes(16).toString('hex')
   let child: ReturnType<typeof spawn> | undefined
-  let bridge: Awaited<ReturnType<typeof startBridge>> | undefined
   let claude: ReturnType<typeof claudeLaunch> | undefined
   let timer: ReturnType<typeof setInterval> | undefined
   let updating: Promise<void> | undefined
@@ -100,51 +67,22 @@ export async function main(argv: string[]): Promise<number> {
   process.on('SIGHUP', hangup)
   process.on('SIGINT', interrupt)
   try {
-    let line: (width: number) => Promise<string>
-    let command: string
-    let childArgs: string[]
-    if (host === 'codex') {
-      const { startBridge } = await import('./hosts/codex/bridge.ts')
-      const server = codexServerArgs(args)
-      const collector = new CodexCollector(server.cwd, homedir())
-      command = 'codex'
-      bridge = await startBridge({
-        socket: join(directory, 'codex.sock'), command, args: server.args,
-        env: process.env, cwd: server.cwd,
-        client: message => collector.fromClient(message),
-        server: message => collector.fromServer(message),
-      })
-      childArgs = ['--remote', bridge.endpoint, '-c', 'tui.status_line=[]', ...args]
-      const renderLine = codexLine(collector, o, t)
-      line = async width => {
-        const screen = await tmux.snapshot()
-        // tmux reports the foreground Node wrapper while its Codex child owns
-        // the terminal. Keep the ordinary Codex screen guard for other commands.
-        if (screen.command === basename(process.execPath)) screen.command = 'codex'
-        const selected = collector.displayedThread(screen)
-        return selected ? renderLine(width, selected) : ''
-      }
-    } else {
-      command = 'claude'
-      const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-      claude = claudeLaunch(root, args, runId, given)
-      childArgs = claude.args
-      line = () => claude!.line()
-    }
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+    claude = claudeLaunch(root, args, runId, given)
     await tmux.attach()
-    const update = async () => { await tmux.update(await line(await tmux.width())) }
+    const update = async () => { await tmux.update(await claude!.line()) }
     await update()
     timer = setInterval(() => {
       if (!updating) updating = update().catch(error => {
         console.error('VArgus row:', (error as Error).message)
       }).finally(() => { updating = undefined })
     }, 1000)
-    child = spawn(command, childArgs, { stdio: 'inherit', env: { ...process.env, VARGUS_TMUX_RUN_ID: runId } })
+    child = spawn('claude', claude.args, { stdio: 'inherit', env: { ...process.env, VARGUS_TMUX_RUN_ID: runId } })
     const exit = new Promise<number>((resolve, reject) => {
       child!.once('error', reject)
       child!.once('exit', (code, signal) => resolve(code ?? (signal ? 128 : 0)))
     })
-    return await Promise.race([exit, interrupted, ...(bridge ? [bridge.failure] : [])])
+    return await Promise.race([exit, interrupted])
   } finally {
     if (timer) clearInterval(timer)
     // Every resource gets its cleanup even if another cleanup fails. Keep the
@@ -163,10 +101,8 @@ export async function main(argv: string[]): Promise<number> {
         try { await exit } finally { clearTimeout(kill) }
       }
     })
-    await cleanup('Codex bridge', async () => bridge?.close())
     await cleanup('Claude alias', async () => claude?.close())
     await cleanup('tmux restore', () => tmux.detach())
-    await cleanup('temporary files', () => rm(directory, { recursive: true, force: true }))
     process.off('SIGTERM', terminate)
     process.off('SIGHUP', hangup)
     process.off('SIGINT', interrupt)

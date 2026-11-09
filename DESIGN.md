@@ -1,6 +1,6 @@
 # VArgus — design
 
-VArgus supports Claude Code through its mod and Codex CLI through a local app-server bridge.
+VArgus supports Claude Code through its mod and Codex CLI through a standalone saved-log reader.
 Both can opt into a tmux row. The existing Claude inline status line has two parts. A mod (a plugin hooks module that stays
 loaded for the whole session) hears the engine's events, keeps the numbers in memory, renders the
 line and writes it to a file. The `statusLine` command is a shell one-liner that prints that file.
@@ -41,14 +41,16 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
 - Output adapters import no host code. `src/cli.ts` and `src/cli` wire collection to display.
 - The Claude mod imports no Node code. The manifest points directly to its register module:
   Claude Code 2.1.319 validation rejects a re-exported `register` entry point.
-- The normal Claude plugin and standalone Codex helper need no npm install. The optional
-  Codex transport launcher loads `ws` only when selected; npm also supplies development tools.
-  `.test.mts` keeps Node tests outside the Claude engine's `.test.ts` runner.
+- The normal Claude plugin, standalone Codex helper and Claude tmux launcher need no npm
+  install or `node_modules` folder. npm supplies development/test tools only; `ws` is used
+  by the hook regression rig to inspect Codex's daemon. `.test.mts` keeps Node tests outside
+  the Claude engine's `.test.ts` runner.
 
 ### Opt-in tmux row
 
-`bin/vargus codex --tmux` or `bin/vargus claude --tmux` enables the output for that launch.
-Without `--tmux` the launcher refuses to change the bar. Claude's `tmuxOutput` userConfig
+`bin/vargus claude --tmux` enables the output for that Claude launch. Codex uses the
+standalone `on`/`off` controls inside ordinary Codex. Without `--tmux` the Claude launcher
+refuses to change the bar. Claude's `tmuxOutput` userConfig
 flag defaults to false; the wrapper enables it through command-line settings. Saved Claude,
 Codex and tmux configuration files are not edited.
 
@@ -114,8 +116,8 @@ marks type stripping stable from 24.12 and says "file extensions are mandatory".
 The Node graph uses explicit `.ts` imports and ordinary class fields instead of
 constructor parameter properties. Its typecheck enforces erasable syntax and
 explicit type imports. Hooks and background workers start the same source entry;
-no bundle, TypeScript loader or build step is used. The `ws` import is deferred to
-the optional Codex transport launcher so standalone controls need no npm packages.
+no bundle, TypeScript loader or build step is used. Supported runtime entry points
+use Node built-ins and local source modules; npm packages are development/test dependencies.
 The feature is off until explicit `on` or the optional startup hook enables
 `tmuxOutput` for its helper. The normal Claude mod graph does not reach this script or Node code.
 
@@ -197,6 +199,14 @@ a dim placeholder even though their drafts remain editable. Without the optional
 external frontend-selection API. Future host format changes must
 be rechecked against these limits.
 
+For native ID matching, a known first-item `session-id` layout needs the full ID
+prefix to remain visible; later fields may be clipped. Other item orders require
+an untruncated footer with one full UUID field. `views.ts` rejects an ellipsis in
+those fields rather than treating a UUID-valued branch or title as the thread.
+This makes terminal column width relevant when moving between terminals or SSH
+clients. Putting the ID first is a clipping workaround, not a requirement when
+the whole footer fits.
+
 Display recognition is separate from permission to send footer commands. On
 0.167.0, parent-owned children also keep drafts editable; only submission is
 blocked. Their contextual labels disappear while typing, so a bold live arrow is
@@ -225,8 +235,7 @@ placeholders, reversed picker arrows, or other unrecognized screens. Existing
 Main/path selection remains intact. Startup matching and footer delivery retain
 their strict empty-editor guards. Off removes the row immediately. The snapshot
 is local to one loaded helper; reload or a fresh activation needs a recognized
-view before it can hold readings. Claude and the transport launcher do not use
-this standalone holding behavior.
+view before it can hold readings. Claude does not use this standalone holding behavior.
 
 The official-TUI probes distinguished this from row allocation or helper exit:
 ordinary parent text lost selection while clearing restored it; typing the exact
@@ -418,7 +427,7 @@ to earlier supported workers.
 
 Standalone `reload` is an explicit opt-in to replacing only the pane helper with
 the current `.ts` source. It does not restart Codex, its daemon or the conversation,
-build packages, install a watcher, or apply to the separate `codex --tmux` launcher.
+build packages or install a watcher.
 The runtime record carries version-1 reload metadata: CODEX_HOME and effective
 resolved options. Supplied flags merge over those retained options in command
 order; omitted keys retain their previous values. Older workers without metadata
@@ -503,8 +512,15 @@ parse error makes completion
 inconclusive and retains the backup, even when it predates the command. A finite
 viewport cannot reliably distinguish repeated identical errors from old ones. The
 user resolves the error and moves it out of view before retrying. The adapter sends
-no erase keys. Unrecognized UI or a restore command wider than the pane fails with
-a retry message. Existing drafts are preserved in
+no erase keys. Unrecognized UI or a restore command that fails the width guard
+gets a retry message. `PaneInput.submit` rejects `text.length + 2 >= screen.width`
+before inserting any keys: the command plus the prompt prefix must fit with room
+to spare. `restoreFooter` joins the full saved item names after `/statusline`, so
+the command can exceed the width even when the rendered native footer fits.
+The tmux row is already detached; the original backup remains pending. Widening
+the pane and retrying `off` can restore it. Changing saved settings does not
+rewrite an existing backup; a shorter saved layout applies to a later activation
+after that backup has been restored. Existing drafts are preserved in
 the live tests; simultaneous typing still races with terminal observations because
 there is no atomic editor lock. Users must wait for a control to finish before
 typing or navigating. Codex's shortcut/context hint row remains after clearing footer items.
@@ -512,6 +528,17 @@ A confirmed view transition requests one full tmux client redraw; ordinary updat
 still use status-only refresh. The captured first-visit failure above involved
 blanked row content after clipped identity. Necessity of a full client redraw is
 not established by the row-visibility fixture.
+
+Observed on 2026-11-09 in a 157-column Linux tmux pane, with the user reporting a
+different terminal size through macOS SSH: the native footer ended in a clipped
+session ID and the helper reported unknown identity. Replaying the captured frame
+with the full matching ID selected the root; briefly widening the live window
+let the existing helper recognize it and clear the footer. The row remained active
+after the original width and sizing option were restored; saved config bytes were
+unchanged. A later `off` reported the restore-command width guard. After the user
+shortened the layout, its restore command passed that guard, and the user reported
+successful `on`, `off` with no pending restoration, then `on` again. This distinguishes
+displayed-footer clipping from command wrapping; neither required a code change.
 
 The live local-mock suite exercises saved defaults, explicit empty/custom layouts,
 repeated on after a saved setting change, two panes, blocked draft restoration,
@@ -528,77 +555,18 @@ user prompt through the same provider as a positive control. This establishes th
 checked 0.167.0 behavior; other composer layouts, macOS and billed endpoints remain
 unverified.
 
-### Codex through tmux
+### Codex saved-log collector
 
-Codex CLI 0.167.0 was used for the generated protocol types and the interactive startup probe.
-The [app-server documentation](https://learn.chatgpt.com/docs/app-server) defines stdio as
-"newline-delimited JSON (JSONL)" and Unix sockets as WebSocket connections. The wrapper starts
-an app-server over stdio and bridges it to a private Unix WebSocket in a temporary directory.
-The regular Codex TUI connects with `--remote unix://...`; it owns initialization, requests,
-approvals and turns. The observer forwards messages without rewriting them and adds no model
-requests or credential handling. This uses an experimental Codex transport.
+`protocol.ts` defines the normalized usage, quota and completed-item readings passed
+from `rollout.ts` to the collector. Token totals and counters belong to the selected
+saved log; child histories are not aggregated. View recognition uses saved-session
+metadata rather than an RPC-selected thread. The collector does not track frontend
+requests or maintain a transport connection.
 
-`protocol.ts` is the subset read from `codex app-server generate-ts` on 0.167.0. Regenerate to a
-scratch directory and re-check that subset when changing the supported version. The observer
-uses:
-
-- Successful `thread/start`, `thread/resume`, `thread/fork` responses for selected thread, cwd,
-  model and effort; explicit child selection is allowed. Successful `turn/start` overrides update
-  those fields. Null effort inherits the thread's effective setting. A picker choice that has
-  not reached the server is not inferred from config files. `thread/started` notifications record
-  metadata but do not select a different conversation. RPC selection is the current
-  family anchor, not proof of the displayed view: cached frontend switches can send
-  no start/resume/turn request. The launcher captures its own tmux pane on each refresh
-  and uses the shared contextual-footer recognition to choose a known family member's
-  readings. The family comes from observed `parentThreadId` and
-  `source.subAgent.thread_spawn.agent_path`; generated 0.167.0 `v2/SessionSource.ts`
-  spells the app-server variant `"subAgent"`, while saved logs use `subagent`.
-  The foreground command can be the Node launcher while its Codex child owns the
-  terminal; only this wrapper's executable name is normalized for recognition.
-  Unrecognized, clipped or ambiguous views blank the row. Selection adds no RPC and
-  does not change the server's active-thread anchor or infer a picker model choice.
-- Ephemeral helpers whose `threadSource` is `system` or `thread_title` are excluded from
-  selection and token totals, including their own frontend start/turn requests. This is the
-  same instance-level rule as `tui/src/app/app_server_events.rs` in local revision `c2bd770ca7`.
-  A local mock-provider wire capture found both the user and title threads had `source:vscode`,
-  ruling that field out as a selector. Ephemeral user chats are not hidden by this rule.
-- `thread/tokenUsage/updated` cumulative totals: uncached input plus output. Repeated updates
-  replace the reading. The selected thread and observed descendants are summed; selecting a
-  child uses that subtree. Historical/unobserved child totals are not reconstructed.
-- The same notification's `last.totalTokens` and `modelContextWindow` for context. The gauge
-  follows Codex's 12,000-token baseline allowance from `tui/src/token_usage.rs`, checked in local
-  source revision `c2bd770ca7`. Unknown context is omitted. A context-compaction item drops the
-  prior reading until another usage update.
-- `account/rateLimits/read` responses and `account/rateLimits/updated` notifications for used
-  percentages and reset times. The active model's named bucket is preferred, then `codex`.
-  Windows are labelled by their reported duration; unavailable values are omitted. Full snapshots
-  replace the cached buckets, including removed/null windows. Sparse notifications keep existing
-  non-null readings; `account/updated` clears the cached buckets.
-- Distinct lead-thread tool items for tool counts. Agent starts accept legacy `spawnAgent`
-  items and V2 `subAgentActivity` items with `kind:started`, deduplicated by canonical call item id.
-  The V2 item also supplies the child's parent relation. These count the visible item stream of
-  the launch, not every internal Code Mode call. Skills/workflows have no counter here and are
-  omitted.
-- Git porcelain through the shared parsers, polled outside rendering with the existing slow-walk
-  hold-off rule. This adapter currently omits SVN, named detached HEADs and worktree names.
-
-The wrapper hides the configurable Codex footer with an invocation-only
-`tui.status_line=[]` override. Codex's own shortcut/context hint row remains. `-c`/`--config`,
-`--enable` and `--disable` options are forwarded to app-server; `-C`/`--cd` selects its cwd,
-including attached `-Cpath`. An explicit Codex `-p`/`--profile` (including `-pname`) or `--remote`
-is rejected rather than silently using a different server configuration. The Claude detail pane
-is not registered in Codex.
-
-Startup and cleanup were probed with the real Codex 0.167.0 and Claude 2.1.319 TUIs. The
-permanent Codex engine test uses a localhost mock Responses provider and scratch CODEX_HOME:
-user turns and background title generation report different usage, so it catches helper-thread
-selection errors and checks tokens, context and quota delivery through the real engine/bridge.
-A real engine/localhost-provider regression supplies sibling spawn calls, visits each
-child, returns to Main and repeats the navigation. It checks distinct child totals
-and the parent's observed subtree total without another provider request. This
-covers cached frontend selection as well as first visits. Compaction and V2-agent
-accounting also use protocol fixtures; model-chosen delegation, billed endpoints
-and macOS remain unverified.
+The read-only stdio requests for `thread/read` and `config/read` remain under
+`hosts/codex/read.ts`: they resolve the current transcript and saved footer settings.
+VArgus does not launch or proxy the user's Codex TUI. Ordinary Codex and standalone
+controls are the supported Codex path. The live engine and footer limits above apply.
 
 ### Codex model names and call counts
 
@@ -637,8 +605,7 @@ commands and failed reads do not add loads. Polling/replaying the same history
 does not add another copy of its count. The icon is shown directly (`⚡3`), by
 maintainer choice. Unknown shell parses, cached reuse without a new load, cloud
 and executor loaders, symlink aliases, and catalog formats outside the checked
-version are outside this observed-load contract. The transport launcher still
-has no skill counter; it does not receive these saved raw instruction records.
+version are outside this observed-load contract.
 
 The real 0.167.0 app-server/localhost-provider skill test loads two scratch skills:
 explicit alpha, automatic alpha read twice in the next turn, then explicit alpha
@@ -727,7 +694,7 @@ src/hosts/claude/write.ts         Claude native line and optional tmux alias
 src/hosts/claude/paths.ts         pure Claude config/data path rules
 src/hosts/claude/view/            existing /vargus pane
 src/hosts/claude/launch-node.ts   Node launcher; outside the mod import graph
-src/hosts/codex/                 Codex protocol/log observers, view recognition, footer policy
+src/hosts/codex/                 Codex saved-log collection, view recognition, footer policy
 src/cli/                        Node-side host/output wiring and standalone controller
 src/core/                       shared readings, defaults and pure git parsers
 src/options.ts                  shared options (defaults match userConfig)
@@ -736,7 +703,7 @@ src/theme/                      palettes and ANSI colour encoding
 src/i18n/                       labels
 src/outputs/ansi.ts             decode the renderer's SGR vocabulary
 src/outputs/tmux/                tmux encoding, pane ownership and row lifecycle
-src/cli.ts                      CLI dispatch and optional host launcher
+src/cli.ts                      CLI dispatch and optional Claude launcher
 bin/vargus                      Bash symlink entry for the TypeScript CLI
 types/index.d.ts                self-contained Claude $.state contract
 tests/*.test.ts                 Claude engine and shared rendering tests
@@ -1243,7 +1210,7 @@ What the types and docs alone can't settle and no live session has settled yet; 
 
 ## Tests
 
-- `npm ci` installs development tools and the optional Codex transport dependency. `npm test`
+- `npm ci` installs development/test tools only. `npm test`
   type-checks the Node graph and runs `.test.mts` files directly in Node: boundary, protocol/log,
   real app-server/localhost mock-provider turns and isolated tmux lifecycle tests.
   Standalone tests copy source, the Bash entry and package metadata without `dist` or
