@@ -1,10 +1,10 @@
-import { CodexCollector } from '../hosts/codex/collect'
-import { readGit } from '../hosts/codex/vcs'
-import { resolveOptions } from '../options'
-import { render } from '../render'
-import { makeTheme } from '../theme'
-import { en } from '../i18n/en'
-import type { FragmentInput } from '../core/types'
+import { CodexCollector } from '../hosts/codex/collect.ts'
+import { readGit } from '../hosts/codex/vcs.ts'
+import { resolveOptions } from '../options.ts'
+import { render } from '../render/index.ts'
+import { makeTheme } from '../theme/index.ts'
+import { en } from '../i18n/en.ts'
+import type { FragmentInput } from '../core/types.ts'
 
 export function codexLine(collector: CodexCollector, o: ReturnType<typeof resolveOptions>, t: ReturnType<typeof makeTheme>) {
   let confirmed: FragmentInput | undefined

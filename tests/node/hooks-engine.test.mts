@@ -236,7 +236,7 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     await submit('/statusline model-with-reasoning current-dir session-id')
     await wait(footer, footerMatches)
     const staleEvent = { ...hookResult.input, transcript_path: seededPath!.replace('_11111111-1111-1111-1111-111111111111', '') }
-    const stale = exec(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'prompt', '--socket', socket], {
+    const stale = exec(process.execPath, [resolve('src/cli.ts'), 'hook', 'prompt', '--socket', socket], {
       cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1' },
     })
     stale.child.stdin!.end(JSON.stringify({ ...staleEvent, hook_event_name: 'UserPromptSubmit' }))
@@ -332,7 +332,7 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     assert.ok(beforeCollision.includes('…'), 'positive control: actual tail is clipped')
     assert.ok(!beforeCollision.includes(actual), 'actual complete session ID is not displayed')
     const postsBeforeReplay = posts
-    const collisionReplay = exec(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'session-start', '--socket', socket], {
+    const collisionReplay = exec(process.execPath, [resolve('src/cli.ts'), 'hook', 'session-start', '--socket', socket], {
       cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1' },
     })
     collisionReplay.child.stdin!.end(JSON.stringify(hookResult.input))
@@ -350,7 +350,7 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     await submit(command('off', '--socket ' + quote(socket)))
     await wait(row, /^$/); await wait(footer, footerMatches)
     assert.equal(posts, hookedPosts)
-    const replay = exec(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'session-start', '--socket', socket], {
+    const replay = exec(process.execPath, [resolve('src/cli.ts'), 'hook', 'session-start', '--socket', socket], {
       cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1' },
     })
     replay.child.stdin!.end(JSON.stringify(hookResult.input))

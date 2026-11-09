@@ -1,5 +1,5 @@
-import type { Fragment, FragmentInput } from '../../core/types'
-import { cleanText } from '../text'
+import type { Fragment, FragmentInput } from '../../core/types.ts'
+import { cleanText } from '../text.ts'
 
 // 9-11. repo, branch, working-tree status, for git or svn (DESIGN,
 // "Fragments"), with VantageHUD's colours (git.js, svn.js): labels in `label`,

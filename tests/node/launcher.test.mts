@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { codexServerArgs } from '../../src/cli'
-import { claudeLaunch } from '../../src/hosts/claude/launch-node'
+import { codexServerArgs } from '../../src/cli.ts'
+import { claudeLaunch } from '../../src/hosts/claude/launch-node.ts'
 
 test('Codex startup config overrides reach the backend; model arguments remain TUI-owned', () => {
   assert.deepEqual(codexServerArgs(['-c', 'model="gpt-6.1-sol"', '--enable', 'hooks', '--disable=memories', '-cfoo=true', '-m', 'gpt-6-luna']).args,

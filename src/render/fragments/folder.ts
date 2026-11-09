@@ -1,5 +1,5 @@
-import type { Fragment } from '../../core/types'
-import { cleanText, shortenHome } from '../text'
+import type { Fragment } from '../../core/types.ts'
+import { cleanText, shortenHome } from '../text.ts'
 
 // 1. folder: the working folder, `~` for home (VantageHUD's pathLabel).
 export const folder: Fragment = ({ v, t }) =>

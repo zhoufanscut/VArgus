@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Views, footerThread, footerCandidates, hiddenDraft, type ViewScreen } from '../../src/hosts/codex/views'
-import { codexComposer } from '../../src/hosts/codex/footer'
+import { Views, footerThread, footerCandidates, hiddenDraft, type ViewScreen } from '../../src/hosts/codex/views.ts'
+import { codexComposer } from '../../src/hosts/codex/footer.ts'
 
 const screen = (footer: string, composer = 'Viewing sub-agent — direct input is disabled'): ViewScreen => ({
   lines: ['old transcript mentions `/root/first`', '› ' + (['Ask Codex to do anything', 'Viewing sub-agent — direct input is disabled'].includes(composer)

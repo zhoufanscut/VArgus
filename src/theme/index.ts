@@ -1,5 +1,5 @@
-import type { Rgb, Theme, TokenName } from '../core/types'
-import { PALETTES } from './palettes'
+import type { Rgb, Theme, TokenName } from '../core/types.ts'
+import { PALETTES } from './palettes.ts'
 
 // Palettes, resolvePalette and the ANSI codes (DESIGN, "Colours", "Rules
 // carried over from VantageHUD", Themes). 24-bit SGR only: no 256/16-colour

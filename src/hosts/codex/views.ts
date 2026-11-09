@@ -1,4 +1,4 @@
-import { codexComposer } from './footer'
+import { codexComposer } from './footer.ts'
 // Codex 0.167.0's contextual footer exposes the selected agent path even when
 // configurable items are cleared. This is a versioned UI observation, not an API.
 import { createReadStream } from 'node:fs'
@@ -14,7 +14,12 @@ export class Views {
   readonly known = new Map<string, View>()
   private seen = new Set<string>()
   private ambiguous = new Set<string>()
-  constructor(private home: string, readonly root: string, private rootFile?: string) {}
+  private home: string
+  readonly root: string
+  private rootFile: string | undefined
+  constructor(home: string, root: string, rootFile?: string) {
+    this.home = home; this.root = root; this.rootFile = rootFile
+  }
   async refresh(): Promise<void> {
     const directory = join(this.home, 'sessions')
     for (const name of await readdir(directory, { recursive: true })) {

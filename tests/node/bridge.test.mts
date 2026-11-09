@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
 import { WebSocket } from 'ws'
-import { startBridge } from '../../src/hosts/codex/bridge'
-import type { Message } from '../../src/hosts/codex/protocol'
+import { startBridge } from '../../src/hosts/codex/bridge.ts'
+import type { Message } from '../../src/hosts/codex/protocol.ts'
 
 test('real Codex app-server initializes through the Unix WebSocket bridge without a model call', { timeout: 20000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-bridge-test-'))

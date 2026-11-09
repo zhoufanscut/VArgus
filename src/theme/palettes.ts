@@ -1,4 +1,4 @@
-import type { TokenName } from '../core/types'
+import type { TokenName } from '../core/types.ts'
 
 // VantageHUD 0.6.0's five bundled palettes (src/hud/themes.js), 10 hex tokens
 // each. What each token paints:

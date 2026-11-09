@@ -1,4 +1,4 @@
-import type { Fragment } from '../../core/types'
+import type { Fragment } from '../../core/types.ts'
 
 // 6. tokens: `token:69.5k`, the session's input + output tokens
 // (src/hosts/claude/collect/session.ts says what counts) (DESIGN, "Fragments"; VantageHUD's

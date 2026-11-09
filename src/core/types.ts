@@ -1,8 +1,8 @@
-import type { Labels } from '../i18n'
-import type { Options } from '../options'
-import type { SessionValues } from './session'
-import type { LimitsValues } from './limits'
-import type { VcsValues } from './vcs'
+import type { Labels } from '../i18n/index.ts'
+import type { Options } from '../options.ts'
+import type { SessionValues } from './session.ts'
+import type { LimitsValues } from './limits.ts'
+import type { VcsValues } from './vcs.ts'
 
 // The shared contract between collectors, fragments and the composer
 // (DESIGN, "How it works"). Each area owns its own values type.

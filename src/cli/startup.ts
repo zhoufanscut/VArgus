@@ -1,10 +1,10 @@
 import { access, mkdir, writeFile, rm } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import { applicationTargets, type Target } from '../outputs/tmux/target'
-import { PaneInput } from '../outputs/tmux/input'
-import { footerThread, footerCandidates } from '../hosts/codex/hooks'
-import { withControlLock } from './lock'
+import { applicationTargets, type Target } from '../outputs/tmux/target.ts'
+import { PaneInput } from '../outputs/tmux/input.ts'
+import { footerThread, footerCandidates } from '../hosts/codex/hooks.ts'
+import { withControlLock } from './lock.ts'
 
 // Broadcast within the selected tmux server. A full current footer ID is the
 // binding; neither shared-daemon ancestry nor inherited terminal variables bind it.

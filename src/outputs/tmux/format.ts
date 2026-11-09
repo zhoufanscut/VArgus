@@ -1,4 +1,4 @@
-import { ansiRuns } from '../ansi'
+import { ansiRuns } from '../ansi.ts'
 
 export const TMUX_PADDING = '  '
 

@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 import { mkdtemp, rm, mkdir, writeFile, chmod } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { TmuxOutput } from '../../src/outputs/tmux/client'
+import { TmuxOutput } from '../../src/outputs/tmux/client.ts'
 import { fileURLToPath } from 'node:url'
 
 const exec = promisify(execFile)
@@ -86,7 +86,7 @@ test('real tmux: reset refuses a live owner and restores an abandoned row after 
     const code = `import { TmuxOutput } from ${JSON.stringify(module)};
       const o = new TmuxOutput(${JSON.stringify(r.socket)}, ${JSON.stringify(r.pane)}, ${JSON.stringify(r.root)});
       await o.attach(); await o.update('abandoned row');`
-    await exec(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code])
+    await exec(process.execPath, ['--input-type=module', '-e', code])
     assert.equal(await r.run('show-options', '-v', '-t', 'test', 'status'), '2')
     await new TmuxOutput(r.socket, r.pane, r.root).reset()
     assert.equal(await r.run('show-options', '-t', 'test'), before)
@@ -120,7 +120,7 @@ test('real concurrent processes can start and exit without losing the session lo
           const o = new TmuxOutput(${JSON.stringify(r.socket)}, ${JSON.stringify(pane)}, ${JSON.stringify(r.root)});
           await o.attach(); await o.update('concurrent owner');
           await new Promise(r => setTimeout(r, ${index * 3})); await o.detach();`
-        return exec(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code])
+        return exec(process.execPath, ['--input-type=module', '-e', code])
       }))
       for (const result of results) assert.equal(result.status, 'fulfilled', result.status === 'rejected' ? String(result.reason) : '')
       assert.equal(await r.run('show-options', '-t', 'test'), before)

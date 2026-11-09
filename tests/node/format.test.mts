@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ansiRuns } from '../../src/outputs/ansi'
-import { tmuxLine } from '../../src/outputs/tmux/format'
-import { makeTheme } from '../../src/theme'
+import { ansiRuns } from '../../src/outputs/ansi.ts'
+import { tmuxLine } from '../../src/outputs/tmux/format.ts'
+import { makeTheme } from '../../src/theme/index.ts'
 
 test('tmux preserves theme colour, nested bold and literal format-like text without raw escapes', () => {
   const t = makeTheme('graphite', false)

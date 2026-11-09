@@ -1,6 +1,6 @@
-import type { Fragment, Theme } from '../../core/types'
-import { MAX_STALE_MS } from '../../core/limits'
-import { formatDuration } from '../format'
+import type { Fragment, Theme } from '../../core/types.ts'
+import { MAX_STALE_MS } from '../../core/limits.ts'
+import { formatDuration } from '../format.ts'
 
 // The rate limits (DESIGN, "Fragments" row 3; "Rules carried over from
 // VantageHUD": Limits display, Usage cache and staleness):

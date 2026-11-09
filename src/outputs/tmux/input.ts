@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { setTimeout as delay } from 'node:timers/promises'
-import type { Target } from './target'
+import type { Target } from './target.ts'
 
 const exec = promisify(execFile)
 export type PaneSnapshot = { lines: string[]; x: number; y: number; width: number; visible: boolean; command: string }
@@ -9,7 +9,8 @@ export type PaneSnapshot = { lines: string[]; x: number; y: number; width: numbe
 // The host supplies its composer recognition. Never erase input, and recheck the
 // complete inserted command before submitting: a changed draft must not be sent.
 export class PaneInput {
-  constructor(private target: Pick<Target, 'socket' | 'pane'>) {}
+  private target: Pick<Target, 'socket' | 'pane'>
+  constructor(target: Pick<Target, 'socket' | 'pane'>) { this.target = target }
   private async tmux(...args: string[]) {
     return (await exec('tmux', ['-S', this.target.socket, ...args], { timeout: 5000 })).stdout
   }

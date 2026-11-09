@@ -5,15 +5,15 @@ import { join, resolve, dirname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
-import { codexLine } from './cli/line'
-import { standalone, rowWorker } from './cli/codex'
-import { hook } from './cli/hooks'
-import { TmuxOutput } from './outputs/tmux/client'
-import { CodexCollector } from './hosts/codex/collect'
-import { startBridge } from './hosts/codex/bridge'
-import { claudeLaunch } from './hosts/claude/launch-node'
-import { resolveOptions } from './options'
-import { makeTheme } from './theme'
+import { codexLine } from './cli/line.ts'
+import { standalone, rowWorker } from './cli/codex.ts'
+import { hook } from './cli/hooks.ts'
+import { TmuxOutput } from './outputs/tmux/client.ts'
+import { CodexCollector } from './hosts/codex/collect.ts'
+import type { startBridge } from './hosts/codex/bridge.ts'
+import { claudeLaunch } from './hosts/claude/launch-node.ts'
+import { resolveOptions } from './options.ts'
+import { makeTheme } from './theme/index.ts'
 
 const HELP = `Usage:
   vargus on|off|status|reload [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
@@ -28,7 +28,7 @@ on their next empty-composer visit. The helper exits after restoration or TUI ex
 FILE is a JSON object of VArgus options; no saved host settings change.
 Standalone drafts keep last-confirmed readings by default. Installed
 Codex startup hooks are enabled by default; neither needs an options file.
-After rebuilding, reload replaces the standalone helper and retains its options
+After updating, reload replaces the standalone helper and retains its options
 and on/off mode. Supplied options override retained values. Codex keeps running.
 Exit the wrapped CLI to restore the original tmux bar. After a crash, tmux-reset
 cleans up an abandoned row when no wrapped session is still running.
@@ -104,6 +104,7 @@ export async function main(argv: string[]): Promise<number> {
     let command: string
     let childArgs: string[]
     if (host === 'codex') {
+      const { startBridge } = await import('./hosts/codex/bridge.ts')
       const server = codexServerArgs(args)
       const collector = new CodexCollector(server.cwd, homedir())
       command = 'codex'

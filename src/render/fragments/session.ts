@@ -1,5 +1,5 @@
-import type { Fragment } from '../../core/types'
-import { formatDuration } from '../format'
+import type { Fragment } from '../../core/types.ts'
+import { formatDuration } from '../format.ts'
 
 // 7. session time: `session:24m`, since $.session.usage().startedAt: a resumed
 // session's whole age, /clear starting it over (DESIGN, "Fragments";

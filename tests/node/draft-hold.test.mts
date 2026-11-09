@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { CodexCollector } from '../../src/hosts/codex/collect'
-import { codexLine } from '../../src/cli/line'
-import { resolveOptions } from '../../src/options'
-import { makeTheme } from '../../src/theme'
-import { stringWidth } from '../../src/render/width'
+import { CodexCollector } from '../../src/hosts/codex/collect.ts'
+import { codexLine } from '../../src/cli/line.ts'
+import { resolveOptions } from '../../src/options.ts'
+import { makeTheme } from '../../src/theme/index.ts'
+import { stringWidth } from '../../src/render/width.ts'
 
 test('paused readings clone the last rendered values and time by default', async t => {
   let now = 60000

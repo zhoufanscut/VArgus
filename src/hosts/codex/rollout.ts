@@ -2,10 +2,10 @@
 // Hooks document this format as unstable; keep fixtures and live checks current.
 import { open, readdir, realpath } from 'node:fs/promises'
 import { join, relative, isAbsolute, sep } from 'node:path'
-import { codexRead } from './read'
-import { CodexCollector } from './collect'
-import { SkillLoads } from './skills'
-import type { Usage } from './protocol'
+import { codexRead } from './read.ts'
+import { CodexCollector } from './collect.ts'
+import { SkillLoads } from './skills.ts'
+import type { Usage } from './protocol.ts'
 
 type RecordLine = { type: string; timestamp?: string; ordinal?: number; payload: any }
 const usage = (u: any): Usage => ({ inputTokens: u.input_tokens, cachedInputTokens: u.cached_input_tokens,
@@ -61,7 +61,10 @@ export class RolloutReader {
   private countersAttributed = true
   private historyStart: number | undefined
   private historyError: string | undefined
-  constructor(private file: string, private thread: string, cwd: string, home: string) {
+  private file: string
+  private thread: string
+  constructor(file: string, thread: string, cwd: string, home: string) {
+    this.file = file; this.thread = thread
     this.collector = new CodexCollector(cwd, home)
   }
 

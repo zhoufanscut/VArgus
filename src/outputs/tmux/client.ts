@@ -5,8 +5,8 @@ import { mkdir, readFile, writeFile, unlink, rmdir, readdir, rename } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { PaneInput } from './input'
-import { tmuxLine, TMUX_PADDING } from './format'
+import { PaneInput } from './input.ts'
+import { tmuxLine, TMUX_PADDING } from './format.ts'
 
 const exec = promisify(execFile)
 type Owner = { pid: number; pane: string; token: string; priorLine?: string }
@@ -25,7 +25,11 @@ export class TmuxOutput {
   private owner: Owner
   private attached = false
 
-  constructor(private socket: string, private pane: string, private stateRoot = join(tmpdir(), `vargus-tmux-${process.getuid?.() ?? 'user'}`)) {
+  private socket: string
+  private pane: string
+  private stateRoot: string
+  constructor(socket: string, pane: string, stateRoot = join(tmpdir(), `vargus-tmux-${process.getuid?.() ?? 'user'}`)) {
+    this.socket = socket; this.pane = pane; this.stateRoot = stateRoot
     if (!/^%\d+$/.test(pane)) throw new Error('VArgus needs a tmux pane (TMUX_PANE).')
     this.owner = { pid: process.pid, pane, token: randomUUID() }
   }

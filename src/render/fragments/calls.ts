@@ -1,4 +1,4 @@
-import type { Fragment } from '../../core/types'
+import type { Fragment } from '../../core/types.ts'
 
 // 8. call counts: `🔧73 🤖2 ⚡1`, with workflow runs `🔧73 🤖2 🔀1 ⚡1` when that
 // option is on; as text (`T:73 A:2 W:1 S:1`) on WSL, whose terminals may draw

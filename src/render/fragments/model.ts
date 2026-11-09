@@ -1,5 +1,5 @@
-import type { Fragment, Rgb, Theme } from '../../core/types'
-import { cleanText } from '../text'
+import type { Fragment, Rgb, Theme } from '../../core/types.ts'
+import { cleanText } from '../text.ts'
 
 // 2. model: the model's short name, with `:effort` when the effort option is on
 // and the model has one (`opus:high`) (DESIGN, "Fragments"; VantageHUD's

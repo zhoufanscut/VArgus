@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { CodexCollector } from '../../src/hosts/codex/collect'
-import { render } from '../../src/render'
-import { DEFAULTS } from '../../src/options'
-import { makeTheme } from '../../src/theme'
-import { en } from '../../src/i18n/en'
+import { CodexCollector } from '../../src/hosts/codex/collect.ts'
+import { render } from '../../src/render/index.ts'
+import { DEFAULTS } from '../../src/options.ts'
+import { makeTheme } from '../../src/theme/index.ts'
+import { en } from '../../src/i18n/en.ts'
 
 const thread = (id: string, parentThreadId: string | null = null) => ({ id, parentThreadId, cwd: '/repo', createdAt: 1, model: 'gpt-6.1-sol', reasoningEffort: 'high' })
 function start(c: CodexCollector, id = 'main') {

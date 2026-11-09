@@ -6,8 +6,8 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { hookSession, footerThread } from '../../src/hosts/codex/hooks'
-import { DEFAULTS } from '../../src/options'
+import { hookSession, footerThread } from '../../src/hosts/codex/hooks.ts'
+import { DEFAULTS } from '../../src/options.ts'
 
 test('SessionStart derives identity from the transcript independently of creation metadata', async () => {
   const home = await mkdtemp(join(tmpdir(), 'vargus-hook-input-'))
@@ -39,7 +39,7 @@ for (const command of ['session-start', 'prompt']) test(`disabled ${command} exi
   const options = join(dir, 'options.json')
   await writeFile(options, JSON.stringify({ codexAutoStart: false }))
   try {
-    const child = spawn(process.execPath, [resolve('dist/cli.mjs'), 'hook', command, '--config', options], {
+    const child = spawn(process.execPath, [resolve('src/cli.ts'), 'hook', command, '--config', options], {
       env: { ...process.env, VARGUS_CLI_MAIN: '1' }, stdio: ['pipe', 'pipe', 'pipe'],
     })
     let output = '', errors = ''
@@ -80,7 +80,7 @@ test('startup identity requires the complete ID below a live empty composer', ()
 test('broadcast matches one exact pane, rejects duplicates and preserves manual off', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hook-broadcast-'))
   const path = process.env.PATH
-  const { startupTarget, startupControl, startupDirectory } = await import('../../src/cli/startup')
+  const { startupTarget, startupControl, startupDirectory } = await import('../../src/cli/startup.ts')
   try {
     const screens = join(dir, 'screens.json')
     const set = async (ids: string[]) => writeFile(screens, JSON.stringify(ids.map(id => fixtureScreen(id).lines)))
@@ -91,7 +91,7 @@ import{readFileSync}from'node:fs';const args=process.argv.slice(2);if(args.inclu
     process.env.PATH = dir + ':' + path
     const target = { socket: '/scratch/socket', pane: '%0', pid: 810001 }
     await set([first, second])
-    assert.deepEqual(await startupTarget(first), target, JSON.stringify(await new (await import('../../src/outputs/tmux/input')).PaneInput(target).snapshot()))
+    assert.deepEqual(await startupTarget(first), target, JSON.stringify(await new (await import('../../src/outputs/tmux/input.ts')).PaneInput(target).snapshot()))
     assert.equal(await startupTarget(first, undefined, '%1'), undefined)
     assert.equal(await startupTarget('01a10000-0000-0000-0000-000000000000'), undefined, 'stale or detached thread has no matching pane')
     await set([first, first])
@@ -130,8 +130,8 @@ test('ordinary off before first attachment suppresses a delayed automatic start'
   const previous = { PATH: process.env.PATH, CODEX_HOME: process.env.CODEX_HOME,
     TMPDIR: process.env.TMPDIR, CODEX_THREAD_ID: process.env.CODEX_THREAD_ID }
   const home = join(dir, 'codex')
-  const { standalone } = await import('../../src/cli/codex')
-  const { startupTarget, startupDirectory, startupControl } = await import('../../src/cli/startup')
+  const { standalone } = await import('../../src/cli/codex.ts')
+  const { startupTarget, startupDirectory, startupControl } = await import('../../src/cli/startup.ts')
   try {
     await mkdir(startupDirectory(home), { recursive: true })
     await writeFile(join(dir, 'tmux'), `#!${process.execPath}
@@ -159,7 +159,7 @@ const a=process.argv;if(a.includes('list-panes'))console.log('/scratch/socket\\t
 test('prompt fallback skips config reads when the native ID is hidden or off is remembered', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hook-fast-'))
   const home = join(dir, 'home'), marker = join(dir, 'config-read'), display = join(dir, 'display.json')
-  const { startupDirectory, startupControl } = await import('../../src/cli/startup')
+  const { startupDirectory, startupControl } = await import('../../src/cli/startup.ts')
   try {
     await mkdir(join(home, 'sessions'), { recursive: true })
     await mkdir(startupDirectory(home), { recursive: true })
@@ -173,7 +173,7 @@ const fs=require('node:fs');if(process.argv.includes('list-panes'))console.log('
 require('node:fs').appendFileSync(${JSON.stringify(marker)},'read\\n');process.exit(91);
 `, { mode: 0o755 })
     const invoke = async () => {
-      const child = spawn(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'prompt'], {
+      const child = spawn(process.execPath, [resolve('src/cli.ts'), 'hook', 'prompt'], {
         env: { ...process.env, PATH: dir + ':' + process.env.PATH, CODEX_HOME: home, VARGUS_CLI_MAIN: '1' },
         stdio: ['pipe', 'pipe', 'pipe'],
       })
@@ -201,7 +201,7 @@ require('node:fs').appendFileSync(${JSON.stringify(marker)},'read\\n');process.e
 for (const command of ['session-start', 'prompt']) test(`${command} rejects an explicit missing options file`, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hook-missing-'))
   try {
-    const child = spawn(process.execPath, [resolve('dist/cli.mjs'), 'hook', command, '--config', join(dir, 'missing.json')], {
+    const child = spawn(process.execPath, [resolve('src/cli.ts'), 'hook', command, '--config', join(dir, 'missing.json')], {
       env: { ...process.env, VARGUS_CLI_MAIN: '1' }, stdio: ['pipe', 'pipe', 'pipe'],
     })
     let errors = ''; child.stderr.on('data', data => { errors += data }); child.stdin.end('{}')

@@ -4,12 +4,12 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { findRollout } from '../hosts/codex/rollout'
-import { resolveOptions } from '../options'
-import { hookSession } from '../hosts/codex/hooks'
+import { findRollout } from '../hosts/codex/rollout.ts'
+import { resolveOptions } from '../options.ts'
+import { hookSession } from '../hosts/codex/hooks.ts'
 import { setTimeout as delay } from 'node:timers/promises'
-import { savedFooter } from '../hosts/codex/footer'
-import { startupTarget, startupHint, startupDirectory, startupSuppressed } from './startup'
+import { savedFooter } from '../hosts/codex/footer.ts'
+import { startupTarget, startupHint, startupDirectory, startupSuppressed } from './startup.ts'
 
 const exec = promisify(execFile)
 
@@ -55,7 +55,7 @@ export async function hook(args: string[]): Promise<number> {
       if (target) {
         // Recheck under the same pane lock used by manual controls. Capture all
         // stdout: SessionStart text would otherwise become model context.
-        await exec(process.execPath, [fileURLToPath(import.meta.url), '__hook-on', ...flags,
+        await exec(process.execPath, [fileURLToPath(new URL('../cli.ts', import.meta.url)), '__hook-on', ...flags,
           '--socket', target.socket, '--pane', target.pane], {
           cwd: session.cwd, env: { ...process.env, CODEX_THREAD_ID: session.thread, VARGUS_CODEX_TRANSCRIPT: session.transcript, VARGUS_CLI_MAIN: '1' },
         })

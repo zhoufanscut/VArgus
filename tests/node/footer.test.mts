@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { codexComposer, restoreFooter, FooterSettings } from '../../src/hosts/codex/footer'
+import { codexComposer, restoreFooter, FooterSettings } from '../../src/hosts/codex/footer.ts'
 
 const screen = (line: string, x = 2) => ({ lines: [line], x, y: 0, visible: true, command: 'codex' })
 test('footer selection keeps saved-empty distinct from defaults and custom order', () => {

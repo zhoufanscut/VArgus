@@ -19,6 +19,10 @@ Notable changes to this project. The format follows
 
 ### Changed
 
+- Run the Node CLI, hooks and background helpers directly from `.ts` source with
+  Node.js 24.12 or later. Standalone Codex controls need no npm install or build;
+  after updating, use `!vargus reload`. The optional Codex transport launcher still
+  needs `ws`; npm supplies the remaining development tools.
 - Standalone Codex `on` hides the native footer through tmux; `off` restores its
   saved layout. Backups survive helper crashes, and composer checks block delivery
   into an existing draft. Inconclusive native commands retain recovery state. Saved

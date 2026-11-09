@@ -1,9 +1,9 @@
-import { selectedView, type ViewScreen } from './views'
-import { initialSession } from '../../core/session'
-import { initialLimits, type RateLimit } from '../../core/limits'
-import { initialVcs } from '../../core/vcs'
-import type { Values } from '../../core/types'
-import type { Item, Limits, Message, Thread, TokenUsage } from './protocol'
+import { selectedView, type ViewScreen } from './views.ts'
+import { initialSession } from '../../core/session.ts'
+import { initialLimits, type RateLimit } from '../../core/limits.ts'
+import { initialVcs } from '../../core/vcs.ts'
+import type { Values } from '../../core/types.ts'
+import type { Item, Limits, Message, Thread, TokenUsage } from './protocol.ts'
 
 const TOOL_ITEMS = new Set(['commandExecution', 'fileChange', 'mcpToolCall', 'dynamicToolCall', 'collabAgentToolCall', 'webSearch', 'imageGeneration', 'imageView'])
 type State = { values: Values; seen: Set<string>; agentItems: Set<string>; usage: number; parent?: string; path?: string; hidden: boolean }
@@ -16,7 +16,12 @@ export class CodexCollector {
   private limits = new Map<string, Limits>()
   active: string | undefined
 
-  constructor(private cwd: string, private home: string | undefined, private now = Date.now) {}
+  private cwd: string
+  private home: string | undefined
+  private now: typeof Date.now
+  constructor(cwd: string, home: string | undefined, now = Date.now) {
+    this.cwd = cwd; this.home = home; this.now = now
+  }
 
   private state(id: string): State {
     let state = this.threads.get(id)

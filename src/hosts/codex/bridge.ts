@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
 import { WebSocketServer, WebSocket } from 'ws'
-import type { Message } from './protocol'
+import type { Message } from './protocol.ts'
 
 // A local transport bridge: the normal Codex TUI owns initialization, requests,
 // approvals and turns. Observation adds no requests or model calls.

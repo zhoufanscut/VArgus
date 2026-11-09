@@ -3,14 +3,14 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename, cp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
-import { PaneInput } from '../../src/outputs/tmux/input'
-import { startupDirectory, startupSuppressed, startupControl } from '../../src/cli/startup'
-import { codexComposer } from '../../src/hosts/codex/footer'
+import { PaneInput } from '../../src/outputs/tmux/input.ts'
+import { startupDirectory, startupSuppressed, startupControl } from '../../src/cli/startup.ts'
+import { codexComposer } from '../../src/hosts/codex/footer.ts'
 
 const exec = promisify(execFile)
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
@@ -24,6 +24,10 @@ for (const fixture of [
   const dir = await mkdtemp(join(tmpdir(), 'vargus-standalone-test-'))
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
   for (const folder of [cfg, project, temporary]) await mkdir(folder)
+  // Exercise a source-only install: no dist or node_modules is copied.
+  const install = join(dir, 'install')
+  for (const name of ['src', 'bin', 'package.json']) await cp(resolve(name), join(install, name), { recursive: true })
+  const entry = join(install, 'bin/vargus')
   const env = { ...process.env, CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
     NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', TMUX: '', TMUX_PANE: '' }
   let posts = 0
@@ -101,7 +105,7 @@ trust_level = "trusted"
       assert.doesNotMatch(await activity(), /^• (?:Running|Working) /m)
     }
   }
-  const command = (action: string, extra = '') => '!COLUMNS=80 ' + quote(resolve('bin/vargus')) + ' ' + action + (extra ? ' ' + extra : '')
+  const command = (action: string, extra = '') => '!COLUMNS=80 ' + quote(entry) + ' ' + action + (extra ? ' ' + extra : '')
   try {
     // This daemon starts outside tmux: !command must not rely on inherited pane variables.
     await exec('codex', ['app-server', 'daemon', 'start'], { env })
@@ -182,18 +186,18 @@ trust_level = "trusted"
       const beforeUpgrade = await runtime()
       // Load a separate legacy-style worker: it reports v5 and retains the old
       // false option. Bare on must replace that Node process and drop the key.
-      await symlink(resolve('node_modules'), join(dir, 'node_modules'))
-      const oldPath = join(dir, 'legacy.mjs')
-      let old = await readFile(resolve('dist/cli.mjs'), 'utf8')
-      for (const [from, to] of [
-        ['var workerVersion = 6;', 'var workerVersion = 5;'],
-        ['var DEFAULTS = {', 'var DEFAULTS = { codexDraftHold: false,'],
-        ['const hold = !!(lastReadings', 'const hold = !!(options.codexDraftHold && lastReadings'],
+      const legacyRoot = join(dir, 'legacy')
+      await cp(install, legacyRoot, { recursive: true })
+      const oldPath = join(legacyRoot, 'src/cli.ts')
+      for (const [file, from, to] of [
+        ['src/cli/codex.ts', 'const workerVersion = 6', 'const workerVersion = 5'],
+        ['src/options.ts', 'export const DEFAULTS = {', 'export const DEFAULTS = { codexDraftHold: false,'],
+        ['src/cli/codex.ts', 'const hold = !!(lastReadings', 'const hold = !!(options.codexDraftHold && lastReadings'],
       ] as const) {
+        const path = join(legacyRoot, file), old = await readFile(path, 'utf8')
         assert.equal(old.split(from).length, 2, from)
-        old = old.replace(from, to)
+        await writeFile(path, old.replace(from, to))
       }
-      await writeFile(oldPath, old)
       await exec(process.execPath, [oldPath, 'reload', '--config', optionsFile, '--theme', 'ember'], {
         cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1', CODEX_THREAD_ID: beforeUpgrade.thread },
       })
@@ -202,7 +206,7 @@ trust_level = "trusted"
       assert.equal(legacy.reload.options.codexDraftHold, false)
       const backupName = (await readdir(footerDir))[0]!
       const backup = await readFile(join(footerDir, backupName), 'utf8')
-      const upgraded = await exec(resolve('bin/vargus'), ['on'], {
+      const upgraded = await exec(entry, ['on'], {
         cwd: project, env: { ...env, CODEX_THREAD_ID: legacy.thread },
       })
       assert.match(upgraded.stdout, /helper upgraded/)
@@ -264,14 +268,17 @@ trust_level = "trusted"
       const first = await runtime()
       const backupName = (await readdir(footerDir))[0]!
       const original = await readFile(join(footerDir, backupName), 'utf8')
-      // A separate built entry proves replacement loads changed code, rather
+      // A separate source tree proves replacement loads changed code, rather
       // than acknowledging a request in the old Node process.
-      const bundlePath = join(dir, 'cli.mjs')
-      const bundle = await readFile(resolve('dist/cli.mjs'), 'utf8')
-      assert.ok(bundle.includes('await output.update(line);'))
-      const changed = bundle.replace('await output.update(line);', 'await output.update(line + " RELOAD_BUILD_B");')
-      await writeFile(bundlePath, changed)
-      const control = (action: string, flags: string[] = []) => exec(process.execPath, [bundlePath, action, ...flags], {
+      const replacement = join(dir, 'replacement')
+      await cp(install, replacement, { recursive: true })
+      const entryPath = join(replacement, 'src/cli.ts')
+      const sourcePath = join(replacement, 'src/cli/codex.ts')
+      const source = await readFile(sourcePath, 'utf8'), entrySource = await readFile(entryPath, 'utf8')
+      assert.equal(source.split('await output.update(line)').length, 2)
+      const changed = source.replace('await output.update(line)', 'await output.update(line + " RELOAD_SOURCE_B")')
+      await writeFile(sourcePath, changed)
+      const control = (action: string, flags: string[] = []) => exec(process.execPath, [entryPath, action, ...flags], {
         cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1', CODEX_THREAD_ID: first.thread },
       })
       // PID/token verification and TUI identity checks precede replacement.
@@ -289,7 +296,7 @@ trust_level = "trusted"
       assert.equal((await runtime()).pid, first.pid, 'unreadable transcript keeps healthy helper')
       await rename(first.transcript + '.held', first.transcript)
       assert.match((await control('reload')).stdout, /helper reloaded/)
-      await wait(row, /RELOAD_BUILD_B/)
+      await wait(row, /RELOAD_SOURCE_B/)
       const second = await runtime()
       assert.notEqual(second.pid, first.pid)
       assert.notEqual(second.token, first.token)
@@ -308,17 +315,17 @@ trust_level = "trusted"
       assert.equal((await runtime()).reload.options.codexAgentCounts, false)
       assert.equal((await runtime()).reload.options.theme, 'graphite')
       // Replacement failure keeps the handoff and backups for the next command.
-      await writeFile(bundlePath, 'if (process.argv[2] === "__row") throw new Error("CONTROLLED_START_FAILURE");\n' + changed)
+      await writeFile(entryPath, 'if (process.argv[2] === "__row") throw new Error("CONTROLLED_START_FAILURE");\n' + entrySource)
       await assert.rejects(control('reload'), /CONTROLLED_START_FAILURE.*Footer backups.*retained/s)
       assert.equal(await row(), '')
       assert.equal(await readFile(join(footerDir, backupName), 'utf8'), original)
-      await writeFile(bundlePath, changed)
+      await writeFile(entryPath, entrySource)
       await control('reload')
-      await wait(row, /RELOAD_BUILD_B/)
+      await wait(row, /RELOAD_SOURCE_B/)
       assert.equal((await runtime()).reload.options.session, true)
       assert.equal(posts, afterTurn, 'reloads make no provider request; normal prompt above is positive control')
       console.log(JSON.stringify({ reload: { firstPid: first.pid, replacementPid: second.pid, tuiPid: second.target.pid,
-        thread: second.thread, marker: 'RELOAD_BUILD_B', tokens: '6.4k', postsBefore: afterTurn, postsAfter: posts } }))
+        thread: second.thread, marker: 'RELOAD_SOURCE_B', tokens: '6.4k', postsBefore: afterTurn, postsAfter: posts } }))
     }
     // A second official TUI makes automatic pane selection ambiguous.
     const firstPane = pane
@@ -330,7 +337,7 @@ trust_level = "trusted"
     afterTurn = posts
     const identity = await wait(footer, /[0-9a-f]{8}-[0-9a-f-]{27}/)
     const secondThread = identity.match(/[0-9a-f]{8}-[0-9a-f-]{27}/)![0]
-    const secondControl = (action: string, flags: string[] = []) => exec(resolve('bin/vargus'), [action, ...flags], {
+    const secondControl = (action: string, flags: string[] = []) => exec(entry, [action, ...flags], {
       cwd: project, env: { ...env, CODEX_THREAD_ID: secondThread },
     })
     await assert.rejects(secondControl('on', ['--socket', socket]), /Select one codex pane/)
@@ -367,7 +374,7 @@ trust_level = "trusted"
       }), /off interrupted/)
       const previous = JSON.parse(await readFile(join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`, activeFile), 'utf8'))
       assert.equal(previous.mode, 'on')
-      const result = await exec(resolve('bin/vargus'), ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+      const result = await exec(entry, ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
       assert.match(result.stdout, /helper reloaded.*VArgus is off/s)
       const replacement = JSON.parse(await readFile(join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`, activeFile), 'utf8'))
       assert.notEqual(replacement.pid, previous.pid)
@@ -375,7 +382,7 @@ trust_level = "trusted"
       assert.equal(await row(), '')
       assert.equal(await startupSuppressed(cfg, active.target, active.thread), true)
     }
-    const deferred = await exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+    const deferred = await exec(entry, ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
     assert.match(deferred.stdout, /VArgus is off;.*pending restoration/)
     assert.equal(await row(), '')
     const afterDraft = await input.snapshot()
@@ -384,9 +391,9 @@ trust_level = "trusted"
     if (initialPrompt) {
       await mkdir(startupDirectory(cfg), { recursive: true })
       // Repeat off after enabling suppression state, then reload during a draft.
-      await exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+      await exec(entry, ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
       const offState = JSON.parse(await readFile(join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`, activeFile), 'utf8'))
-      const reloaded = await exec(resolve('bin/vargus'), ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+      const reloaded = await exec(entry, ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
       assert.match(reloaded.stdout, /helper reloaded.*VArgus is off/s)
       const restore = JSON.parse(await readFile(join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`, activeFile), 'utf8'))
       assert.notEqual(restore.pid, offState.pid)
@@ -404,7 +411,7 @@ trust_level = "trusted"
     assert.equal(await readFile(join(cfg, 'config.toml'), 'utf8'), savedConfig)
     assert.equal(posts, afterTurn)
     if (initialPrompt) {
-      const result = await exec(resolve('bin/vargus'), ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+      const result = await exec(entry, ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
       assert.match(result.stdout, /VArgus is off/)
       assert.equal(await row(), '')
       assert.equal(await startupSuppressed(cfg, active.target, active.thread), true)
@@ -419,12 +426,12 @@ trust_level = "trusted"
     await delay(300)
     if (selection === null) {
       await rename(live.transcript, live.transcript + '.held')
-      const result = await exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: live.thread } })
+      const result = await exec(entry, ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: live.thread } })
       assert.match(result.stdout, /pending restoration/)
       assert.equal(await row(), '')
       assert.equal(await tmux('show-options', '-t', 'test'), before)
       assert.deepEqual(JSON.parse(await readFile(join(footerDir, (await readdir(footerDir))[0]!), 'utf8')).selection, selection)
-      assert.match((await exec(resolve('bin/vargus'), ['status'], { cwd: project, env: { ...env, CODEX_THREAD_ID: live.thread } })).stdout, /pending/)
+      assert.match((await exec(entry, ['status'], { cwd: project, env: { ...env, CODEX_THREAD_ID: live.thread } })).stdout, /pending/)
       await rename(live.transcript + '.held', live.transcript)
     }
 

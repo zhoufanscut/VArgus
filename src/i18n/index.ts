@@ -1,4 +1,4 @@
-import { en, type Labels } from './en'
+import { en, type Labels } from './en.ts'
 
 // The language registry (DESIGN, "Languages"): a null prototype and own-property
 // lookups, so a tag such as `constructor` finds nothing and falls back to English.

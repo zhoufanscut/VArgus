@@ -1,6 +1,6 @@
 import { readFile, stat, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { dataDir, homeDir } from './paths'
+import { dataDir, homeDir } from './paths.ts'
 
 // Node-side launcher only. The Claude mod never imports this file.
 export function claudeLaunch(root: string, args: string[], runId: string, options: Record<string, unknown>) {

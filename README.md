@@ -73,18 +73,17 @@ VArgus has two parts:
 
 ## tmux output
 
-Opt-in, for either host. Requires Node.js 22 or later and tmux on Linux or macOS; the live
+Opt-in, for either host. Requires Node.js 24.12 or later and tmux on Linux or macOS; the live
 startup checks were on Linux with tmux 3.5a, Codex 0.167.0 and Claude Code 2.1.319.
 The sections below this one describe the existing Claude inline plugin.
 
 ### Inside official Codex
 
-VArgus stays in this clone. Requires Bash, Node.js 22+ and tmux. Build once and
-expose the Bash entry through a symlink in a directory on your PATH:
+VArgus stays in this clone. Requires Bash, Node.js 24.12+ and tmux. It runs the
+`.ts` source directly; no npm install or build is needed. Expose the Bash entry
+through a symlink in a directory on your PATH:
 
 ```sh
-npm ci
-npm run build
 mkdir -p "$HOME/.local/bin"
 ln -s /absolute/path/to/VArgus/bin/vargus "$HOME/.local/bin/vargus"
 ```
@@ -100,8 +99,8 @@ Start ordinary `codex` in tmux. Run controls from its primary conversation view:
 
 `!` runs a local shell command; no model decides how to run the control. The row
 starts off. `on` starts a small background Node helper that reads this conversation's
-saved session log and uses the shared renderer/tmux output. Code and dependencies
-stay in the clone; rebuild after updating it. Codex is not patched or rebuilt.
+saved session log and uses the shared renderer/tmux output. Code stays in the
+clone. Codex is not patched or rebuilt.
 
 Automatic selection uses the default tmux server and requires one matching Codex
 pane. With several matching panes, select the intended one explicitly:
@@ -115,10 +114,10 @@ can inherit another terminal's environment, so pane selection does not trust
 `TMUX_PANE`. Once attached, `off`, `status` and `reload` use the saved thread binding.
 `--theme ember` and `--config /path/to/options.json` apply on activation.
 
-After updating the clone, run `npm run build` there, then `!vargus reload` in
-Codex. This explicit command replaces the standalone helper with the current built
-code while Codex, its daemon and conversation keep running. It retains effective
-options, replays recorded readings, rediscovers the displayed view, and keeps the
+After updating the clone, run `!vargus reload` in Codex. This explicit command
+replaces the standalone helper with the current source while Codex, its daemon and
+conversation keep running. It retains effective options, replays recorded readings,
+rediscovers the displayed view, and keeps the
 original footer backups. Plain `on` also upgrades an older helper with reload
 metadata, preserving those options and backups; the retired draft-hold setting
 cannot disable paused readings. Reload flags override retained options: `--config` merges
@@ -268,7 +267,7 @@ footer items you want restored by `!vargus off`:
 status_line = ["model-with-reasoning", "current-dir", "thread-name", "session-id"]
 ```
 
-Rebuild VArgus, start ordinary `codex` in tmux, then review and trust the hook
+Start ordinary `codex` in tmux, then review and trust the hook
 through `/hooks`. When removing an older `--config` argument, update both VArgus
 commands and review their changed definitions in a reopened TUI before deleting
 the old options file. Trust both entries, including the prompt fallback when upgrading
@@ -317,13 +316,13 @@ the setup step above; on/off still use session-only commands.
 
 ### Launcher for stock Codex or Claude
 
-From this clone:
+Both launchers run the `.ts` source directly. The Codex transport launcher needs
+its WebSocket dependency; install it once in this clone:
 
 ```sh
-npm ci
-npm run build
+npm ci --omit=dev
 ./bin/vargus codex --tmux
-# Or use the Claude mod through the same tmux row:
+# The Claude launcher needs no npm install:
 ./bin/vargus claude --tmux
 ```
 
@@ -523,6 +522,6 @@ from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-
 - [DESIGN.md](DESIGN.md): how VArgus works, every rule with its reason, and what is still to be
   checked.
 - [AGENTS.md](AGENTS.md): working rules for coding agents in this repo.
-- Optional launcher: `npm ci`, `npm run build`, `npm test` (tests require Codex CLI and tmux).
+- Node development: `npm ci`, `npm test` (tests require Codex CLI and tmux).
 - Claude checks: `claude plugin validate .`, `tsc -p .`, `claude plugin test .`,
   `sh tests/reader.test.sh`, `sh tests/manifest.test.sh` (DESIGN.md "Tests" has the details).

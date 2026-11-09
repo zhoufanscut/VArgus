@@ -28,7 +28,7 @@ DESIGN.md "Unsettled" with a throwaway mod before building on it.
   each other or a display adapter.
 - `src/outputs` owns display encoding and tmux lifecycle; it imports no host code.
   `src/cli.ts` and `src/cli` wire a host to an output. Check these boundaries with `npm test`.
-- For the Node launcher run `npm run build` and `npm test`; for Claude run
+- For the Node launcher run `npm test`; for Claude run
   `npm run test:claude`. Codex protocol fixtures complement, rather than establish, live model
   behavior: keep the live verification limits in DESIGN.md current.
 

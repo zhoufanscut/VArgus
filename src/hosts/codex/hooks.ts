@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
-import { savedTranscript } from './rollout'
-export { footerThread, footerCandidates } from './views'
+import { savedTranscript } from './rollout.ts'
+export { footerThread, footerCandidates } from './views.ts'
 
 // Hook environments can contain another thread's CODEX_THREAD_ID. Use the
 // current event's saved transcript, never an inherited terminal/thread binding.

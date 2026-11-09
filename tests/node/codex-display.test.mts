@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { CodexCollector } from '../../src/hosts/codex/collect'
-import { model } from '../../src/render/fragments/model'
-import { calls } from '../../src/render/fragments/calls'
-import { DEFAULTS } from '../../src/options'
-import { en } from '../../src/i18n/en'
-import { makeTheme } from '../../src/theme'
+import { CodexCollector } from '../../src/hosts/codex/collect.ts'
+import { model } from '../../src/render/fragments/model.ts'
+import { calls } from '../../src/render/fragments/calls.ts'
+import { DEFAULTS } from '../../src/options.ts'
+import { en } from '../../src/i18n/en.ts'
+import { makeTheme } from '../../src/theme/index.ts'
 
 test('Codex short names retain full IDs internally and preserve unfamiliar model IDs', () => {
   const collector = new CodexCollector('/repo', '/home/u')

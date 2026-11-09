@@ -6,18 +6,18 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes, createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
-import { TmuxOutput } from '../outputs/tmux/client'
-import { findRollout, RolloutReader } from '../hosts/codex/rollout'
-import { Views, hiddenDraft } from '../hosts/codex/views'
-import { applicationTarget, type Target } from '../outputs/tmux/target'
-import { PaneInput } from '../outputs/tmux/input'
-import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, FooterSettings, type FooterSelection } from '../hosts/codex/footer'
-import { resolveOptions } from '../options'
-import { makeTheme } from '../theme'
-import { codexLine } from './line'
-import { withControlLock } from './lock'
-import { startupControl, startupTarget, hasStartupState, startupSuppressed } from './startup'
-import { cleanText } from '../render/text'
+import { TmuxOutput } from '../outputs/tmux/client.ts'
+import { findRollout, RolloutReader } from '../hosts/codex/rollout.ts'
+import { Views, hiddenDraft } from '../hosts/codex/views.ts'
+import { applicationTarget, type Target } from '../outputs/tmux/target.ts'
+import { PaneInput } from '../outputs/tmux/input.ts'
+import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, FooterSettings, type FooterSelection } from '../hosts/codex/footer.ts'
+import { resolveOptions } from '../options.ts'
+import { makeTheme } from '../theme/index.ts'
+import { codexLine } from './line.ts'
+import { withControlLock } from './lock.ts'
+import { startupControl, startupTarget, hasStartupState, startupSuppressed } from './startup.ts'
+import { cleanText } from '../render/text.ts'
 
 type Running = { pid: number; thread: string; transcript?: string; target: Target; token: string; version?: number;
   mode?: 'on' | 'restore'; selected?: string; pending?: number; error?: string;
@@ -246,7 +246,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
 }
 
 async function startWorker(spec: Spec): Promise<Running> {
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '__row', JSON.stringify(spec)], {
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../cli.ts', import.meta.url)), '__row', JSON.stringify(spec)], {
     detached: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'], env: { ...process.env, VARGUS_CLI_MAIN: '1' },
   })
   let errors = '', attached = false

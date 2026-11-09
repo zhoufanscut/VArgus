@@ -41,8 +41,9 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
 - Output adapters import no host code. `src/cli.ts` and `src/cli` wire collection to display.
 - The Claude mod imports no Node code. The manifest points directly to its register module:
   Claude Code 2.1.319 validation rejects a re-exported `register` entry point.
-- The normal Claude plugin needs no Node package install. Node dependencies serve the launcher
-  and its tests; `.test.mts` keeps Node tests outside the Claude engine's `.test.ts` runner.
+- The normal Claude plugin and standalone Codex helper need no npm install. The optional
+  Codex transport launcher loads `ws` only when selected; npm also supplies development tools.
+  `.test.mts` keeps Node tests outside the Claude engine's `.test.ts` runner.
 
 ### Opt-in tmux row
 
@@ -106,8 +107,15 @@ daemon started outside tmux, received that exact thread id but neither `TMUX` no
 the same local mock provider. These facts rule out inherited pane variables as the
 sole binding and rule out needing an LLM to activate the row.
 
-`bin/vargus` is a Bash entry that resolves its own symlink and runs `dist/cli.mjs`.
-One PATH symlink exposes it; Node dependencies and built code live in the clone.
+`bin/vargus` is a Bash entry that resolves its own symlink and runs `src/cli.ts`
+with Node.js 24.12 or later. One PATH symlink exposes it; source stays in the clone.
+Node's [TypeScript documentation](https://nodejs.org/docs/latest-v24.x/api/typescript.html)
+marks type stripping stable from 24.12 and says "file extensions are mandatory".
+The Node graph uses explicit `.ts` imports and ordinary class fields instead of
+constructor parameter properties. Its typecheck enforces erasable syntax and
+explicit type imports. Hooks and background workers start the same source entry;
+no bundle, TypeScript loader or build step is used. The `ws` import is deferred to
+the optional Codex transport launcher so standalone controls need no npm packages.
 The feature is off until explicit `on` or the optional startup hook enables
 `tmuxOutput` for its helper. The normal Claude mod graph does not reach this script or Node code.
 
@@ -405,11 +413,11 @@ its footer. Worker v6 replaces older on-mode workers while retaining their backu
 For a bound helper with reload metadata, bare `on` upgrades the helper and preserves
 its root, home and effective custom options. The retired draft-hold setting is
 dropped when resolving options. Explicit `on` can reuse the same-version helper;
-rebuilding alone does not change code already loaded in Node. `off` can still talk
+updating source alone does not change code already loaded in Node. `off` can still talk
 to earlier supported workers.
 
 Standalone `reload` is an explicit opt-in to replacing only the pane helper with
-the currently built CLI. It does not restart Codex, its daemon or the conversation,
+the current `.ts` source. It does not restart Codex, its daemon or the conversation,
 build packages, install a watcher, or apply to the separate `codex --tmux` launcher.
 The runtime record carries version-1 reload metadata: CODEX_HOME and effective
 resolved options. Supplied flags merge over those retained options in command
@@ -729,7 +737,7 @@ src/i18n/                       labels
 src/outputs/ansi.ts             decode the renderer's SGR vocabulary
 src/outputs/tmux/                tmux encoding, pane ownership and row lifecycle
 src/cli.ts                      CLI dispatch and optional host launcher
-bin/vargus                      Bash symlink entry for the built Node CLI
+bin/vargus                      Bash symlink entry for the TypeScript CLI
 types/index.d.ts                self-contained Claude $.state contract
 tests/*.test.ts                 Claude engine and shared rendering tests
 tests/node/*.test.mts            Node boundaries, Codex and tmux integration
@@ -1235,9 +1243,12 @@ What the types and docs alone can't settle and no live session has settled yet; 
 
 ## Tests
 
-- `npm ci && npm run build` builds the optional launcher. `npm test` type-checks its graph and
-  runs boundary, protocol/log, real app-server/localhost mock-provider turns and isolated tmux
-  lifecycle tests. Daemon-heavy Node cases run serially to bound resource use.
+- `npm ci` installs development tools and the optional Codex transport dependency. `npm test`
+  type-checks the Node graph and runs `.test.mts` files directly in Node: boundary, protocol/log,
+  real app-server/localhost mock-provider turns and isolated tmux lifecycle tests.
+  Standalone tests copy source, the Bash entry and package metadata without `dist` or
+  `node_modules`; legacy-worker and reload probes change the copied `.ts` files.
+  Daemon-heavy Node cases run serially to bound resource use.
 - `npm run test:claude` runs the existing Claude checks listed below. In this development
   environment the engine test workers require execution outside the restricted sandbox; the
   unchanged baseline failed inside and passed outside.

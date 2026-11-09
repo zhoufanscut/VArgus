@@ -8,11 +8,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
-import { findRollout, RolloutReader } from '../../src/hosts/codex/rollout'
-import { render } from '../../src/render'
-import { DEFAULTS } from '../../src/options'
-import { makeTheme } from '../../src/theme'
-import { en } from '../../src/i18n/en'
+import { findRollout, RolloutReader } from '../../src/hosts/codex/rollout.ts'
+import { render } from '../../src/render/index.ts'
+import { DEFAULTS } from '../../src/options.ts'
+import { makeTheme } from '../../src/theme/index.ts'
+import { en } from '../../src/i18n/en.ts'
 
 // Official engine and real shell reads; only the Responses provider is mocked.
 // This verifies recorded signals, not a model deciding when to use a skill.

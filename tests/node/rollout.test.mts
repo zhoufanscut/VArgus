@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, appendFile, rm, mkdir, symlink, readFile, utimes } from 'node:fs/promises'
+import { mkdtemp, writeFile, appendFile, rm, mkdir, symlink, readFile, utimes, cp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { RolloutReader, findRollout } from '../../src/hosts/codex/rollout'
+import { RolloutReader, findRollout } from '../../src/hosts/codex/rollout.ts'
 
 const meta = { type: 'session_meta', payload: { id: 'thread-a', cwd: '/repo', timestamp: '2026-11-08T05:41:17Z' } }
 const amount = { input_tokens: 42424, cached_input_tokens: 40000, output_tokens: 777, total_tokens: 43201 }
@@ -109,8 +109,10 @@ test('skill loads use marked injections or successful catalogued reads, once per
 test('the Bash entry resolves an external symlink and runs from a different cwd', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus entry '))
   try {
+    const install = join(dir, 'install')
+    for (const name of ['src', 'bin', 'package.json']) await cp(resolve(name), join(install, name), { recursive: true })
     const link = join(dir, 'vargus')
-    await symlink(resolve('bin/vargus'), link)
+    await symlink(join(install, 'bin/vargus'), link)
     const { stdout } = await promisify(execFile)(link, ['--help'], { cwd: dir })
     assert.match(stdout, /vargus on\|off\|status/)
   } finally { await rm(dir, { recursive: true, force: true }) }

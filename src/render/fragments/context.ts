@@ -1,4 +1,4 @@
-import type { Fragment } from '../../core/types'
+import type { Fragment } from '../../core/types.ts'
 
 // 4. context: `ctx:20%` (DESIGN, "Fragments"; VantageHUD's elements/context.js
 // with its default thresholds, built in per DESIGN "Config").

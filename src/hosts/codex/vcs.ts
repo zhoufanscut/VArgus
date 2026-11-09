@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { initialVcs, parseGitStatus, parseGitFiles, repoNameFromUrl } from '../../core/vcs'
+import { initialVcs, parseGitStatus, parseGitFiles, repoNameFromUrl } from '../../core/vcs.ts'
 
 const exec = promisify(execFile)
 

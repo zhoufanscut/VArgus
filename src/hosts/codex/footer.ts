@@ -1,4 +1,4 @@
-import { codexRead } from './read'
+import { codexRead } from './read.ts'
 
 export type FooterSelection = string[] | null
 // Codex c2bd770ca7, chatwidget.rs DEFAULT_STATUS_LINE_ITEMS; live-tested on 0.167.0.
@@ -24,7 +24,8 @@ export async function savedFooter(cwd: string): Promise<FooterSelection> {
 export class FooterSettings {
   private values = new Map<string, FooterSelection>()
   private errors = new Map<string, Error>()
-  constructor(private load = savedFooter) {}
+  private load: typeof savedFooter
+  constructor(load = savedFooter) { this.load = load }
   reset(): void { this.values.clear(); this.errors.clear() }
   async preload(cwds: Iterable<string>): Promise<void> {
     for (const cwd of new Set(cwds)) {
