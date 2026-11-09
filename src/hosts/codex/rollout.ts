@@ -1,7 +1,8 @@
 // Read-only adapter for official Codex JSONL history (0.167.0).
 // Hooks document this format as unstable; keep fixtures and live checks current.
-import { open, readdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { open, readdir, realpath } from 'node:fs/promises'
+import { join, relative, isAbsolute, sep } from 'node:path'
+import { codexRead } from './read'
 import { CodexCollector } from './collect'
 import { SkillLoads } from './skills'
 import type { Usage } from './protocol'
@@ -12,12 +13,42 @@ const usage = (u: any): Usage => ({ inputTokens: u.input_tokens, cachedInputToke
 const window = (w: any) => w == null ? null : ({ usedPercent: w.used_percent,
   windowDurationMins: w.window_minutes, resetsAt: w.resets_at })
 
-export async function findRollout(home: string, thread: string): Promise<string> {
-  const directory = join(home, 'sessions')
-  const files = await readdir(directory, { recursive: true })
-  const found = files.filter(f => f.endsWith(`-${thread}.jsonl`))
-  if (found.length !== 1) throw new Error(`Cannot find one saved Codex transcript for thread ${thread}. Ephemeral chats are not supported.`)
-  return join(directory, found[0]!)
+export async function savedTranscript(home: string, thread: string, file: string): Promise<string> {
+  const directory = await realpath(join(home, 'sessions')), path = await realpath(file)
+  const inside = relative(directory, path)
+  if (isAbsolute(inside) || inside === '..' || inside.startsWith('..' + sep)) throw new Error("Codex transcript is outside this home's saved sessions.")
+  const handle = await open(path)
+  try {
+    let text = '', offset = 0
+    for (;;) {
+      const buffer = Buffer.alloc(65536), { bytesRead } = await handle.read(buffer, 0, buffer.length, offset)
+      text += buffer.subarray(0, bytesRead).toString('utf8'); offset += bytesRead
+      if (text.includes('\n') || !bytesRead) break
+    }
+    const meta = JSON.parse(text.split('\n')[0]!)
+    if (meta.type !== 'session_meta' || meta.payload?.id !== thread) throw new Error('The saved transcript belongs to another Codex thread.')
+    return path
+  } finally { await handle.close() }
+}
+
+export async function findRollout(home: string, thread: string, reported?: string): Promise<string> {
+  if (reported) return savedTranscript(home, thread, reported)
+  const directory = join(home, 'sessions'), files = await readdir(directory, { recursive: true })
+  const escaped = thread.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp('-' + escaped + '(?:_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})?\\.jsonl$')
+  const found = files.filter(file => pattern.test(file))
+  // Codex's store chooses the current path, including opaque/session-suffixed
+  // names. A single filename is a compatibility fallback if that read fails.
+  let result: any
+  try { result = await codexRead('thread/read', { threadId: thread, includeTurns: false }, process.cwd(), home) }
+  catch (error) {
+    if (found.length !== 1) throw error
+    return savedTranscript(home, thread, join(directory, found[0]!))
+  }
+  if (result?.thread?.id !== thread || result.thread.ephemeral || typeof result.thread.path !== 'string') {
+    throw new Error(`Cannot resolve a current saved Codex transcript for thread ${thread}. Ephemeral chats are not supported.`)
+  }
+  return savedTranscript(home, thread, result.thread.path)
 }
 
 export class RolloutReader {

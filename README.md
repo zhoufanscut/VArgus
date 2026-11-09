@@ -119,7 +119,7 @@ The helper follows the displayed parent or subagent through Alt+Left/Right and
 aggregated. VArgus matches Codex's contextual agent label to saved session metadata.
 If a popup, clipped label or ambiguous agent path prevents identification, the row
 is blank until the view can be identified again. `status` reports that pause.
-After `/new` or `/resume`, run `!vargus on` again (with pane selection if needed)
+Without the optional startup hook, after `/new` or `/resume` run `!vargus on` again (with pane selection if needed)
 to bind the new conversation. Its token total covers recorded uncached input and output.
 Tool counts replay completed visible items and exclude `!` controls. `🤖2` counts
 recorded subagent starts in the displayed conversation; `⚡3` counts observed skill
@@ -175,9 +175,118 @@ typing or navigation can still race the observations. Temporary session-only
 `/statusline` selections and launch-time overrides cannot be read back reliably:
 restoration uses saved configuration, including its default layout when unset.
 
+Codex can report a current transcript with an extra UUID suffix while an older
+same-thread file remains. VArgus uses the reported path and validates its metadata;
+it does not pick the newest filename. The root view stays pinned to that path.
+
 Saved session logs and composer recognition are version-sensitive interfaces.
 Compatibility is checked with fixtures and a live official-Codex/local-mock test
 on 0.167.0. Other prompt layouts can require a compatibility update.
+
+### Automatic startup in Codex (optional)
+
+`codexAutoStart` defaults to false. To enable it, add `"codexAutoStart": true`
+to a VArgus JSON options file such as `~/.codex/vargus-options.json`:
+
+```json
+{
+  "codexAutoStart": true
+}
+```
+
+Create the opt-in state directory before your first session. This lets
+`!vargus off` remember your choice before any startup callback has run:
+
+```sh
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/vargus/autostart"
+```
+
+Add this entry to Codex's `~/.codex/hooks.json`, preserving any existing hooks:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "^(startup|resume|clear|fork)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.local/bin/vargus\" hook session-start --config \"$HOME/.codex/vargus-options.json\"",
+            "async": true,
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.local/bin/vargus\" hook prompt --config \"$HOME/.codex/vargus-options.json\"",
+            "async": true,
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Include `session-id` in your saved Codex footer selection; it can go at the tail.
+For example, merge this into the existing `[tui]` table in `~/.codex/config.toml`, retaining any other
+footer items you want restored by `!vargus off`:
+
+```toml
+[tui]
+status_line = ["model-with-reasoning", "current-dir", "thread-name", "session-id"]
+```
+
+Rebuild VArgus, start ordinary `codex` in tmux, then review and trust the hook
+through `/hooks`. Trust both entries, including the prompt fallback when upgrading
+from a SessionStart-only setup. Shared-daemon mode is supported. In checked Codex 0.167.0,
+SessionStart runs with the first prompt: the native footer displays the thread ID
+until then. Reopening a thread already loaded in the shared daemon can omit
+SessionStart; the UserPromptSubmit fallback covers that case on a normal prompt.
+SessionStart scans foreground Codex panes on the selected tmux server,
+with an eight-second retry deadline. It requires one full ID below a recognizably
+empty composer that matches the event's saved transcript. It then uses the normal helper to
+hide the native footer and attach the tmux row. `!vargus off` restores the saved
+selection, including its ID. For a tail ID, keep the entire native footer line
+untruncated; widen the pane or remove other items if needed. A clipped row could
+otherwise leave a UUID-valued branch or title visible after the real ID disappears.
+VArgus skips that ambiguous row. A saved first-item ID can still be recognized
+from its complete prefix when later fields are clipped. Avoid invocation or
+session-only footer overrides: automatic matching uses the saved layout.
+Restart Codex after changing the saved item order so its displayed layout matches.
+
+Prompt fallback makes one activation attempt. When the native ID is hidden
+(already using VArgus), missing or explicitly suppressed by off, it returns before
+starting a Codex config reader. It does not add an eight-second scan on every turn.
+
+Missing/clipped IDs, drafts, unknown layouts and duplicate visible matches skip
+automatic activation; use `!vargus on` when ready. Inherited `CODEX_THREAD_ID`,
+terminal variables, directory names and transcript creation sources do not choose
+a pane. Events for other displayed threads do not activate it. Matching identifies
+the displayed conversation, not which frontend emitted the event. An ephemeral
+session with no saved transcript is skipped. Custom tmux servers need
+`--socket /path/to/socket`; `--pane %ID` restricts the match without bypassing the
+full-ID and uniqueness checks. The callback scans panes itself and exits; no
+permanent listener or launcher is required. Hook stdout adds no model context.
+
+The prompt fallback respects manual off; later turns do not reactivate that row.
+Compaction has no separate handler. Off also
+records suppression before the first row attaches. Unbound controls on a custom
+server need `--socket`; ambiguous panes can require `--pane`. Manual off is remembered per thread and TUI process under `~/.codex/vargus/autostart` (or your
+`CODEX_HOME`), so delayed duplicate callbacks cannot undo it. Explicit
+`!vargus on` clears that thread's suppression; another thread or a new Codex process
+has its own state. `/new` and resume can activate through SessionStart or the
+prompt fallback when the full ID is visible. Disable automatic startup by setting
+`codexAutoStart` to false or disabling the hook through `/hooks`; use
+`!vargus off` to remove an active row. Saved footer settings are changed only by
+the setup step above; on/off still use session-only commands.
 
 ### Launcher for stock Codex or Claude
 

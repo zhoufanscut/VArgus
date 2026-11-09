@@ -1,5 +1,4 @@
-import { spawn } from 'node:child_process'
-import { createInterface } from 'node:readline'
+import { codexRead } from './read'
 
 export type FooterSelection = string[] | null
 // Codex c2bd770ca7, chatwidget.rs DEFAULT_STATUS_LINE_ITEMS; live-tested on 0.167.0.
@@ -14,35 +13,10 @@ export function restoreFooter(items: FooterSelection): string {
 // Read effective saved layers through Codex's own parser. No config write, thread
 // creation, model request, or dependence on a second TOML parser.
 export async function savedFooter(cwd: string): Promise<FooterSelection> {
-  const child = spawn('codex', ['app-server', '--stdio'], { cwd, stdio: ['pipe', 'pipe', 'pipe'] })
-  const lines = createInterface({ input: child.stdout })
-  let errors = ''
-  child.stderr.on('data', data => { errors = (errors + String(data)).slice(-1000) })
-  try {
-    return await new Promise<FooterSelection>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Reading saved Codex footer timed out.')), 8000)
-      const fail = (error: Error) => { clearTimeout(timer); reject(error) }
-      child.once('error', fail)
-      child.once('exit', () => fail(new Error('Could not read saved Codex footer. ' + errors)))
-      const send = (id: number, method: string, params: unknown) => child.stdin.write(JSON.stringify({ id, method, params }) + '\n')
-      child.stdin.on('error', fail)
-      lines.on('line', line => {
-        let reply: any
-        try { reply = JSON.parse(line) } catch { return }
-        if (reply.error) return fail(new Error(`Codex footer config read: ${reply.error.message}`))
-        if (reply.id === 1) send(2, 'config/read', { includeLayers: false, cwd })
-        if (reply.id === 2) {
-          const items = reply.result?.config?.tui?.status_line ?? null
-          if (items !== null && (!Array.isArray(items) || !items.every(item => typeof item === 'string'))) return fail(new Error('Codex returned an unsupported footer configuration.'))
-          clearTimeout(timer); resolve(items)
-        }
-      })
-      send(1, 'initialize', { clientInfo: { name: 'vargus-footer', version: '0.1.0' } })
-    })
-  } finally {
-    lines.close()
-    child.kill('SIGTERM')
-  }
+  const result = await codexRead('config/read', { includeLayers: false, cwd }, cwd)
+  const items = result?.config?.tui?.status_line ?? null
+  if (items !== null && (!Array.isArray(items) || !items.every((item: unknown) => typeof item === 'string'))) throw new Error('Codex returned an unsupported footer configuration.')
+  return items
 }
 
 // Warm each workspace before inspecting the pane. A first child visit must not

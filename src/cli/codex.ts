@@ -16,8 +16,9 @@ import { resolveOptions } from '../options'
 import { makeTheme } from '../theme'
 import { codexLine } from './line'
 import { withControlLock } from './lock'
+import { startupControl, startupTarget, hasStartupState } from './startup'
 
-type Running = { pid: number; thread: string; target: Target; token: string; version?: number;
+type Running = { pid: number; thread: string; transcript?: string; target: Target; token: string; version?: number;
   mode?: 'on' | 'restore'; selected?: string; pending?: number; error?: string }
 type FooterBackup = { thread: string; target: Target; selection: FooterSelection }
 type Spec = { target: Target; thread: string; transcript: string; home: string;
@@ -100,7 +101,7 @@ function description(r: Running): string {
   return `VArgus is on in ${r.target.pane} (thread ${r.selected ?? 'unknown'}).${r.error ? ' ' + r.error : ''}`
 }
 
-export async function standalone(args: string[]): Promise<number> {
+export async function standalone(args: string[], automatic = false): Promise<number> {
   const [action, ...flags] = args
   let socket: string | undefined, pane: string | undefined
   let options: Record<string, unknown> = {}
@@ -113,7 +114,9 @@ export async function standalone(args: string[]): Promise<number> {
     else if (flag === '--config') options = { ...options, ...JSON.parse(await readFile(value, 'utf8')) }
     else throw new Error(`Unknown VArgus option: ${flag}.`)
   }
+  if (automatic && !resolveOptions(options).codexAutoStart) return 0
   const thread = process.env.CODEX_THREAD_ID
+  const home = process.env.CODEX_HOME ?? join(homedir(), '.codex')
   if (action === 'on' && !thread) throw new Error('Inside Codex, run !vargus on. CODEX_THREAD_ID identifies the conversation.')
   await mkdir(footerRoot(), { recursive: true, mode: 0o700 })
   const bindings = new Map<string, { target: Target; thread: string }>()
@@ -131,30 +134,39 @@ export async function standalone(args: string[]): Promise<number> {
   if (bindings.size > 1) throw new Error('This thread has multiple rows; select one with --pane and --socket.')
   const existing = [...bindings.values()][0]
   if (action !== 'on' && !existing && !pane && !socket) {
+    // Off can arrive before the first automatic attachment. Once opted in,
+    // remember that intent even though no worker/backup exists to find yet.
+    if (action === 'off' && thread && await hasStartupState(home)) {
+      const target = await startupTarget(thread) ?? await applicationTarget('codex')
+      await startupControl(home, target, thread, 'off', false, async () => 0)
+    }
     console.log('VArgus is off for this Codex thread.'); return 0
   }
   const target = existing?.target ?? await applicationTarget('codex', socket, pane)
+  const automaticSelection = automatic ? await savedFooter(process.cwd()) : undefined
+  if (automatic && !automaticSelection?.includes('session-id')) return 0
+  return startupControl(home, target, thread, action!, automatic, async () => {
   let current = await readRunning(recordPath(target))
   if (current && !sameTarget(current.target, target)) { await stopWorker(current); current = undefined }
   if (action === 'status') {
     console.log(current ? description(current) : (await backups(target)).length ? 'VArgus is off; footer restoration is pending. Run !vargus off.' : 'VArgus is off.')
     return 0
   }
-  if (current && ((action === 'off' && [2, 3, 4].includes(current.version!)) || (current.version === 4 && current.thread === thread))) {
+  const requestedTranscript = action === 'on' ? await findRollout(home, thread!, process.env.VARGUS_CODEX_TRANSCRIPT) : undefined
+  if (current && ((action === 'off' && [2, 3, 4].includes(current.version!)) || (current.version === 4 && current.thread === thread && current.transcript === requestedTranscript))) {
     const reply = await request(current, action as 'on' | 'off')
     console.log(action === 'on' ? `VArgus is already on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))
     return 0
   }
-  const home = process.env.CODEX_HOME ?? join(homedir(), '.codex')
   const saved = await backups(target)
   const root = thread ?? current?.thread ?? saved[0]?.thread
   if (!root) { await new TmuxOutput(target.socket, target.pane).cleanupAbandoned(); console.log('VArgus is off.'); return 0 }
   // Validate history before replacing a live worker or changing any footer.
-  const transcript = await findRollout(home, root)
+  const transcript = requestedTranscript ?? await findRollout(home, root)
   const file = footerPath(target, root)
   const newBackup = action === 'on' && !await json(file)
   if (newBackup) {
-    const selection = await savedFooter(process.cwd())
+    const selection = automatic ? automaticSelection! : await savedFooter(process.cwd())
     restoreFooter(selection)
     await save(file, { target, thread: root, selection })
   }
@@ -179,11 +191,12 @@ export async function standalone(args: string[]): Promise<number> {
     throw error
   } finally { child.stderr!.destroy(); if (child.connected) child.disconnect(); child.unref() }
   return 0
+  }, automaticSelection?.[0] === 'session-id')
 }
 
 export async function rowWorker(spec: Spec): Promise<number> {
   const { target, thread } = spec
-  const file = recordPath(target), views = new Views(spec.home, thread), input = new PaneInput(target)
+  const file = recordPath(target), views = new Views(spec.home, thread, spec.transcript), input = new PaneInput(target)
   const output = new TmuxOutput(target.socket, target.pane)
   const options = resolveOptions({ ...spec.options, tmuxOutput: true }), theme = makeTheme(options.theme, !!process.env.NO_COLOR)
   const readers = new Map<string, { reader: RolloutReader; line: ReturnType<typeof codexLine> }>()
@@ -191,9 +204,10 @@ export async function rowWorker(spec: Spec): Promise<number> {
   let mode = spec.mode, selected: string | undefined, error: string | undefined
   let stopping = false, attached = false, refreshAt = 0, renderAt = 0
   let lastConfirmed: string | undefined, readingError: string | undefined, published = ''
+  let identity: 'first' | 'whole' | 'none' = 'none'
   const stop = () => { stopping = true }
   process.on('SIGTERM', stop); process.on('SIGHUP', stop)
-  const state = async (): Promise<Running> => ({ pid: process.pid, thread, target, token: spec.token, version: 4,
+  const state = async (): Promise<Running> => ({ pid: process.pid, thread, transcript: spec.transcript, target, token: spec.token, version: 4,
     mode, selected, pending: (await backups(target)).length, error })
   const step = async () => {
     if (Date.now() >= refreshAt) {
@@ -201,7 +215,15 @@ export async function rowWorker(spec: Spec): Promise<number> {
       if (mode === 'on') await footerSettings.preload(views.family().map(view => view.cwd))
       refreshAt = Date.now() + 1000
     }
-    const screen = await input.snapshot(), view = views.selected(screen)
+    const family = views.family()
+    const saved = mode === 'restore' ? new Map((await backups(target)).map(backup => [backup.thread, backup.selection])) : undefined
+    const layouts = family.map(view => {
+      if (saved?.has(view.thread)) return saved.get(view.thread)
+      try { return footerSettings.get(view.cwd) } catch { return undefined }
+    })
+    identity = layouts.length && layouts.every(layout => layout?.includes('session-id'))
+      ? layouts.every(layout => layout?.[0] === 'session-id') ? 'first' : 'whole' : 'none'
+    const screen = await input.snapshot(), view = views.selected(screen, identity)
     const changed = selected !== view?.thread
     selected = view?.thread
     if (changed) readingError = undefined
@@ -265,7 +287,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
     // Inserting a slash command can hide the contextual agent label. Its exact
     // draft and cursor must still match before Enter; empty-prompt checks bind
     // the operation to the selected view before insertion and after completion.
-    const after = await input.submit(command, (screen, text) => codexComposer(screen, text) && (text !== '' || views.selected(screen)?.thread === expected))
+    const after = await input.submit(command, (screen, text) => codexComposer(screen, text) && (text !== '' || views.selected(screen, identity)?.thread === expected))
     if (footerCommandError(after.lines)) throw new Error('Footer command completion is inconclusive: a native statusline error remains visible. Saved restoration state is retained. Resolve the error and move it out of view before retrying.')
   }
   try {

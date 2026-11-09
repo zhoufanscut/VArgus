@@ -23,6 +23,7 @@ export const DEFAULTS = {
   codexShortModel: true,
   codexAgentCounts: true,
   codexSkillCounts: true,
+  codexAutoStart: false,
 }
 
 export type Options = typeof DEFAULTS

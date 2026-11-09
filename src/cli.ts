@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
 import { codexLine } from './cli/line'
 import { standalone, rowWorker } from './cli/codex'
+import { hook } from './cli/hooks'
 import { TmuxOutput } from './outputs/tmux/client'
 import { CodexCollector } from './hosts/codex/collect'
 import { startBridge } from './hosts/codex/bridge'
@@ -16,6 +17,7 @@ import { makeTheme } from './theme'
 
 const HELP = `Usage:
   vargus on|off|status [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
+  vargus hook session-start|prompt --config FILE [--pane %ID] [--socket PATH]
   vargus codex --tmux [--theme NAME] [--config FILE] -- [codex arguments]
   vargus claude --tmux [--theme NAME] [--config FILE] -- [claude arguments]
   vargus tmux-reset
@@ -54,6 +56,8 @@ export function codexServerArgs(args: string[]): { args: string[]; cwd: string }
 export async function main(argv: string[]): Promise<number> {
   if (argv[0] === '--help' || !argv.length) { console.log(HELP); return 0 }
   if (['on', 'off', 'status'].includes(argv[0]!)) return standalone(argv)
+  if (argv[0] === '__hook-on') return standalone(['on', ...argv.slice(1)], true)
+  if (argv[0] === 'hook') return hook(argv.slice(1))
   if (argv[0] === '__row') return rowWorker(JSON.parse(argv[1]!))
   const [host, ...rest] = argv
   if (host === 'tmux-reset') { await TmuxOutput.environment().reset(); return 0 }

@@ -147,6 +147,12 @@
       "title": "Codex: skill count",
       "description": "Show observed skill loads in standalone Codex, once per skill per user turn; has no effect in Claude",
       "default": true
+    },
+    "codexAutoStart": {
+      "type": "boolean",
+      "title": "Codex: automatic tmux startup",
+      "description": "Allow the optional SessionStart hook to enable VArgus; requires separate Codex hook setup and has no effect in Claude",
+      "default": false
     }
   }
 }

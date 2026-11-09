@@ -17,7 +17,8 @@ const crowdedSelection = ['current-dir', 'model-with-reasoning', 'five-hour-limi
 for (const fixture of [
   { initialPrompt: '', selection: ['session-id'], crowded: false },
   { initialPrompt: '', selection: crowdedSelection, crowded: true },
-]) test(`official Codex follows sibling views and restores them on visit${fixture.crowded ? ' (crowded fullscreen footer, cold config)' : ''}`, { timeout: 90000 }, async () => {
+  { initialPrompt: '', selection: ['session-id', ...crowdedSelection], crowded: true },
+]) test(`official Codex follows sibling views and restores them on visit${fixture.crowded ? ' (crowded fullscreen footer, cold config' + (fixture.selection[0] === 'session-id' ? ', full ID' : '') + ')' : ''}`, { timeout: 90000 }, async () => {
   const { initialPrompt, selection, crowded } = fixture
   const columns = crowded ? 177 : 157
   const dir = await mkdtemp(join(tmpdir(), 'vargus-standalone-test-'))

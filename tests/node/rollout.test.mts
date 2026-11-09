@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, appendFile, rm, mkdir, symlink } from 'node:fs/promises'
+import { mkdtemp, writeFile, appendFile, rm, mkdir, symlink, readFile, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -193,4 +193,38 @@ test('paginated child history skips the inherited prefix but retains its skill c
     await appendFile(file, jsonl([{ ...count, ordinal: rows.length }]))
     await assert.rejects(r.poll(), /valid ordinal/)
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+
+test('Codex reported path selects the current session-suffixed history, not the newest filename', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-rollout-alias-')), priorPath = process.env.PATH
+  try {
+    await mkdir(join(dir, 'sessions')); await mkdir(join(dir, 'bin'))
+    const old = join(dir, 'sessions', 'rollout-date-thread-a.jsonl')
+    const current = join(dir, 'sessions', 'rollout-date-thread-a_11111111-1111-1111-1111-111111111111.jsonl')
+    for (const file of [old, current]) await writeFile(file, JSON.stringify(meta) + '\n')
+    await utimes(old, new Date('2030-01-01'), new Date('2030-01-01'))
+    await utimes(current, new Date('2020-01-01'), new Date('2020-01-01'))
+    const reported = join(dir, 'reported.json'), requests = join(dir, 'requests.jsonl')
+    await writeFile(reported, JSON.stringify({ id: 'thread-a', path: current, ephemeral: false }))
+    await writeFile(join(dir, 'bin', 'codex'), `#!${process.execPath}
+const fs=require('node:fs'),r=require('node:readline').createInterface({input:process.stdin});r.on('line',l=>{const m=JSON.parse(l);if(m.method==='initialize')console.log(JSON.stringify({id:m.id,result:{}}));else{fs.appendFileSync(${JSON.stringify(requests)},JSON.stringify({method:m.method,params:m.params})+'\\n');console.log(JSON.stringify({id:m.id,result:{thread:JSON.parse(fs.readFileSync(${JSON.stringify(reported)},'utf8'))}}));}});
+`, { mode: 0o755 })
+    process.env.PATH = join(dir, 'bin') + ':' + priorPath
+    assert.equal(await findRollout(dir, 'thread-a'), current)
+    await writeFile(reported, JSON.stringify({ id: 'thread-a', path: old, ephemeral: false }))
+    assert.equal(await findRollout(dir, 'thread-a'), old, 'the API pointer can move to an older-named file too')
+    const calls = (await readFile(requests, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    assert.deepEqual(calls.map(c => c.method), ['thread/read', 'thread/read'])
+    assert.ok(calls.every(c => c.params.includeTurns === false))
+    await writeFile(reported, JSON.stringify({ id: 'thread-a', path: current, ephemeral: true }))
+    await assert.rejects(findRollout(dir, 'thread-a'), /Ephemeral/)
+    await writeFile(current, JSON.stringify({ ...meta, payload: { ...meta.payload, id: 'thread-b' } }) + '\n')
+    await writeFile(reported, JSON.stringify({ id: 'thread-a', path: current, ephemeral: false }))
+    await assert.rejects(findRollout(dir, 'thread-a'), /another Codex thread/)
+  } finally {
+    if (priorPath === undefined) delete process.env.PATH
+    else process.env.PATH = priorPath
+    await rm(dir, { recursive: true, force: true })
+  }
 })

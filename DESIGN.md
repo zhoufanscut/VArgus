@@ -107,8 +107,8 @@ sole binding and rule out needing an LLM to activate the row.
 
 `bin/vargus` is a Bash entry that resolves its own symlink and runs `dist/cli.mjs`.
 One PATH symlink exposes it; Node dependencies and built code live in the clone.
-The feature is off until the explicit `on` control enables `tmuxOutput` for its
-helper. The normal Claude mod graph does not reach this script or Node code.
+The feature is off until explicit `on` or the optional startup hook enables
+`tmuxOutput` for its helper. The normal Claude mod graph does not reach this script or Node code.
 
 `outputs/tmux/target.ts` discovers a named foreground application through tmux and
 `ps`. The outermost matching application process identifies the frontend; nested
@@ -125,8 +125,12 @@ lock arbitrates concurrent attachment. Each pane gets one owner and existing bar
 options retain the same cleanup/restore rules. The helper watches the resolved TUI
 process, not the persistent app-server daemon; `off` and TUI exit detach the row.
 
-`hosts/codex/rollout.ts` looks up the exact thread-id filename under CODEX_HOME's
-`sessions` directory, validates its session metadata and incrementally reads JSONL.
+`hosts/codex/rollout.ts` resolves the current path through Codex's read-only
+`thread/read` metadata and validates the file's first session metadata and location
+under CODEX_HOME's `sessions`. If the metadata request fails, exactly one recognized
+canonical/session-suffixed filename is a compatibility fallback. Multiple candidates
+never choose by directory order or modification time. The reader then consumes JSONL
+incrementally.
 It retains incomplete records and UTF-8 bytes between polls. It normalizes records
 into the existing Codex collector: session metadata for creation time and cwd,
 `turn_context` / `thread_settings_applied` for recorded model and effort,
@@ -171,13 +175,162 @@ parent relationships. In checked source `tui/src/app/agent_navigation.rs`,
 `active_agent_label` returns a backtick-wrapped `agent_path` for a child and
 `Main [default]` for the primary thread. `bottom_pane/footer.rs` retains this label
 when configurable items are cleared. The catalog rejects ambiguous/reused paths
-within the bound family; unrelated families do not select a child. Clipped labels,
-popups and other unrecognized views blank the row and pause footer commands. Log
+within the bound family; unrelated families do not select a child. A full unambiguous UUID
+field anywhere in the native footer selects an exact known family member before path
+matching; a full foreign ID stops selection. This also recognizes a child when a
+crowded footer clips its path. Without that ID, clipped paths, popups and other
+unrecognized views blank the row and pause footer commands. Log
 mtime is never a selection signal. The writable primary prompt uses the activation's
 thread identity when its Main label is absent; parent-owned child views use the
-read-only prompt. `/new` and `/resume` still require `on` again; this is not a general
+read-only prompt. Without the optional startup hook, `/new` and `/resume` require `on` again; this is not a general
 external frontend-selection API. Future host format changes must
 be rechecked against these limits.
+
+#### Optional Codex SessionStart hook
+
+`codexAutoStart` defaults to false in shared options and userConfig. Installing
+and trusting a separate SessionStart command hook, with an options file explicitly
+enabling it, opts into `vargus hook session-start`. It changes no Claude behavior.
+The [official hook documentation](https://learn.chatgpt.com/docs/hooks#sessionstart)
+provides stdin JSON and startup/resume/clear/fork source matching. The shipped
+example excludes compact: ordinary turns and compaction must not undo manual off.
+A UserPromptSubmit fallback handles loaded-thread resumes. No Stop, SubagentStart
+or SessionEnd handler is installed; existing view polling and TUI-process cleanup
+remain responsible for those cases.
+
+In checked source `c2bd770ca7`, `core/src/session/session.rs` queues start sources;
+`core/src/session/turn.rs` runs pending start hooks during the first turn. A real
+0.167.0 embedded TUI trace confirmed no startup hook before the first prompt and a SessionStart
+payload after it. That hook inherited a CODEX_THREAD_ID from another conversation.
+The adapter reads the first record and verifies that its ID matches a saved file
+inside this home. After prompt preflight, it compares that path with the current
+path reported by Codex. Already-on/off prompt fast paths therefore avoid metadata
+RPC as well as config/read. The verified path is passed privately to the normal on
+control, and the worker pins its root catalog entry to that file. Old workers with
+no reported path, or a different path for the same ID, are replaced by explicit on.
+Ambiguous non-root catalog histories remain unknown instead of choosing one.
+
+A read-only check of the maintainer's active thread found both a shorter canonical
+filename and a larger file with an additional UUID suffix. Native thread/read
+reported the suffixed file. The old filename-only resolver chose the canonical
+file, and the hook validator rejected the reported current path. The captured
+five-minute diagnostic window did not include the user's later test message;
+this path failure was established separately from native metadata and a validator
+control. The fixed reader replayed the reported current file successfully. The
+engine regression creates that duplicate layout in its own scratch history/DB,
+then checks genuine CLI hooks, the runtime path and subsequent activity. It does
+not claim the CLI naturally created that fixture suffix.
+
+`hosts/codex/read.ts` shares the initialized stdio metadata/config request lifecycle.
+Its supported methods create no thread, resume no thread, write no configuration
+and make no model request. The on control uses event cwd, not metadata's older cwd. Creation source/originator and shared hook session_id do not
+identify the current frontend or concrete thread after a resume.
+
+The hook broadcasts by scanning foreground Codex panes on the default tmux server
+or an explicit socket. It uses an eight-second retry deadline, then exits. The
+command callback owns this bounded scan; no persistent inbox daemon is needed. It first reads
+effective saved footer settings and requires `session-id` somewhere in the selection.
+`hosts/codex/views.ts` splits the first configurable footer line into native
+separator-delimited fields below a recognizably empty composer, and requires one
+complete UUID field. Middle/tail layouts require an untruncated line containing
+one UUID field; substring matches, multiple UUID fields and clipped rows do not
+establish identity. A saved first-item layout can use its complete first field
+while later fields are clipped. This assumes the pane uses its saved footer
+selection; invocation/private selection overrides are not read back reliably.
+It never reads identities from chat text or clipped UUID prefixes. In checked `tui/src/chatwidget/status_surfaces.rs`,
+`StatusLineItem::SessionId => self.thread_id.map(|id| id.to_string())` supplies that
+value. One exact visible match is required across candidate panes; explicit pane
+selection cannot bypass duplicate matches. This binds the displayed conversation,
+not the frontend that emitted the event. A native UUID-named Git branch regression
+showed why clipping must be rejected: a branch UUID stayed complete while the real
+tail ID was shortened, and the previous shape-only parser selected the branch's
+thread. Startup and follow-mode recognition now use the same clipping rule. The
+prompt preflight sees only candidates for deciding whether to read configuration;
+it cannot activate a row. The final target check reloads saved footer settings.
+The worker uses first-item recognition only when every known view's saved/backup
+layout proves that position; layouts without a configured ID retain the existing agent-path and primary
+composer recognition instead. An event for another thread does not
+select a pane. Inherited terminal variables and creation metadata do not substitute
+for this binding.
+
+`outputs/tmux/target.ts` exposes candidate enumeration separately from the existing
+manual target resolver. Manual ancestry/unique-pane fallback is retained. Automatic
+startup rechecks the footer ID, uniqueness and TUI PID under a pane control lock
+before starting the normal helper. Once the hook has opted in and created its
+state directory, manual on/off use the same lock; status stays available during
+controls. Without that directory,
+manual controls retain their existing path and require no new home writes. Off writes a
+per-thread/TUI suppression marker under `CODEX_HOME/vargus/autostart`; a delayed
+callback cannot reactivate it. Explicit on clears the marker. Another thread or TUI
+PID has a separate key. Off before any binding exists resolves the displayed full
+ID or uses the existing manual target resolver, then records suppression before
+acknowledging off. Non-opt-in controls keep their old early return. Setup creates
+the opt-in directory before the first callback; custom servers and ambiguous
+unbound controls still need explicit targeting. The original early return was
+reproduced with real trusted payloads delivered after an acknowledged unbound off:
+the row activated without a new model request. A permanent wiring regression now
+covers that entry path as well as a first callback after /new. Markers are small
+files retained until removed by explicit on or local cleanup. Both handlers use
+the existing opt-in `codexAutoStart` flag. The CLI captures normal on stdout
+because hook stdout would become developer context.
+
+A trusted official 0.167.0 daemon probe kept a thread loaded in one TUI and
+resumed it in another. The second prompt emitted UserPromptSubmit without another
+SessionStart. Restarting only the scratch daemon made the next resume emit both
+hooks. In checked `app-server/src/request_processors/thread_processor.rs`,
+`resume_running_thread` returns the existing engine; a new engine queues the start
+source in `core/src/session/session.rs`. This selects UserPromptSubmit as a fallback
+rather than assuming a frontend reconnect always starts an engine session.
+
+An upgrade probe first loaded a thread with only SessionStart configured, then
+added UserPromptSubmit. A second TUI trusted the added entry through the normal
+startup dialog and resumed that loaded thread. The new prompt hook ran without
+another SessionStart. This follows `tui/src/hooks_rpc.rs`: accepting hook trust
+uses config/batchWrite with reload_user_config true, refreshing loaded hook
+runtimes. Upgrade instructions therefore include trusting the new entry in a
+reopened TUI; VArgus does not restart the shared daemon or write trust hashes.
+
+`vargus hook prompt` validates the same concrete transcript identity. It attempts
+activation once, with the same final pane/PID check and off suppression. Missing or
+hidden IDs and off markers return before config/read, avoiding a config subprocess
+and a polling window on ordinary already-on/off turns. No prompt text is used by
+the adapter. SessionStart retains bounded readiness retries. Two callbacks racing
+on cold startup use the existing pane lock; a contender skips if another control
+is pending. Neither handler makes a model request or creates a status card.
+
+The earlier trusted official 0.167.0 daemon test ran the hook below the daemon,
+with empty TMUX/TMUX_PANE and transcript source vscode despite a CLI originator.
+Checked `hooks/src/registry.rs` captures process environment, so ancestry and these
+variables cannot bind shared-daemon callbacks to the TUI. The test-only trust bypass
+also excludes daemon startup (`tui/src/daemon_startup.rs`); current daemon fixtures
+accept the actual isolated trust dialog and do not use that bypass. VArgus does not
+change daemon policy.
+
+A throwaway official 0.167.0 trusted-daemon/local-provider probe verified full footer
+IDs against transcript metadata on startup, after /new and after resume. In that
+probe /new emitted source startup. Two panes in the same directory had distinct
+IDs; opening the same thread in another pane produced duplicate IDs. At 30 columns
+the ID was clipped; clearing the configurable footer removed it. Resume initially
+showed “Resuming session…” without an ID, selecting bounded readiness checks rather
+than a guessed delay. The attempted separate exec control did not yield an observed
+hook callback and is not live detached-hook evidence.
+
+The official-engine/localhost regression uses a tail ID and verifies a loaded
+resume through UserPromptSubmit while the SessionStart trace remains unchanged.
+It also verifies first-turn shared-daemon activation despite a stale inherited thread ID, footer clearing, silent hook output
+in later provider inputs, manual off with saved config unchanged, and replay of the
+completed real callback after off. A separate trusted case without a saved full-ID
+selection leaves the row absent and native footer visible. The engine regression
+also activates a second pane independently and rebinds it after /new. Fixtures cover stale or detached IDs, duplicate matches, clipping,
+drafts and the locked identity recheck. Adding session-id to the crowded saved
+footer reproduced a first-child-visit failure: the full ID remained visible while
+the path was clipped. Exact known-family ID selection cleared the native footer
+and retained the row on first visits in the same controlled regression.
+These are supplied mock responses, not model-chosen actions. macOS, real-provider
+timing and general cross-frontend ownership remain unverified. Typing/navigation
+still share the existing observation race; missing identity or an exhausted scan
+requires explicit on or another matching SessionStart event. Saved footer backups,
+row attachment and exit restoration use the normal controls.
 
 #### Native footer control
 
