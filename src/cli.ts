@@ -17,7 +17,7 @@ import { makeTheme } from './theme'
 
 const HELP = `Usage:
   vargus on|off|status|reload [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
-  vargus hook session-start|prompt --config FILE [--pane %ID] [--socket PATH]
+  vargus hook session-start|prompt [--config FILE] [--pane %ID] [--socket PATH]
   vargus codex --tmux [--theme NAME] [--config FILE] -- [codex arguments]
   vargus claude --tmux [--theme NAME] [--config FILE] -- [claude arguments]
   vargus tmux-reset
@@ -26,6 +26,8 @@ The tmux row is opt-in. Standalone on/off hide/restore Codex's saved footer
 through tmux /statusline commands. Off removes the row; inactive views restore
 on their next empty-composer visit. The helper exits after restoration or TUI exit.
 FILE is a JSON object of VArgus options; no saved host settings change.
+Standalone drafts keep last-confirmed readings by default. Installed
+Codex startup hooks are enabled by default; neither needs an options file.
 After rebuilding, reload replaces the standalone helper and retains its options
 and on/off mode. Supplied options override retained values. Codex keeps running.
 Exit the wrapped CLI to restore the original tmux bar. After a crash, tmux-reset

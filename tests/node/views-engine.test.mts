@@ -206,11 +206,12 @@ trust_level = "trusted"
       }
       return 'restored'
     }
-    await submit(command('on', '--socket ' + quote(socket)))
+    const activation = '--socket ' + quote(socket)
+    await submit(command('on', activation))
     await wait(row, /session:/)
     assert.equal(posts, 0)
     let active = (await records())[0]
-    assert.equal(active.version, 5)
+    assert.equal(active.version, 6)
     if (!crowded) {
       const fake = join(dir, 'fake'), trace = join(dir, 'ps-trace.jsonl')
       await mkdir(fake)
@@ -226,7 +227,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
       await exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread, PATH: fake + ':' + process.env.PATH } })
       const observations = (await readFile(trace, 'utf8')).trim().split('\n').map(l => JSON.parse(l))
       assert.ok(observations.some(o => o.replies.length > 0 && o.records.length === 0), 'reply must be present after helper exit in the forced acknowledgement race')
-      await submit(command('on', '--socket ' + quote(socket)))
+      await submit(command('on', activation))
       active = (await records())[0]
     }
     const readsBeforeVisits = crowded ? await reads() : 0
@@ -275,6 +276,32 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
       assert.doesNotMatch((await screen()).slice((await screen()).lastIndexOf('Viewing sub-agent')), new RegExp(value.id))
       if (crowded) assert.doesNotMatch(await childFooter(), /GPT-6\.1-Sol|Context \d+% used/, 'configured native footer must be hidden on the first visit')
       assert.equal((await records())[0].selected, value.id)
+      if (!crowded) {
+        await tmux('send-keys', '-l', '-t', pane, 'a child draft')
+        await delay(1400)
+        const held = (await records())[0]
+        assert.equal(held.selected, undefined, 'typing cannot prove that the current view is the parent')
+        assert.equal(held.paused.thread, value.id)
+        assert.doesNotMatch(await row(), /\[paused:/)
+        assert.match(await row(), new RegExp('token:' + value.tokens.replace('.', '\\.')))
+        assert.doesNotMatch(await row(), /🤖\d+/)
+        await tmux('resize-window', '-t', 'test', '-x', '24', '-y', '53')
+        await delay(1200)
+        assert.equal((await records())[0].selected, undefined)
+        assert.equal((await records())[0].paused.thread, value.id)
+        await tmux('resize-window', '-t', 'test', '-x', String(columns), '-y', '53')
+        await delay(1200)
+        assert.match(await row(), new RegExp('token:' + value.tokens.replace('.', '\\.')))
+        assert.equal(posts, afterTurns)
+        console.log('PAUSED_CHILD', JSON.stringify({ child: value.id, path, tokens: value.tokens, held: held.paused,
+          selected: held.selected, providerPosts: posts }))
+        await tmux('send-keys', '-t', pane, 'C-e'); await delay(100)
+        await tmux('send-keys', '-t', pane, 'C-u')
+        await wait(async () => (await records())[0]?.selected ?? '', new RegExp('^' + value.id + '$'))
+        await wait(row, new RegExp('token:' + value.tokens.replace('.', '\\.')))
+        assert.equal((await records())[0].paused, undefined)
+        assert.doesNotMatch(await row(), /\[paused:/)
+      }
       visited.add(path)
     }
     assert.equal(visited.size, 2)

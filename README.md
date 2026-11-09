@@ -119,7 +119,9 @@ After updating the clone, run `npm run build` there, then `!vargus reload` in
 Codex. This explicit command replaces the standalone helper with the current built
 code while Codex, its daemon and conversation keep running. It retains effective
 options, replays recorded readings, rediscovers the displayed view, and keeps the
-original footer backups. Reload flags override retained options: `--config` merges
+original footer backups. Plain `on` also upgrades an older helper with reload
+metadata, preserving those options and backups; the retired draft-hold setting
+cannot disable paused readings. Reload flags override retained options: `--config` merges
 only supplied keys, and `--theme`/`--config` are applied in command order. A reload
 while off stays off, including pending footer restoration and manual-off suppression
 recorded by an interrupted off command.
@@ -133,7 +135,8 @@ The helper follows the displayed parent or subagent through Alt+Left/Right and
 `/subagents`. Each view shows its own recorded readings; child totals are not
 aggregated. VArgus matches Codex's contextual agent label to saved session metadata.
 If a popup, clipped label or ambiguous agent path prevents identification, the row
-is blank until the view can be identified again. `status` reports that pause.
+blanks until the view can be identified again, except for the last-confirmed draft
+snapshot described below. `status` reports the current view or pause.
 Without the optional startup hook, after `/new` or `/resume` run `!vargus on` again (with pane selection if needed)
 to bind the new conversation. Its token total covers recorded uncached input and output.
 Tool counts replay completed visible items and exclude `!` controls. `🤖2` counts
@@ -184,7 +187,16 @@ native footer through `/statusline` or restart Codex; retry `off` when the log i
 available to resume automatic restoration. An already-empty saved footer stays empty.
 
 Leave the composer empty when switching views and wait for footer automation before
-typing. Drafts pause automation and are preserved. A narrow pane may need widening
+typing. Drafts pause footer automation and are preserved. Standalone Codex keeps
+the last confirmed readings while typing hides the view label, including with plain
+`!vargus on`; no options file is needed. Readings and time stay frozen without an
+extra label in the row; `!vargus status` reports that the current view is unknown.
+These historical readings may belong to a different view after navigation.
+Live readings resume when the view is identified again. This needs a previously
+rendered snapshot in the current helper plus the native `% context left` or matched
+`Shell mode` hint. Dialogs, explicit foreign/clipped identities and unsupported
+layouts still blank the row. Reloading discards the snapshot until a view is
+recognized again. A narrow pane may need widening
 to fit the restore command or identify the agent. A visible native statusline error
 makes completion inconclusive, including an error from an earlier attempt: the
 backup remains. Resolve the error and move it out of view before retrying. This is
@@ -201,18 +213,12 @@ Saved session logs and composer recognition are version-sensitive interfaces.
 Compatibility is checked with fixtures and a live official-Codex/local-mock test
 on 0.167.0. Other prompt layouts can require a compatibility update.
 
-### Automatic startup in Codex (optional)
+### Automatic startup in Codex
 
-`codexAutoStart` defaults to false. To enable it, add `"codexAutoStart": true`
-to a VArgus JSON options file such as `~/.codex/vargus-options.json`:
+`codexAutoStart` defaults to true. Installed, trusted hooks use the defaults;
+an options file or `--config` argument is not needed.
 
-```json
-{
-  "codexAutoStart": true
-}
-```
-
-Create the opt-in state directory before your first session. This lets
+Create the startup state directory before your first session. This lets
 `!vargus off` remember your choice before any startup callback has run:
 
 ```sh
@@ -230,7 +236,7 @@ Add this entry to Codex's `~/.codex/hooks.json`, preserving any existing hooks:
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/.local/bin/vargus\" hook session-start --config \"$HOME/.codex/vargus-options.json\"",
+            "command": "\"$HOME/.local/bin/vargus\" hook session-start",
             "async": true,
             "timeout": 30
           }
@@ -242,7 +248,7 @@ Add this entry to Codex's `~/.codex/hooks.json`, preserving any existing hooks:
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/.local/bin/vargus\" hook prompt --config \"$HOME/.codex/vargus-options.json\"",
+            "command": "\"$HOME/.local/bin/vargus\" hook prompt",
             "async": true,
             "timeout": 30
           }
@@ -263,7 +269,9 @@ status_line = ["model-with-reasoning", "current-dir", "thread-name", "session-id
 ```
 
 Rebuild VArgus, start ordinary `codex` in tmux, then review and trust the hook
-through `/hooks`. Trust both entries, including the prompt fallback when upgrading
+through `/hooks`. When removing an older `--config` argument, update both VArgus
+commands and review their changed definitions in a reopened TUI before deleting
+the old options file. Trust both entries, including the prompt fallback when upgrading
 from a SessionStart-only setup. Shared-daemon mode is supported. In checked Codex 0.167.0,
 SessionStart runs with the first prompt: the native footer displays the thread ID
 until then. Reopening a thread already loaded in the shared daemon can omit
@@ -302,7 +310,8 @@ server need `--socket`; ambiguous panes can require `--pane`. Manual off is reme
 `!vargus on` clears that thread's suppression; another thread or a new Codex process
 has its own state. `/new` and resume can activate through SessionStart or the
 prompt fallback when the full ID is visible. Disable automatic startup by setting
-`codexAutoStart` to false or disabling the hook through `/hooks`; use
+`codexAutoStart` to false in an explicit `--config` file, or disabling the hook
+through `/hooks`; use
 `!vargus off` to remove an active row. Saved footer settings are changed only by
 the setup step above; on/off still use session-only commands.
 
@@ -452,8 +461,8 @@ of the reply. If the row stays empty:
 
 ## Configure
 
-Options are shown in `/config` under the plugin. New Claude display options default
-to off. The Codex model/counter defaults are described [above](#inside-official-codex);
+Options are shown in `/config` under the plugin. Existing option defaults are
+documented below. The Codex model/counter defaults are described [above](#inside-official-codex);
 their switches have no effect on the Claude line.
 
 - **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only the usage

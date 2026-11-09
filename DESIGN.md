@@ -184,16 +184,53 @@ matching; a full foreign ID stops selection. This also recognizes a child when a
 crowded footer clips its path. Without that ID, clipped paths, popups and other
 unrecognized views blank the row and pause footer commands. Log
 mtime is never a selection signal. The writable primary prompt uses the activation's
-thread identity when its Main label is absent; parent-owned child views use the
-read-only prompt. Without the optional startup hook, `/new` and `/resume` require `on` again; this is not a general
+thread identity when its Main label is absent; empty parent-owned child views use
+a dim placeholder even though their drafts remain editable. Without the optional startup hook, `/new` and `/resume` require `on` again; this is not a general
 external frontend-selection API. Future host format changes must
 be rechecked against these limits.
 
-#### Optional Codex SessionStart hook
+Display recognition is separate from permission to send footer commands. On
+0.167.0, parent-owned children also keep drafts editable; only submission is
+blocked. Their contextual labels disappear while typing, so a bold live arrow is
+not evidence that the primary thread is displayed. The observer leaves such a
+view unknown instead of assigning its readings to the root.
 
-`codexAutoStart` defaults to false in shared options and userConfig. Installing
-and trusting a separate SessionStart command hook, with an options file explicitly
-enabling it, opts into `vargus hook session-start`. It changes no Claude behavior.
+Standalone Codex preserves last-confirmed readings while typing by default,
+without a separate option. Once a view has rendered, the Node renderer keeps a deep copy
+of its values, options and render time. An unidentified editable draft can show
+that snapshot without an added label, as requested by the maintainer. Readings/time
+stay frozen; only fitting to the current width is repeated. Runtime `selected`
+remains unknown and separate paused
+metadata identifies the historical view. This is last-confirmed information, not
+proof of the currently displayed thread: source `8703d32bd0` gates Alt navigation
+on empty input but allows other routes, including selection of a preserved draft,
+and the observer can miss transitions between its polls. The user explicitly
+chose last readings after the indistinguishable child-draft probe and later asked
+to remove the visible paused marker.
+
+The display-only draft frame requires a bold live arrow (or `!`) and a native
+`% context left` hint (or `Shell mode` with a live `!`) below the textarea. It
+locates the complete footer after wrapped/multiline input, keeping typed agent
+paths and UUIDs outside that metadata. Native IDs retain ambiguity/clipping rules.
+No paused snapshot is shown for explicit foreign/clipped metadata, dim history or
+placeholders, reversed picker arrows, or other unrecognized screens. Existing
+Main/path selection remains intact. Startup matching and footer delivery retain
+their strict empty-editor guards. Off removes the row immediately. The snapshot
+is local to one loaded helper; reload or a fresh activation needs a recognized
+view before it can hold readings. Claude and the transport launcher do not use
+this standalone holding behavior.
+
+The official-TUI probes distinguished this from row allocation or helper exit:
+ordinary parent text lost selection while clearing restored it; typing the exact
+placeholder retained the old fallback. Child drafts hid their labels too. The
+initial draft-to-root proposal displayed parent totals for a child; the corrected
+behavior preserves unknown identity and retains a frozen historical snapshot.
+
+#### Codex startup hooks
+
+`codexAutoStart` defaults to true in shared options and userConfig. Installed,
+trusted SessionStart and UserPromptSubmit commands use those defaults without
+an options file. Hook installation is still required; this changes no Claude behavior.
 The [official hook documentation](https://learn.chatgpt.com/docs/hooks#sessionstart)
 provides stdin JSON and startup/resume/clear/fork source matching. The shipped
 example excludes compact: ordinary turns and compaction must not undo manual off.
@@ -274,7 +311,7 @@ reproduced with real trusted payloads delivered after an acknowledged unbound of
 the row activated without a new model request. A permanent wiring regression now
 covers that entry path as well as a first callback after /new. Markers are small
 files retained until removed by explicit on or local cleanup. Both handlers use
-the existing opt-in `codexAutoStart` flag. The CLI captures normal on stdout
+the `codexAutoStart` switch, enabled by default. The CLI captures normal on stdout
 because hook stdout would become developer context.
 
 A trusted official 0.167.0 daemon probe kept a thread loaded in one TUI and
@@ -292,6 +329,18 @@ another SessionStart. This follows `tui/src/hooks_rpc.rs`: accepting hook trust
 uses config/batchWrite with reload_user_config true, refreshing loaded hook
 runtimes. Upgrade instructions therefore include trusting the new entry in a
 reopened TUI; VArgus does not restart the shared daemon or write trust hashes.
+
+Removing a retired hook `--config` argument must also refresh already-loaded
+callbacks before deleting their options file. In checked source `8703d32bd0`,
+`ConfigBatchWriteParams.reload_user_config` says "hot-reload updated runtime
+settings into loaded threads after writing"; the config processor also accepts
+empty edits for this refresh. The official 0.167.0 daemon regression sends empty
+`config/batchWrite` edits with `reloadUserConfig:true`, checks unchanged saved
+config bytes and the loaded thread's new commands through `hooks/list`, and then
+deletes the retired file. Modified hooks skip until the normal TUI trust review;
+after trust, both a resumed frontend and the originally loaded frontend run the
+updated prompt hook without the file. Explicit missing user-supplied config files
+still fail; there is no general missing-file fallback.
 
 `vargus hook prompt` validates the same concrete transcript identity. It attempts
 activation once, with the same final pane/PID check and off suppression. Missing or
@@ -352,14 +401,17 @@ observation. Views in the same workspace share cached settings, while restore ba
 thread. Explicit `on` starts a fresh settings cache without replacing existing
 backups; failed workspace reads can retry without discarding other cached values.
 No config/read call sits between recognizing a new view and backing it up/clearing
-its footer. Worker v5 replaces older on-mode workers while retaining their backups.
-Explicit `on` can reuse the same-version helper; rebuilding alone does not change
-code already loaded in Node. `off` can still talk to v2, v3 and v4 workers.
+its footer. Worker v6 replaces older on-mode workers while retaining their backups.
+For a bound helper with reload metadata, bare `on` upgrades the helper and preserves
+its root, home and effective custom options. The retired draft-hold setting is
+dropped when resolving options. Explicit `on` can reuse the same-version helper;
+rebuilding alone does not change code already loaded in Node. `off` can still talk
+to earlier supported workers.
 
 Standalone `reload` is an explicit opt-in to replacing only the pane helper with
 the currently built CLI. It does not restart Codex, its daemon or the conversation,
 build packages, install a watcher, or apply to the separate `codex --tmux` launcher.
-The v5 runtime record carries version-1 reload metadata: CODEX_HOME and effective
+The runtime record carries version-1 reload metadata: CODEX_HOME and effective
 resolved options. Supplied flags merge over those retained options in command
 order; omitted keys retain their previous values. Older workers without metadata
 are refused before stopping: off followed by on with the original options enables
@@ -634,7 +686,7 @@ own tmux pane, code shared with VantageHUD.
 | A new repo; no code shared with VantageHUD | VantageHUD has no outside users to keep. A mod can import only its own files and `claude-code`, so VantageHUD's code could not be imported anyway |
 | Port VantageHUD's rules, not its code | Each rule came from a bug; the code around it was built for a process per frame. Each ported rule comes with a test |
 | 0.1.0's options are the fragment switches and a theme picker (default `graphite`); VantageHUD's other options are built in at their defaults | The maintainer's own VantageHUD config changes only the theme; fewer options to build and test. Custom themes, bar gauges and label overrides come later ([Config](#config)) |
-| Every new feature has its own flag, off by default | An upgrade must not change what someone's line shows |
+| Feature defaults follow AGENTS.md | The maintainer chose default-on feature work across hosts; existing option defaults are documented under Config |
 | The mod only observes: a hook on an engine event passes it on unchanged with `next(e)` | A status line has no reason to change or block what the engine and other mods do |
 | Setup is done by the agent: the plugin ships a `vargus-setup` skill; README.md has the manual steps | A plugin cannot set `statusLine`, so the person's settings must be edited once; the agent does it from the skill's steps |
 | The mod sits at the repo root, and the repo is its own marketplace; plugin name `vargus` | One repo to install from |
@@ -1065,8 +1117,8 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 ## Config
 
 - Flags and simple values are `userConfig` fields in `.claude-plugin/plugin.json`: shown in
-  `/config`, stored under `pluginConfigs`. New features default to off, except the
-  explicitly chosen Codex model/counter defaults described above.
+  `/config`, stored under `pluginConfigs`. AGENTS.md defines the feature-default
+  policy for every host and shared feature; the defaults below describe existing options.
 - 0.1.0's options: one boolean per fragment and sub-option ([Fragments](#fragments)), and
   `theme`, a picker (`options`) of VantageHUD's five palettes (`aurora`, `ember`, `nebula`,
   `graphite`, `daylight`), default `graphite`.

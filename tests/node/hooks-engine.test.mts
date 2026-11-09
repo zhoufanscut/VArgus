@@ -1,3 +1,4 @@
+import WebSocket from 'ws'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -13,7 +14,33 @@ import { setTimeout as delay } from 'node:timers/promises'
 const exec = promisify(execFile)
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
 
-for (const identity of [true, false]) test(`official Codex SessionStart ${identity ? 'broadcast activates in shared-daemon mode and respects manual off' : 'skips without an explicit full-ID footer'}`, { timeout: 90000 }, async () => {
+async function daemonRpc(method: string, params: unknown, env: NodeJS.ProcessEnv, cwd: string): Promise<any> {
+  const socket = new WebSocket('ws+unix://' + join(env.CODEX_HOME!, 'app-server-control', 'app-server-control.sock') + ':/')
+  try {
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(method + ' timed out')), 10000)
+      const fail = (error: Error) => { clearTimeout(timer); reject(error) }
+      socket.once('error', fail); socket.once('close', () => fail(new Error('Daemon connection closed')))
+      const send = (id: number, method: string, params: unknown) => socket.send(JSON.stringify({ id, method, params }))
+      socket.on('message', data => {
+        const reply = JSON.parse(data.toString())
+        if (reply.error) return fail(new Error(reply.error.message))
+        if (reply.id === 1) {
+          socket.send(JSON.stringify({ method: 'initialized' }))
+          send(2, method, params)
+        }
+        if (reply.id === 2) { clearTimeout(timer); resolve(reply.result) }
+      })
+      socket.once('open', () => send(1, 'initialize', { clientInfo: { name: 'vargus-hook-migration', version: '0.1.0' } }))
+    })
+  } finally { socket.close() }
+}
+
+for (const { identity, migration } of [
+  { identity: true, migration: false },
+  { identity: false, migration: false },
+  { identity: true, migration: true },
+]) test(`official Codex SessionStart ${migration ? 'refreshes cached hooks before removing the retired options file' : identity ? 'broadcast activates in shared-daemon mode and respects manual off' : 'skips without an explicit full-ID footer'}`, { timeout: 90000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hooks-test-'))
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
   for (const folder of [cfg, project, temporary]) await mkdir(folder)
@@ -150,16 +177,17 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     await tmux('-f', '/dev/null', 'new-session', '-d', '-s', 'test', '-x', '157', '-y', '40', 'sleep 120')
     pane = await tmux('display-message', '-p', '#{pane_id}')
     await tmux('set-window-option', 'remain-on-exit', 'on')
-    const options = join(dir, 'vargus-options.json')
-    await writeFile(options, JSON.stringify({ codexAutoStart: true }))
-    const hookCommand = quote(resolve('bin/vargus')) + ' hook session-start --config ' + quote(options) + ' --socket ' + quote(socket)
+    const retiredOptions = join(cfg, 'vargus-options.json')
+    if (migration) await writeFile(retiredOptions, JSON.stringify({ codexAutoStart: true }))
+    const hookCommand = quote(resolve('bin/vargus')) + ' hook session-start --socket ' + quote(socket)
     const trace = join(dir, 'hook-result.json'), promptTrace = join(dir, 'prompt-result.json'), wrapper = join(dir, 'hook-wrapper.mjs')
     await writeFile(wrapper, `import {spawnSync} from 'node:child_process';import {writeFileSync} from 'node:fs';let raw='';for await(const p of process.stdin)raw+=p;const result=spawnSync(process.argv[2],process.argv.slice(3),{input:raw,encoding:'utf8'});writeFileSync(JSON.parse(raw).hook_event_name==='SessionStart'?${JSON.stringify(trace)}:${JSON.stringify(promptTrace)},JSON.stringify({code:result.status,stdout:result.stdout,stderr:result.stderr,input:JSON.parse(raw)}));process.stdout.write(result.stdout||'');process.stderr.write(result.stderr||'');process.exitCode=result.status??1;`)
     const callback = (command: string) => ({ type: 'command', command: quote(process.execPath) + ' ' + quote(wrapper) + ' ' + command, async: true, timeout: 30 })
-    await writeFile(join(cfg, 'hooks.json'), JSON.stringify({ hooks: {
-      SessionStart: [{ matcher: '^(startup|resume|clear|fork)$', hooks: [callback(hookCommand)] }],
-      UserPromptSubmit: [{ hooks: [callback(hookCommand.replace('hook session-start', 'hook prompt'))] }],
-    } }))
+    const hookDefinition = (command: string) => JSON.stringify({ hooks: {
+      SessionStart: [{ matcher: '^(startup|resume|clear|fork)$', hooks: [callback(command)] }],
+      UserPromptSubmit: [{ hooks: [callback(command.replace('hook session-start', 'hook prompt'))] }],
+    } })
+    await writeFile(join(cfg, 'hooks.json'), hookDefinition(hookCommand + (migration ? ' --config ' + quote(retiredOptions) : '')))
     const launch = ['env', `CODEX_HOME=${cfg}`, `TMPDIR=${temporary}`, 'VARGUS_LOCAL_TEST_KEY=local-test-only',
       'NO_PROXY=127.0.0.1,localhost', 'no_proxy=127.0.0.1,localhost', 'codex', '--no-alt-screen', '-C', project].map(quote).join(' ')
     await tmux('respawn-pane', '-k', '-t', pane, launch + (seededId ? ' resume ' + quote(seededId) : ''))
@@ -208,14 +236,14 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     await submit('/statusline model-with-reasoning current-dir session-id')
     await wait(footer, footerMatches)
     const staleEvent = { ...hookResult.input, transcript_path: seededPath!.replace('_11111111-1111-1111-1111-111111111111', '') }
-    const stale = exec(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'prompt', '--config', options, '--socket', socket], {
+    const stale = exec(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'prompt', '--socket', socket], {
       cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1' },
     })
     stale.child.stdin!.end(JSON.stringify({ ...staleEvent, hook_event_name: 'UserPromptSubmit' }))
     assert.equal((await stale).stdout, '')
     await wait(footer, footerMatches)
     assert.equal(JSON.parse(await readFile(runtimePath, 'utf8')).transcript, seededPath)
-    const controlOn = () => exec(resolve('bin/vargus'), ['on', '--config', options, '--socket', socket, '--pane', pane], {
+    const controlOn = () => exec(resolve('bin/vargus'), ['on', '--socket', socket, '--pane', pane], {
       cwd: project, env: { ...env, CODEX_THREAD_ID: state.thread },
     })
     await controlOn()
@@ -233,8 +261,31 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     // Keep the first TUI attached so this is a loaded-thread resume. Its
     // native ID is hidden, leaving only the resumed pane as a visible match.
     const initialPane = pane, initialStartTrace = await readFile(trace, 'utf8')
+    if (migration) {
+      await writeFile(join(cfg, 'hooks.json'), hookDefinition(hookCommand))
+      const beforeRefresh = await readFile(join(cfg, 'config.toml'), 'utf8')
+      await daemonRpc('config/batchWrite', { edits: [], reloadUserConfig: true }, env, project)
+      assert.equal(await readFile(join(cfg, 'config.toml'), 'utf8'), beforeRefresh, 'empty refresh must not edit saved settings')
+      const cached = await daemonRpc('hooks/list', { threadId: state.thread }, env, project)
+      const hooks = cached.data[0].hooks
+      assert.equal(hooks.length, 2)
+      assert.ok(hooks.every((h: any) => !h.command.includes('--config') && h.trustStatus === 'modified'))
+      await rm(retiredOptions)
+      assert.equal((await readdir(cfg)).includes('vargus-options.json'), false)
+      const beforeTrust = await readFile(promptTrace, 'utf8')
+      await submit('Changed hooks awaiting trust review.')
+      await wait(async () => JSON.stringify(requests), /Changed hooks awaiting trust review/)
+      await wait(screen, /LOCAL CONTROL RESPONSE/)
+      await delay(300)
+      assert.equal(await readFile(promptTrace, 'utf8'), beforeTrust, 'modified hooks must skip instead of invoking the deleted config')
+      console.log('CACHED_HOOKS_REFRESHED', JSON.stringify(cached))
+    }
     pane = await tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'test', launch + ' resume ' + quote(state.thread))
     await tmux('set-window-option', '-t', pane, 'remain-on-exit', 'on')
+    if (migration) {
+      await wait(screen, /Trust all and continue/)
+      await tmux('send-keys', '-t', pane, 'Down', 'Enter')
+    }
     await wait(footer, footerMatches)
     await submit('Warm resumed conversation startup.')
     await wait(async () => { try { return await readFile(promptTrace, 'utf8') } catch { return '' } }, /Warm resumed conversation startup/)
@@ -247,6 +298,21 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     await wait(row, /^$/); await wait(footer, footerMatches)
     await submit('/exit')
     await wait(() => tmux('display-message', '-p', '-t', pane, '#{pane_dead}'), /^1$/)
+    if (migration) {
+      pane = initialPane
+      await submit(command('off', '--socket ' + quote(socket) + ' --pane ' + quote(pane)))
+      await wait(row, /^$/); await wait(footer, footerMatches)
+      await submit('Original loaded frontend after hook migration.')
+      await wait(async () => readFile(promptTrace, 'utf8'), /Original loaded frontend after hook migration/)
+      const refreshed = JSON.parse(await readFile(promptTrace, 'utf8'))
+      assert.equal(refreshed.code, 0, refreshed.stderr)
+      assert.equal(refreshed.stdout, ''); assert.equal(refreshed.stderr, '')
+      assert.equal(await row(), '', 'refreshed hooks preserve manual off')
+      console.log('CACHED_HOOKS_MIGRATED', JSON.stringify({ thread: state.thread, removed: retiredOptions, result: refreshed }))
+      await submit('/exit')
+      await wait(() => tmux('display-message', '-p', '-t', pane, '#{pane_dead}'), /^1$/)
+      return
+    }
     pane = initialPane
     await exec('git', ['init', '-q', '-b', state.thread], { cwd: project })
     await exec('git', ['-c', 'user.name=Local fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture'], { cwd: project })
@@ -266,7 +332,7 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     assert.ok(beforeCollision.includes('…'), 'positive control: actual tail is clipped')
     assert.ok(!beforeCollision.includes(actual), 'actual complete session ID is not displayed')
     const postsBeforeReplay = posts
-    const collisionReplay = exec(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'session-start', '--config', options, '--socket', socket], {
+    const collisionReplay = exec(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'session-start', '--socket', socket], {
       cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1' },
     })
     collisionReplay.child.stdin!.end(JSON.stringify(hookResult.input))
@@ -284,7 +350,7 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     await submit(command('off', '--socket ' + quote(socket)))
     await wait(row, /^$/); await wait(footer, footerMatches)
     assert.equal(posts, hookedPosts)
-    const replay = exec(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'session-start', '--config', options, '--socket', socket], {
+    const replay = exec(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'session-start', '--socket', socket], {
       cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1' },
     })
     replay.child.stdin!.end(JSON.stringify(hookResult.input))

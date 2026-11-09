@@ -10,6 +10,7 @@ import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 import { PaneInput } from '../../src/outputs/tmux/input'
 import { startupDirectory, startupSuppressed, startupControl } from '../../src/cli/startup'
+import { codexComposer } from '../../src/hosts/codex/footer'
 
 const exec = promisify(execFile)
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
@@ -135,7 +136,7 @@ trust_level = "trusted"
     }
     const optionsFile = join(dir, 'options.json')
     await writeFile(optionsFile, JSON.stringify({ session: false, codexAgentCounts: false }))
-    await submit(command('on', '--socket ' + quote(socket) + (initialPrompt ? ' --theme ember --config ' + quote(optionsFile) : '')))
+    await submit(command('on', '--socket ' + quote(socket)))
     await wait(screen, /VArgus is on/)
     await wait(footer, /for shortcuts/)
     assert.doesNotMatch(await footer(), /gpt-6\.1-sol|[0-9a-f]{8}-[0-9a-f-]{27}/i)
@@ -160,6 +161,101 @@ trust_level = "trusted"
     assert.doesNotMatch(metrics, /gpt-6\.1-sol/)
     await delay(1000); let afterTurn = posts
     assert.ok(afterTurn > 0, 'Positive control: a user turn reaches the same local model counter')
+    if (!initialPrompt) {
+      await tmux('send-keys', '-l', '-t', pane, 'Fresh default draft')
+      await delay(1400)
+      assert.doesNotMatch(await row(), /\[paused:/)
+      assert.match(await row(), new RegExp('token:' + expectedTokens.replace('.', '\\.')))
+      const controlDir = join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`)
+      const runtimePath = join(controlDir, (await readdir(controlDir)).find(n => n.endsWith('.json'))!)
+      const paused = JSON.parse(await readFile(runtimePath, 'utf8'))
+      assert.equal(paused.selected, undefined)
+      assert.equal(paused.paused.label, 'main')
+      await tmux('send-keys', '-t', pane, 'C-e', 'C-u')
+      await wait(async () => JSON.parse(await readFile(runtimePath, 'utf8')).selected ?? '', new RegExp(paused.thread))
+      assert.equal(posts, afterTurn)
+    }
+    if (initialPrompt) {
+      const controlDir = join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`)
+      const file = (await readdir(controlDir)).find(name => name.endsWith('.json'))!
+      const runtime = async () => JSON.parse(await readFile(join(controlDir, file), 'utf8'))
+      const beforeUpgrade = await runtime()
+      // Load a separate legacy-style worker: it reports v5 and retains the old
+      // false option. Bare on must replace that Node process and drop the key.
+      await symlink(resolve('node_modules'), join(dir, 'node_modules'))
+      const oldPath = join(dir, 'legacy.mjs')
+      let old = await readFile(resolve('dist/cli.mjs'), 'utf8')
+      for (const [from, to] of [
+        ['var workerVersion = 6;', 'var workerVersion = 5;'],
+        ['var DEFAULTS = {', 'var DEFAULTS = { codexDraftHold: false,'],
+        ['const hold = !!(lastReadings', 'const hold = !!(options.codexDraftHold && lastReadings'],
+      ] as const) {
+        assert.equal(old.split(from).length, 2, from)
+        old = old.replace(from, to)
+      }
+      await writeFile(oldPath, old)
+      await exec(process.execPath, [oldPath, 'reload', '--config', optionsFile, '--theme', 'ember'], {
+        cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1', CODEX_THREAD_ID: beforeUpgrade.thread },
+      })
+      const legacy = await runtime()
+      assert.equal(legacy.version, 5)
+      assert.equal(legacy.reload.options.codexDraftHold, false)
+      const backupName = (await readdir(footerDir))[0]!
+      const backup = await readFile(join(footerDir, backupName), 'utf8')
+      const upgraded = await exec(resolve('bin/vargus'), ['on'], {
+        cwd: project, env: { ...env, CODEX_THREAD_ID: legacy.thread },
+      })
+      assert.match(upgraded.stdout, /helper upgraded/)
+      const active = await runtime(), input = new PaneInput(active.target)
+      assert.notEqual(active.pid, legacy.pid)
+      assert.equal(active.version, 6)
+      assert.equal(active.thread, legacy.thread)
+      assert.equal(active.transcript, legacy.transcript)
+      assert.deepEqual(active.target, legacy.target)
+      assert.equal(active.reload.home, legacy.reload.home)
+      assert.equal(active.reload.options.theme, 'ember')
+      assert.equal(active.reload.options.session, false)
+      assert.equal(active.reload.options.codexAgentCounts, false)
+      assert.equal('codexDraftHold' in active.reload.options, false)
+      assert.equal(await readFile(join(footerDir, backupName), 'utf8'), backup)
+      assert.equal(posts, afterTurn)
+      console.log('LEGACY_UPGRADED', JSON.stringify({ legacyPid: legacy.pid, pid: active.pid, tuiPid: active.target.pid,
+        thread: active.thread, options: active.reload.options, posts }))
+      for (const text of ['normal draft', 'first line\nsecond line', 'a long draft '.repeat(25),
+        'draft\n\n`/root/child` · ← for agents\nffffffff-ffff-ffff-ffff-ffffffffffff\n100% context left', '/stat', '!printf local-draft-only']) {
+        const shell = text.startsWith('!')
+        if (shell) { await tmux('send-keys', '-l', '-t', pane, '!'); await delay(200) }
+        await tmux('set-buffer', '-b', 'typing-test', shell ? text.slice(1) : text)
+        await tmux('paste-buffer', '-p', '-d', '-b', 'typing-test', '-t', pane)
+        // Observe past the render interval so a stale pre-draft row cannot pass.
+        await delay(1400)
+        assert.match(await row(), /token:6\.4k/, JSON.stringify({ text, screen: await input.snapshot(), state: await runtime() }))
+        assert.doesNotMatch(await row(), /\[paused:/)
+        assert.equal((await runtime()).selected, undefined)
+        assert.equal((await runtime()).paused.thread, active.thread)
+        assert.equal(codexComposer(await input.snapshot(), ''), false)
+        await tmux('send-keys', '-t', pane, 'C-a'); await delay(1200)
+        assert.match(await row(), /token:6\.4k/, 'moving the draft caret must keep the row')
+        assert.equal((await runtime()).selected, undefined)
+        assert.equal((await runtime()).paused.thread, active.thread)
+        assert.equal(await readFile(join(footerDir, backupName), 'utf8'), backup)
+        assert.equal(posts, afterTurn)
+        console.log('DRAFT_DISPLAY', JSON.stringify({ shell, multiline: text.includes('\n'), chars: text.length,
+          thread: active.thread, selected: (await runtime()).selected, paused: (await runtime()).paused, postsBefore: afterTurn, postsAfter: posts }))
+        await tmux('send-keys', '-t', pane, 'Escape'); await delay(200)
+        for (let clear = 0; clear < 8; clear++) {
+          await tmux('send-keys', '-t', pane, 'C-e'); await delay(40)
+          await tmux('send-keys', '-t', pane, 'C-u'); await delay(40)
+          await tmux('send-keys', '-t', pane, 'BSpace'); await delay(40)
+        }
+        assert.equal(codexComposer(await input.snapshot(), ''), true)
+        await wait(row, /token:6\.4k/)
+        const until = Date.now() + 3000
+        while ((await runtime()).selected !== active.thread && Date.now() < until) await delay(100)
+        assert.equal((await runtime()).selected, active.thread)
+        assert.equal((await runtime()).paused, undefined)
+      }
+    }
     if (initialPrompt) {
       const controlDir = join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`)
       const runtimeName = (await readdir(controlDir)).find(name => name.endsWith('.json'))!
@@ -170,7 +266,6 @@ trust_level = "trusted"
       const original = await readFile(join(footerDir, backupName), 'utf8')
       // A separate built entry proves replacement loads changed code, rather
       // than acknowledging a request in the old Node process.
-      await symlink(resolve('node_modules'), join(dir, 'node_modules'))
       const bundlePath = join(dir, 'cli.mjs')
       const bundle = await readFile(resolve('dist/cli.mjs'), 'utf8')
       assert.ok(bundle.includes('await output.update(line);'))
@@ -204,6 +299,7 @@ trust_level = "trusted"
       assert.equal(second.reload.options.theme, 'ember')
       assert.equal(second.reload.options.session, false)
       assert.equal(second.reload.options.codexAgentCounts, false)
+      assert.equal('codexDraftHold' in second.reload.options, false)
       assert.match(await row(), /token:6\.4k/)
       assert.equal(await readFile(join(footerDir, backupName), 'utf8'), original)
       await writeFile(optionsFile, JSON.stringify({ session: true }))

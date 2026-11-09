@@ -8,7 +8,7 @@ import { randomBytes, createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { TmuxOutput } from '../outputs/tmux/client'
 import { findRollout, RolloutReader } from '../hosts/codex/rollout'
-import { Views } from '../hosts/codex/views'
+import { Views, hiddenDraft } from '../hosts/codex/views'
 import { applicationTarget, type Target } from '../outputs/tmux/target'
 import { PaneInput } from '../outputs/tmux/input'
 import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, FooterSettings, type FooterSelection } from '../hosts/codex/footer'
@@ -17,9 +17,11 @@ import { makeTheme } from '../theme'
 import { codexLine } from './line'
 import { withControlLock } from './lock'
 import { startupControl, startupTarget, hasStartupState, startupSuppressed } from './startup'
+import { cleanText } from '../render/text'
 
 type Running = { pid: number; thread: string; transcript?: string; target: Target; token: string; version?: number;
   mode?: 'on' | 'restore'; selected?: string; pending?: number; error?: string;
+  paused?: { thread: string; label: string };
   reload?: { version: 1; home: string; options: Record<string, unknown> } }
 type FooterBackup = { thread: string; target: Target; selection: FooterSelection }
 type Spec = { target: Target; thread: string; transcript: string; home: string;
@@ -27,6 +29,7 @@ type Spec = { target: Target; thread: string; transcript: string; home: string;
 type Recovery = { version: 1; spec: Spec }
 type Request = { id: string; action: 'on' | 'off' }
 const exec = promisify(execFile)
+const workerVersion = 6
 const controlRoot = () => join(tmpdir(), `vargus-control-${process.getuid?.() ?? 'user'}`)
 const running = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
 const recordPath = (target: Target) => join(controlRoot(), createHash('sha256').update(target.socket + '\0' + target.pane).digest('hex') + '.json')
@@ -157,7 +160,9 @@ export async function standalone(args: string[], automatic = false): Promise<num
   if (automatic && !automaticSelection?.includes('session-id')) return 0
   const perform = async () => {
   let current = await readRunning(recordPath(target))
-  if (action === 'reload') {
+  const migrating = action === 'on' && current && current.version !== workerVersion &&
+    current.thread === thread && current.reload?.version === 1
+  if (action === 'reload' || migrating) {
     const live = await applicationTarget('codex', target.socket, target.pane)
     if (!sameTarget(live, target) || current && !sameTarget(current.target, target)) throw new Error('Reload stopped: the Codex process in this pane changed.')
     const recovery = await json<Recovery>(recoveryPath(target))
@@ -175,14 +180,14 @@ export async function standalone(args: string[], automatic = false): Promise<num
     await new RolloutReader(transcript, retained.thread, process.cwd(), homedir()).poll()
     // Off admission records intent before delivery; cancellation can leave the
     // old helper on. Preserve that intent in both replacement and retry state.
-    const mode = await startupSuppressed(home, target, retained.thread) ? 'restore' : retained.mode
+    const mode = migrating ? 'on' : await startupSuppressed(home, target, retained.thread) ? 'restore' : retained.mode
     const spec: Spec = { ...retained, mode, transcript, options: resolveOptions({ ...retained.options, ...options }), token: randomBytes(16).toString('hex') }
     await save(recoveryPath(target), { version: 1, spec } satisfies Recovery)
     if (current) await stopWorker(current)
     try {
       const reply = await startWorker(spec)
       await rm(recoveryPath(target), { force: true })
-      console.log(`VArgus helper reloaded. ${description(reply)}`)
+      console.log(`VArgus helper ${migrating ? 'upgraded' : 'reloaded'}. ${description(reply)}`)
     } catch (error) {
       await new TmuxOutput(target.socket, target.pane).cleanupAbandoned()
       throw new Error(`Reload could not start the replacement: ${(error as Error).message} Footer backups and reload options are retained. Retry !vargus reload; !vargus off restores the footer.`)
@@ -196,7 +201,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
   }
   const requestedTranscript = action === 'on' ? await findRollout(home, thread!, process.env.VARGUS_CODEX_TRANSCRIPT) : undefined
   await rm(recoveryPath(target), { force: true })
-  if (current && ((action === 'off' && [2, 3, 4, 5].includes(current.version!)) || (current.version === 5 && current.thread === thread && current.transcript === requestedTranscript))) {
+  if (current && ((action === 'off' && [2, 3, 4, 5, workerVersion].includes(current.version!)) || (current.version === workerVersion && current.thread === thread && current.transcript === requestedTranscript))) {
     const reply = await request(current, action as 'on' | 'off')
     console.log(action === 'on' ? `VArgus is already on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))
     return 0
@@ -277,12 +282,14 @@ export async function rowWorker(spec: Spec): Promise<number> {
   let mode = spec.mode, selected: string | undefined, error: string | undefined
   let stopping = false, attached = false, refreshAt = 0, renderAt = 0
   let lastConfirmed: string | undefined, readingError: string | undefined, published = ''
+  let lastReadings: { thread: string; label: string; line: ReturnType<typeof codexLine> } | undefined
+  let paused: Running['paused']
   let identity: 'first' | 'whole' | 'none' = 'none'
   const stop = () => { stopping = true }
   process.on('SIGTERM', stop); process.on('SIGHUP', stop)
-  const state = async (): Promise<Running> => ({ pid: process.pid, thread, transcript: spec.transcript, target, token: spec.token, version: 5,
+  const state = async (): Promise<Running> => ({ pid: process.pid, thread, transcript: spec.transcript, target, token: spec.token, version: workerVersion,
     reload: { version: 1, home: spec.home, options },
-    mode, selected, pending: (await backups(target)).length, error })
+    mode, selected, paused, pending: (await backups(target)).length, error })
   const step = async () => {
     if (Date.now() >= refreshAt) {
       await views.refresh()
@@ -328,9 +335,12 @@ export async function rowWorker(spec: Spec): Promise<number> {
       } catch (e) { error = (e as Error).message }
     }
     if (!view) error = 'View identity is unknown; widen the pane or close the popup and leave the composer empty.'
-    if (mode === 'on' && (changed || Date.now() >= renderAt)) {
+    const hold = !!(lastReadings && !view && hiddenDraft(screen))
+    if (mode !== 'on') paused = undefined
+    if (mode === 'on' && (changed || Date.now() >= renderAt || hold !== !!paused)) {
       renderAt = Date.now() + 1000
       let line = ''
+      paused = undefined
       if (view) {
         readingError = undefined
         try {
@@ -341,7 +351,14 @@ export async function rowWorker(spec: Spec): Promise<number> {
           }
           await value.reader.poll()
           line = await value.line(await output.width())
+          if (line) lastReadings = { thread: view.thread, label: cleanText(view.path ?? 'main'), line: value.line }
         } catch (e) { readingError = (e as Error).message }
+      } else if (hold) {
+        const frozen = lastReadings!.line.paused(await output.width())
+        if (frozen) {
+          line = frozen
+          paused = { thread: lastReadings!.thread, label: lastReadings!.label }
+        }
       }
       await output.update(line)
       // Thread switches rebuild the terminal surface. Redraw once at a confirmed
@@ -351,6 +368,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
         lastConfirmed = view.thread
       }
     }
+    if (paused) error = `Readings paused from ${paused.label} (${paused.thread}); the current view is unknown.`
     error ??= readingError
     const value = await state(), serialized = JSON.stringify(value)
     if (serialized !== published) { await save(file, value); published = serialized }

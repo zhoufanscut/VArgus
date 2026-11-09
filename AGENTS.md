@@ -37,9 +37,9 @@ DESIGN.md "Unsettled" with a throwaway mod before building on it.
 - **Evidence before ideas.** Back each proposed feature or design choice with a measured number or
   a quoted source (types, docs, CHANGELOG, VantageHUD's code), and say which candidates the
   evidence rules out. A list of plausible ideas gets rejected.
-- **New features are opt-in.** Each new feature, or new behaviour inside an existing element,
-  gets its own `userConfig` flag defaulting to off, and a README line saying how to turn it on.
-  Bug fixes need no flag.
+- **Features are enabled by default.** This applies to every host and shared feature,
+  including new behaviour inside an existing element. Make a feature opt-in only when
+  the user explicitly requests it. Document how to use the feature in README.md.
 - **VantageHUD is a read-only reference.** Port its rules (DESIGN.md "Rules carried over from
   VantageHUD") as a rule plus a test; never copy its code or import it. Never edit VantageHUD.
 - **Mod API facts come from the build's own types.** Load the `plugin-authoring` skill to get

@@ -18,7 +18,7 @@ test('SessionStart derives identity from the transcript independently of creatio
     await writeFile(file, JSON.stringify(meta) + '\n')
     const event = { hook_event_name: 'SessionStart', source: 'startup', session_id: 'shared-session',
       transcript_path: file, cwd: '/current/workspace' }
-    assert.equal(DEFAULTS.codexAutoStart, false)
+    assert.equal(DEFAULTS.codexAutoStart, true)
     assert.deepEqual(await hookSession({ ...event, hook_event_name: 'UserPromptSubmit', source: undefined, prompt: 'unused' }, home, 'UserPromptSubmit'), { thread: 'current', cwd: '/current/workspace', transcript: await realpath(file) })
     for (const source of ['startup', 'resume', 'clear', 'fork']) {
       assert.deepEqual(await hookSession({ ...event, source }, home), { thread: 'current', cwd: '/current/workspace', transcript: await realpath(file) })
@@ -35,16 +35,21 @@ test('SessionStart derives identity from the transcript independently of creatio
 
 
 for (const command of ['session-start', 'prompt']) test(`disabled ${command} exits without reading an unavailable transcript`, async () => {
-  const child = spawn(process.execPath, [resolve('dist/cli.mjs'), 'hook', command], {
-    env: { ...process.env, VARGUS_CLI_MAIN: '1' }, stdio: ['pipe', 'pipe', 'pipe'],
-  })
-  let output = '', errors = ''
-  child.stdout.on('data', data => { output += data })
-  child.stderr.on('data', data => { errors += data })
-  child.stdin.end(JSON.stringify({ hook_event_name: command === 'prompt' ? 'UserPromptSubmit' : 'SessionStart', source: 'startup',
-    transcript_path: '/unavailable/transcript.jsonl', cwd: '/unavailable' }))
-  const [code] = await once(child, 'close')
-  assert.equal(code, 0, errors); assert.equal(output, ''); assert.equal(errors, '')
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-hook-disabled-'))
+  const options = join(dir, 'options.json')
+  await writeFile(options, JSON.stringify({ codexAutoStart: false }))
+  try {
+    const child = spawn(process.execPath, [resolve('dist/cli.mjs'), 'hook', command, '--config', options], {
+      env: { ...process.env, VARGUS_CLI_MAIN: '1' }, stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let output = '', errors = ''
+    child.stdout.on('data', data => { output += data })
+    child.stderr.on('data', data => { errors += data })
+    child.stdin.end(JSON.stringify({ hook_event_name: command === 'prompt' ? 'UserPromptSubmit' : 'SessionStart', source: 'startup',
+      transcript_path: '/unavailable/transcript.jsonl', cwd: '/unavailable' }))
+    const [code] = await once(child, 'close')
+    assert.equal(code, 0, errors); assert.equal(output, ''); assert.equal(errors, '')
+  } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
 const first = '01a1bdc7-7e98-7dd3-bfbf-0dd7710dcd91'
@@ -160,7 +165,6 @@ test('prompt fallback skips config reads when the native ID is hidden or off is 
     await mkdir(startupDirectory(home), { recursive: true })
     const transcript = join(home, 'sessions', `rollout-${first}.jsonl`)
     await writeFile(transcript, JSON.stringify({ type: 'session_meta', payload: { id: first, cwd: dir, source: 'cli' } }) + '\n')
-    const options = join(dir, 'options.json'); await writeFile(options, JSON.stringify({ codexAutoStart: true }))
     await writeFile(join(dir, 'tmux'), `#!${process.execPath}
 const fs=require('node:fs');if(process.argv.includes('list-panes'))console.log('/scratch/socket\\t%0\\t810000\\tcodex');else console.log(JSON.parse(fs.readFileSync(${JSON.stringify(display)},'utf8')).join('\\n')+'\\n2\\t1\\t157\\t1\\tcodex');
 `, { mode: 0o755 })
@@ -169,7 +173,7 @@ const fs=require('node:fs');if(process.argv.includes('list-panes'))console.log('
 require('node:fs').appendFileSync(${JSON.stringify(marker)},'read\\n');process.exit(91);
 `, { mode: 0o755 })
     const invoke = async () => {
-      const child = spawn(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'prompt', '--config', options], {
+      const child = spawn(process.execPath, [resolve('dist/cli.mjs'), 'hook', 'prompt'], {
         env: { ...process.env, PATH: dir + ':' + process.env.PATH, CODEX_HOME: home, VARGUS_CLI_MAIN: '1' },
         stdio: ['pipe', 'pipe', 'pipe'],
       })
@@ -191,5 +195,17 @@ require('node:fs').appendFileSync(${JSON.stringify(marker)},'read\\n');process.e
     assert.notEqual(attempted.code, 0)
     assert.equal(attempted.out, '')
     assert.match(await readFile(marker, 'utf8'), /read/, 'positive control: eligible unsuppressed input reaches config/read')
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+for (const command of ['session-start', 'prompt']) test(`${command} rejects an explicit missing options file`, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-hook-missing-'))
+  try {
+    const child = spawn(process.execPath, [resolve('dist/cli.mjs'), 'hook', command, '--config', join(dir, 'missing.json')], {
+      env: { ...process.env, VARGUS_CLI_MAIN: '1' }, stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let errors = ''; child.stderr.on('data', data => { errors += data }); child.stdin.end('{}')
+    const [code] = await once(child, 'close')
+    assert.notEqual(code, 0); assert.match(errors, /ENOENT.*missing.json/)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

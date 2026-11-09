@@ -15,7 +15,7 @@ const exec = promisify(execFile)
 
 export async function hook(args: string[]): Promise<number> {
   const event = args[0] === 'session-start' ? 'SessionStart' : args[0] === 'prompt' ? 'UserPromptSubmit' : undefined
-  if (!event) throw new Error('Use vargus hook session-start|prompt --config FILE.')
+  if (!event) throw new Error('Use vargus hook session-start|prompt [--config FILE].')
   const flags = args.slice(1)
   let given: Record<string, unknown> = {}, socket: string | undefined, pane: string | undefined
   for (let i = 0; i < flags.length; i += 2) {

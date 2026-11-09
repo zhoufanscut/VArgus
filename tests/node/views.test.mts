@@ -3,10 +3,12 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Views, type ViewScreen } from '../../src/hosts/codex/views'
+import { Views, footerThread, footerCandidates, hiddenDraft, type ViewScreen } from '../../src/hosts/codex/views'
+import { codexComposer } from '../../src/hosts/codex/footer'
 
 const screen = (footer: string, composer = 'Viewing sub-agent — direct input is disabled'): ViewScreen => ({
-  lines: ['old transcript mentions `/root/first`', '› ' + composer, '', '  ' + footer], x: 2, y: 1, visible: true, command: 'codex',
+  lines: ['old transcript mentions `/root/first`', '› ' + (['Ask Codex to do anything', 'Viewing sub-agent — direct input is disabled'].includes(composer)
+    ? '\x1b[2m' + composer + '\x1b[0m' : composer), '', '  ' + footer], x: 2, y: 1, visible: true, command: 'codex',
 })
 test('view identity uses the contextual footer and known family, rejecting missing, truncated and ambiguous paths', async () => {
   const home = await mkdtemp(join(tmpdir(), 'vargus-views-'))
@@ -29,6 +31,8 @@ test('view identity uses the contextual footer and known family, rejecting missi
     assert.equal(views.selected(screen('`/root/second` · ← for agents'))?.thread, 'second')
     assert.equal(views.selected(screen('`/root/first/nested` · ← for agents'))?.thread, 'nested')
     assert.equal(views.selected(screen('Main [default] · ← for agents', 'Ask Codex to do anything'))?.thread, 'parent')
+    assert.equal(views.selected(screen('Main [default] · ← for agents', 'an existing draft'))?.thread, 'parent')
+    assert.equal(views.selected(screen('`/root/first` · ← for agents', 'an existing draft'))?.thread, 'first')
     for (const footer of ['`/root/first…', '`/unknown`', 'for shortcuts', '']) assert.equal(views.selected(screen(footer)), undefined)
     assert.equal(views.selected({ ...screen('`/root/first`'), command: 'bash' }), undefined)
     assert.equal(views.selected({ ...screen('`/root/first`'), visible: false }), undefined)
@@ -82,4 +86,60 @@ test('the reported root transcript is pinned when old and session-suffixed logs 
     assert.equal(views.known.get('parent')?.cwd, '/current')
     await views.refresh(); assert.equal(views.known.get('parent')?.file, current)
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('unlabelled drafts retain unknown identity while footer and startup readers require empty input', () => {
+  const parent = '01a1bdc7-7e98-7dd3-bfbf-0dd7710dcd91'
+  const child = '01a1bdc7-869e-78d0-a59c-bac2ec7bd0ae'
+  const foreign = '01a10000-0000-0000-0000-000000000000'
+  const views = new Views('/unused', parent)
+  views.known.set(parent, { thread: parent, file: '/parent', cwd: '/project' })
+  views.known.set(child, { thread: child, parent, path: '/root/child', file: '/child', cwd: '/project' })
+  const draft = (text: string[], cursor = text.length - 1, footer = ['  82% context left'], prefix = '\x1b[1m›\x1b[0m '): ViewScreen => ({
+    lines: ['old submitted prompt', prefix + text[0], ...text.slice(1).map(line => '  ' + line), '', ...footer, '', ''],
+    x: 2 + text[cursor]!.length, y: 1 + cursor, visible: true, command: 'codex',
+  })
+  for (const text of [['normal draft'], ['Ask Codex to do anything'], ['first line', 'second line'],
+    ['long wrapped first line', 'wrapped continuation', 'last line'],
+    ['draft', '', '`/root/child` · ← for agents', child, '100% context left'], ['/stat']]) {
+    for (let cursor = 0; cursor < text.length; cursor++) {
+      const current = draft(text, cursor)
+      assert.equal(views.selected(current), undefined)
+      assert.equal(hiddenDraft(current), true)
+      assert.equal(codexComposer(current, ''), false, 'display recognition must not admit footer keys')
+      assert.equal(footerThread(current), undefined, 'startup identity must still require empty input')
+      assert.deepEqual(footerCandidates(current), [])
+      assert.equal(views.selected({ ...current, x: 2 }), undefined, 'caret position cannot establish view identity')
+    }
+  }
+  for (const prefix of ['\x1b[1;38;5;214m›\x1b[0m ', '\x1b[1;38;2;246;197;67m›\x1b[0m ']) {
+    assert.equal(hiddenDraft(draft(['draft'], 0, undefined, prefix)), true)
+  }
+  assert.equal(hiddenDraft(draft(['printf draft'], 0, ['  Shell mode'], '\x1b[1;31m!\x1b[0m ')), true)
+  assert.equal(views.selected(draft(['draft'], 0, ['  Shell mode'])), undefined)
+  assert.equal(views.selected(draft(['draft'], 0, undefined, '\x1b[1m!\x1b[0m ')), undefined)
+  assert.equal(views.selected(draft(['draft'], 0, ['  ' + child, '  82% context left']))?.thread, child)
+  assert.equal(views.selected(draft(['draft'], 0, ['  ' + foreign, '  82% context left'])), undefined)
+  assert.equal(hiddenDraft(draft(['draft'], 0, ['  ' + foreign, '  82% context left'])), false)
+  const clipped = draft(['draft'], 0, ['  ' + parent + ' · model · ' + child.slice(0, 28) + '…', '  82% context left'])
+  assert.equal(views.selected(clipped), undefined)
+  assert.equal(hiddenDraft(clipped), false)
+  assert.equal(views.selected(clipped, 'first')?.thread, parent)
+  for (const prefix of ['\x1b[1;2m› \x1b[0m', '\x1b[1;7m›\x1b[0m ', '› ']) {
+    assert.equal(views.selected(draft(['draft'], 0, undefined, prefix)), undefined, 'history and modal selection arrows are not live editors')
+    assert.equal(hiddenDraft(draft(['draft'], 0, undefined, prefix)), false)
+  }
+  for (const placeholder of ['Ask Codex to d', 'Viewing sub-agent — d']) {
+    const clipped = draft(['\x1b[2m' + placeholder + '\x1b[0m'])
+    assert.equal(views.selected({ ...clipped, x: 2 }), undefined, 'a clipped dim placeholder is not a draft')
+    assert.equal(hiddenDraft({ ...clipped, x: 2 }), false)
+  }
+  const current = draft(['draft'])
+  assert.equal(views.selected({ ...current, visible: false }), undefined)
+  assert.equal(hiddenDraft({ ...current, visible: false }), false)
+  assert.equal(views.selected({ ...current, command: 'bash' }), undefined)
+  assert.equal(hiddenDraft({ ...current, command: 'bash' }), false)
+  assert.equal(views.selected(draft(['draft'], 0, ['  unrelated dialog'])), undefined)
+  assert.equal(views.selected(draft(['Ask Codex to do anything'], 0, ['  unrelated dialog'])), undefined,
+    'typing placeholder words is not evidence of an empty primary editor, even without the draft hint')
 })

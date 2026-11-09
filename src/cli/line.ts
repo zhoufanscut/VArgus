@@ -4,8 +4,10 @@ import { resolveOptions } from '../options'
 import { render } from '../render'
 import { makeTheme } from '../theme'
 import { en } from '../i18n/en'
+import type { FragmentInput } from '../core/types'
 
 export function codexLine(collector: CodexCollector, o: ReturnType<typeof resolveOptions>, t: ReturnType<typeof makeTheme>) {
+  let confirmed: FragmentInput | undefined
   let line: (width: number, thread?: string) => Promise<string>
       let gitAt = 0
       let gitCwd = ''
@@ -25,7 +27,15 @@ export function codexLine(collector: CodexCollector, o: ReturnType<typeof resolv
             gitReading = undefined
           })
         }
-        return render({ v, o, l: en, t, now: Date.now() })
+        const frame = { v, o, l: en, t, now: Date.now() }
+        const result = render(frame)
+        if (result) confirmed = { ...frame, v: structuredClone(v), o: { ...o } }
+        return result
       }
-  return line
+  return Object.assign(line, {
+    paused(width: number): string {
+      if (!confirmed) return ''
+      return render({ ...confirmed, v: { ...confirmed.v, core: { ...confirmed.v.core, columns: width } } })
+    },
+  })
 }

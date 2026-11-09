@@ -73,7 +73,9 @@ export function footerCandidates(screen: ViewScreen): string[] {
   return footerFields(screen)?.filter(isId) ?? []
 }
 export function footerThread(screen: ViewScreen, firstItem = false): string | undefined {
-  const fields = footerFields(screen)
+  return threadField(footerFields(screen), firstItem)
+}
+function threadField(fields: string[] | undefined, firstItem: boolean): string | undefined {
   if (!fields) return
   if (firstItem) return fields[0] && isId(fields[0]) ? fields[0] : undefined
   if (fields.some(field => field.includes('…'))) return
@@ -81,16 +83,77 @@ export function footerThread(screen: ViewScreen, firstItem = false): string | un
   return ids.length === 1 ? ids[0] : undefined
 }
 
+// The live editable arrow is bold; submitted prompts are dimmed and popup
+// selections can be reversed. Ignore colour parameters when reading modifiers.
+function livePrompt(line: string): boolean {
+  const prefix = line.match(/^((?:\x1b\[[0-9;]*m)+)[›!](?:\x1b\[[0-9;]*m)* /)?.[1]
+  if (!prefix) return false
+  const codes = prefix.replace(/(?:38|48);(?:5;\d+|2;\d+;\d+;\d+)/g, '').match(/\d+/g) ?? []
+  const modifiers = new Set<number>()
+  for (const code of codes.map(Number)) {
+    if (code === 0) modifiers.clear()
+    else if (code === 22) { modifiers.delete(1); modifiers.delete(2) }
+    else if (code === 27) modifiers.delete(7)
+    else modifiers.add(code)
+  }
+  return modifiers.has(1) && !modifiers.has(2) && !modifiers.has(7)
+}
+
+// Display-only recognition of 0.167.0's editable draft. The native context/shell hint
+// anchors the footer below the textarea; cursor-relative slices can read draft
+// continuation lines as agent labels or IDs. Footer delivery keeps its separate
+// strict empty-composer guard, as do the exported startup ID readers above.
+function draftFrame(screen: ViewScreen): { start: number; footer: string[] } | undefined {
+  if (screen.x < 2) return
+  let end = screen.lines.length - 1
+  while (end > screen.y && !plain(screen.lines[end]!).trim()) end--
+  const hint = plain(screen.lines[end] ?? '').trim(), shell = /\bShell mode$/.test(hint)
+  if (end <= screen.y || (!shell && !/\b\d+% context left$/.test(hint))) return
+  let footer = end
+  while (footer > screen.y + 1 && plain(screen.lines[footer - 1]!).trim()) footer--
+  if (footer <= screen.y + 1 || plain(screen.lines[footer - 1]!).trim()) return
+  let start = screen.y
+  while (start >= 0 && !livePrompt(screen.lines[start] ?? '')) {
+    const line = plain(screen.lines[start] ?? '')
+    if (line.trim() && !line.startsWith('  ')) return
+    start--
+  }
+  if (start < 0) return
+  // Parent-owned children retain a bold arrow but have a dim placeholder, which
+  // can be clipped before the existing empty-composer guard recognizes it.
+  if (/\x1b\[(?:[0-9]+;)*2m(?:Ask Codex|Viewing sub-agent)/.test(screen.lines[start]!)) return
+  if (plain(screen.lines[start]!).startsWith('! ') !== shell) return
+  for (let i = start + 1; i < footer - 1; i++) {
+    const line = plain(screen.lines[i]!)
+    if (line.trim() && !line.startsWith('  ')) return
+  }
+  return { start, footer: screen.lines.slice(footer, end + 1).map(plain) }
+}
+
+// An unlabelled editable draft can belong to any view. It permits showing a
+// historical snapshot, never assigning current readings to the root.
+export function hiddenDraft(screen: ViewScreen): boolean {
+  if (!screen.visible || screen.command !== 'codex' || codexComposer(screen, '')) return false
+  const draft = draftFrame(screen)
+  if (!draft) return false
+  const footer = draft.footer.join('\n')
+  return !/[`…]/.test(footer) && !/^\s*Main \[default\]/m.test(footer)
+    && !draft.footer.some(line => line.split(' · ').some(field => isId(field.trim())))
+}
+
 // Both saved-log and transport catalogs use the same versioned UI recognition.
 export function selectedView<T extends { thread: string; path?: string }>(screen: ViewScreen,
   family: T[], root: string, identity: 'first' | 'whole' | 'none' = 'whole'): T | undefined {
     if (!screen.visible || screen.command !== 'codex') return
-    const composer = plain(screen.lines[screen.y] ?? '')
-    if (!composer.startsWith('› ')) return
-    const footer = screen.lines.slice(screen.y + 1, screen.y + 4).map(plain).filter(l => l.trim()).join('\n').trim()
+    const draft = codexComposer(screen, '') ? undefined : draftFrame(screen)
+    const composer = plain(screen.lines[draft?.start ?? screen.y] ?? '')
+    if (!composer.startsWith('› ') && !(draft && composer.startsWith('! '))) return
+    const rows = draft?.footer ?? screen.lines.slice(screen.y + 1, screen.y + 4).map(plain).filter(l => l.trim())
+    const footer = rows.join('\n').trim()
     if (identity !== 'none') {
-      const id = footerThread(screen, identity === 'first')
-      if (footerCandidates(screen).length || footerFields(screen)?.some(field => field.includes('…'))) {
+      const fields = draft ? rows[0]?.split(' · ').map(item => item.trim()) : footerFields(screen)
+      const id = threadField(fields, identity === 'first')
+      if (fields?.some(field => isId(field) || field.includes('…'))) {
         return id ? family.find(view => view.thread === id) : undefined
       }
     }
@@ -100,8 +163,8 @@ export function selectedView<T extends { thread: string; path?: string }>(screen
       return matched.length === 1 ? matched[0] : undefined
     }
     if (/^Main \[default\](?: ·|$)/.test(footer)) return family.find(view => view.thread === root)
-    // Parent-owned child views use the read-only placeholder. The writable
-    // primary may lack a Main label (including before tracked children load).
+    // Empty parent-owned children use a dim placeholder but allow editable
+    // drafts. Only the empty primary fallback can use the activation root.
     // Standalone /new and /resume still require a fresh !vargus on binding.
-    if (composer === '› Ask Codex to do anything') return family.find(view => view.thread === root)
+    if (codexComposer(screen, '') && composer === '› Ask Codex to do anything') return family.find(view => view.thread === root)
 }

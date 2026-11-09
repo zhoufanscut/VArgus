@@ -152,7 +152,7 @@
       "type": "boolean",
       "title": "Codex: automatic tmux startup",
       "description": "Allow the optional SessionStart hook to enable VArgus; requires separate Codex hook setup and has no effect in Claude",
-      "default": false
+      "default": true
     }
   }
 }
