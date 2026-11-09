@@ -3,12 +3,13 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 import { PaneInput } from '../../src/outputs/tmux/input'
+import { startupDirectory, startupSuppressed, startupControl } from '../../src/cli/startup'
 
 const exec = promisify(execFile)
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
@@ -132,7 +133,9 @@ trust_level = "trusted"
       assert.equal(await row(), '')
       await tmux('set-option', '-u', '-t', 'test', 'status')
     }
-    await submit(command('on', '--socket ' + quote(socket)))
+    const optionsFile = join(dir, 'options.json')
+    await writeFile(optionsFile, JSON.stringify({ session: false, codexAgentCounts: false }))
+    await submit(command('on', '--socket ' + quote(socket) + (initialPrompt ? ' --theme ember --config ' + quote(optionsFile) : '')))
     await wait(screen, /VArgus is on/)
     await wait(footer, /for shortcuts/)
     assert.doesNotMatch(await footer(), /gpt-6\.1-sol|[0-9a-f]{8}-[0-9a-f-]{27}/i)
@@ -157,6 +160,70 @@ trust_level = "trusted"
     assert.doesNotMatch(metrics, /gpt-6\.1-sol/)
     await delay(1000); let afterTurn = posts
     assert.ok(afterTurn > 0, 'Positive control: a user turn reaches the same local model counter')
+    if (initialPrompt) {
+      const controlDir = join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`)
+      const runtimeName = (await readdir(controlDir)).find(name => name.endsWith('.json'))!
+      const runtimePath = join(controlDir, runtimeName)
+      const runtime = async () => JSON.parse(await readFile(runtimePath, 'utf8'))
+      const first = await runtime()
+      const backupName = (await readdir(footerDir))[0]!
+      const original = await readFile(join(footerDir, backupName), 'utf8')
+      // A separate built entry proves replacement loads changed code, rather
+      // than acknowledging a request in the old Node process.
+      await symlink(resolve('node_modules'), join(dir, 'node_modules'))
+      const bundlePath = join(dir, 'cli.mjs')
+      const bundle = await readFile(resolve('dist/cli.mjs'), 'utf8')
+      assert.ok(bundle.includes('await output.update(line);'))
+      const changed = bundle.replace('await output.update(line);', 'await output.update(line + " RELOAD_BUILD_B");')
+      await writeFile(bundlePath, changed)
+      const control = (action: string, flags: string[] = []) => exec(process.execPath, [bundlePath, action, ...flags], {
+        cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1', CODEX_THREAD_ID: first.thread },
+      })
+      // PID/token verification and TUI identity checks precede replacement.
+      await writeFile(runtimePath, JSON.stringify({ ...first, token: 'unrelated-worker-token' }))
+      assert.match((await control('reload', ['--socket', socket, '--pane', pane])).stdout, /nothing to reload/)
+      assert.ok((await row()).includes('token:'))
+      await writeFile(runtimePath, JSON.stringify({ ...first, version: 4, reload: undefined }))
+      await assert.rejects(control('reload'), /older helper has no reload options metadata/)
+      assert.equal((await runtime()).pid, first.pid)
+      await writeFile(runtimePath, JSON.stringify({ ...first, target: { ...first.target, pid: process.pid } }))
+      await assert.rejects(control('reload', ['--socket', socket, '--pane', pane]), /Codex process.*changed/)
+      await writeFile(runtimePath, JSON.stringify(first))
+      await rename(first.transcript, first.transcript + '.held')
+      await assert.rejects(control('reload'))
+      assert.equal((await runtime()).pid, first.pid, 'unreadable transcript keeps healthy helper')
+      await rename(first.transcript + '.held', first.transcript)
+      assert.match((await control('reload')).stdout, /helper reloaded/)
+      await wait(row, /RELOAD_BUILD_B/)
+      const second = await runtime()
+      assert.notEqual(second.pid, first.pid)
+      assert.notEqual(second.token, first.token)
+      assert.deepEqual(second.target, first.target, 'same official TUI process and pane')
+      assert.equal(second.thread, first.thread)
+      assert.equal(second.transcript, first.transcript)
+      assert.equal(second.reload.options.theme, 'ember')
+      assert.equal(second.reload.options.session, false)
+      assert.equal(second.reload.options.codexAgentCounts, false)
+      assert.match(await row(), /token:6\.4k/)
+      assert.equal(await readFile(join(footerDir, backupName), 'utf8'), original)
+      await writeFile(optionsFile, JSON.stringify({ session: true }))
+      await control('reload', ['--config', optionsFile, '--theme', 'graphite'])
+      assert.equal((await runtime()).reload.options.session, true)
+      assert.equal((await runtime()).reload.options.codexAgentCounts, false)
+      assert.equal((await runtime()).reload.options.theme, 'graphite')
+      // Replacement failure keeps the handoff and backups for the next command.
+      await writeFile(bundlePath, 'if (process.argv[2] === "__row") throw new Error("CONTROLLED_START_FAILURE");\n' + changed)
+      await assert.rejects(control('reload'), /CONTROLLED_START_FAILURE.*Footer backups.*retained/s)
+      assert.equal(await row(), '')
+      assert.equal(await readFile(join(footerDir, backupName), 'utf8'), original)
+      await writeFile(bundlePath, changed)
+      await control('reload')
+      await wait(row, /RELOAD_BUILD_B/)
+      assert.equal((await runtime()).reload.options.session, true)
+      assert.equal(posts, afterTurn, 'reloads make no provider request; normal prompt above is positive control')
+      console.log(JSON.stringify({ reload: { firstPid: first.pid, replacementPid: second.pid, tuiPid: second.target.pid,
+        thread: second.thread, marker: 'RELOAD_BUILD_B', tokens: '6.4k', postsBefore: afterTurn, postsAfter: posts } }))
+    }
     // A second official TUI makes automatic pane selection ambiguous.
     const firstPane = pane
     // Read this real TUI's identity without another synthetic !/Enter exchange.
@@ -195,18 +262,57 @@ trust_level = "trusted"
     await delay(100)
     const input = new PaneInput(active.target)
     const draftScreen = await input.snapshot()
+    if (initialPrompt) {
+      await mkdir(startupDirectory(cfg), { recursive: true })
+      // Fail after actual off admission but before worker delivery. The independent
+      // real-TUI regression also terminates an off process at this boundary.
+      await assert.rejects(startupControl(cfg, active.target, active.thread, 'off', false, async () => {
+        throw new Error('off interrupted before request delivery')
+      }), /off interrupted/)
+      const previous = JSON.parse(await readFile(join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`, activeFile), 'utf8'))
+      assert.equal(previous.mode, 'on')
+      const result = await exec(resolve('bin/vargus'), ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+      assert.match(result.stdout, /helper reloaded.*VArgus is off/s)
+      const replacement = JSON.parse(await readFile(join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`, activeFile), 'utf8'))
+      assert.notEqual(replacement.pid, previous.pid)
+      assert.equal(replacement.mode, 'restore')
+      assert.equal(await row(), '')
+      assert.equal(await startupSuppressed(cfg, active.target, active.thread), true)
+    }
     const deferred = await exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
     assert.match(deferred.stdout, /VArgus is off;.*pending restoration/)
     assert.equal(await row(), '')
     const afterDraft = await input.snapshot()
     assert.equal(afterDraft.lines[afterDraft.y], draftScreen.lines[draftScreen.y], 'draft with placeholder words must be preserved')
     assert.equal(afterDraft.x, draftScreen.x)
+    if (initialPrompt) {
+      await mkdir(startupDirectory(cfg), { recursive: true })
+      // Repeat off after enabling suppression state, then reload during a draft.
+      await exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+      const offState = JSON.parse(await readFile(join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`, activeFile), 'utf8'))
+      const reloaded = await exec(resolve('bin/vargus'), ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+      assert.match(reloaded.stdout, /helper reloaded.*VArgus is off/s)
+      const restore = JSON.parse(await readFile(join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`, activeFile), 'utf8'))
+      assert.notEqual(restore.pid, offState.pid)
+      assert.equal(restore.mode, 'restore')
+      assert.equal(await row(), '')
+      assert.equal(await startupSuppressed(cfg, active.target, active.thread), true)
+      const kept = await input.snapshot()
+      assert.equal(kept.lines[kept.y], draftScreen.lines[draftScreen.y])
+      assert.equal(kept.x, draftScreen.x)
+    }
     await tmux('send-keys', '-t', pane, 'End', 'C-u')
     await submit(command('off')); await wait(() => tmux('show-options', '-t', 'test'), new RegExp('^' + before.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'))
     assert.equal(await tmux('show-options', '-t', 'test'), before)
     await wait(footer, footerMatches)
     assert.equal(await readFile(join(cfg, 'config.toml'), 'utf8'), savedConfig)
     assert.equal(posts, afterTurn)
+    if (initialPrompt) {
+      const result = await exec(resolve('bin/vargus'), ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+      assert.match(result.stdout, /VArgus is off/)
+      assert.equal(await row(), '')
+      assert.equal(await startupSuppressed(cfg, active.target, active.thread), true)
+    }
     // Replay must restore existing totals without another model request.
     await submit(command('on', '--socket ' + quote(socket) + ' --pane ' + pane))
     await wait(row, new RegExp('token:' + expectedTokens.replace('.', '\\.')))

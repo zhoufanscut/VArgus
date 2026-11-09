@@ -94,6 +94,7 @@ Start ordinary `codex` in tmux. Run controls from its primary conversation view:
 ```text
 !vargus on
 !vargus status
+!vargus reload
 !vargus off
 ```
 
@@ -111,8 +112,22 @@ pane. With several matching panes, select the intended one explicitly:
 
 A custom tmux socket also needs `--socket /path/to/socket`. Codex's shared daemon
 can inherit another terminal's environment, so pane selection does not trust
-`TMUX_PANE`. Once attached, `off` and `status` use the saved thread binding.
+`TMUX_PANE`. Once attached, `off`, `status` and `reload` use the saved thread binding.
 `--theme ember` and `--config /path/to/options.json` apply on activation.
+
+After updating the clone, run `npm run build` there, then `!vargus reload` in
+Codex. This explicit command replaces the standalone helper with the current built
+code while Codex, its daemon and conversation keep running. It retains effective
+options, replays recorded readings, rediscovers the displayed view, and keeps the
+original footer backups. Reload flags override retained options: `--config` merges
+only supplied keys, and `--theme`/`--config` are applied in command order. A reload
+while off stays off, including pending footer restoration and manual-off suppression
+recorded by an interrupted off command.
+An older helper without reload metadata stays running and reports how to migrate:
+run `!vargus off`, then `!vargus on` with your original options once. Unreadable
+history leaves a healthy helper running. Failed replacement retains backups and
+options for another `reload`; `off` remains available for footer recovery. Reload
+does not build or install anything, and does not support `vargus codex --tmux`.
 
 The helper follows the displayed parent or subagent through Alt+Left/Right and
 `/subagents`. Each view shows its own recorded readings; child totals are not

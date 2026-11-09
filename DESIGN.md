@@ -352,9 +352,33 @@ observation. Views in the same workspace share cached settings, while restore ba
 thread. Explicit `on` starts a fresh settings cache without replacing existing
 backups; failed workspace reads can retry without discarding other cached values.
 No config/read call sits between recognizing a new view and backing it up/clearing
-its footer. Worker v4 replaces older on-mode workers while retaining their backups,
-so an explicit `on` after rebuilding loads the model/counter changes. `off` can
-still talk to v2 and v3 workers.
+its footer. Worker v5 replaces older on-mode workers while retaining their backups.
+Explicit `on` can reuse the same-version helper; rebuilding alone does not change
+code already loaded in Node. `off` can still talk to v2, v3 and v4 workers.
+
+Standalone `reload` is an explicit opt-in to replacing only the pane helper with
+the currently built CLI. It does not restart Codex, its daemon or the conversation,
+build packages, install a watcher, or apply to the separate `codex --tmux` launcher.
+The v5 runtime record carries version-1 reload metadata: CODEX_HOME and effective
+resolved options. Supplied flags merge over those retained options in command
+order; omitted keys retain their previous values. Older workers without metadata
+are refused before stopping: off followed by on with the original options enables
+reload without guessing their custom configuration.
+
+All standalone mutations share a pane admission lock, including when hooks are
+disabled. The optional startup lock still guards hook identity and off suppression.
+Reload checks the foreground TUI PID, resolves the bound root's current saved
+transcript and replays it before stopping the helper; the worker PID/token is
+checked again before signalling. It saves a versioned recovery handoff before
+replacement, retaining root, target, mode, home and options. Original per-view
+backups remain separate and are never replaced with an already-hidden layout.
+The replacement rediscovers the displayed view and replays each view's own log.
+Restore mode and manual-off markers remain off. The retained root's off marker
+takes precedence even if an interrupted off left the old runtime in on mode.
+A fully off pane has nothing to
+reload. Successful startup removes the handoff; failure removes abandoned row
+ownership but keeps backups and handoff for retry. Explicit on/off supersedes the
+handoff. Unavailable history fails preflight without stopping a healthy helper.
 
 A read-only trace on 2026-11-08 captured the first-visit failure with a populated
 fullscreen footer: the full child path appeared, Git counts arrived and clipped it,

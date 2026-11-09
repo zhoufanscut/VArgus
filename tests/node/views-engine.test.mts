@@ -210,7 +210,7 @@ trust_level = "trusted"
     await wait(row, /session:/)
     assert.equal(posts, 0)
     let active = (await records())[0]
-    assert.equal(active.version, 4)
+    assert.equal(active.version, 5)
     if (!crowded) {
       const fake = join(dir, 'fake'), trace = join(dir, 'ps-trace.jsonl')
       await mkdir(fake)
@@ -278,6 +278,23 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
       visited.add(path)
     }
     assert.equal(visited.size, 2)
+    if (!crowded) {
+      const previous = (await records())[0]
+      const footerDir = join(controlRoot, 'footers')
+      const saved = new Map(await Promise.all((await readdir(footerDir)).map(async name => [name, await readFile(join(footerDir, name), 'utf8')] as const)))
+      const result = await exec(resolve('bin/vargus'), ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+      assert.match(result.stdout, /helper reloaded/)
+      const replacement = (await records())[0]
+      assert.notEqual(replacement.pid, previous.pid)
+      assert.deepEqual(replacement.target, previous.target)
+      assert.equal(replacement.thread, active.thread)
+      assert.equal(replacement.selected, expected.get(lastPath)!.id)
+      await wait(row, new RegExp('token:' + expected.get(lastPath)!.tokens.replace('.', '\\.')))
+      assert.doesNotMatch(await row(), /🤖\d+/)
+      for (const [name, content] of saved) assert.equal(await readFile(join(footerDir, name), 'utf8'), content)
+      assert.equal(posts, afterTurns)
+      active = replacement
+    }
     assert.match((await readFile(join(dir, 'physical.log'), 'utf8')).slice(physicalOffset), /session:0m/)
     if (crowded) {
       assert.ok(readsBeforeVisits > 0, 'positive control: config/read helper was observed during activation')

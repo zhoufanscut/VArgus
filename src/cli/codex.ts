@@ -16,13 +16,15 @@ import { resolveOptions } from '../options'
 import { makeTheme } from '../theme'
 import { codexLine } from './line'
 import { withControlLock } from './lock'
-import { startupControl, startupTarget, hasStartupState } from './startup'
+import { startupControl, startupTarget, hasStartupState, startupSuppressed } from './startup'
 
 type Running = { pid: number; thread: string; transcript?: string; target: Target; token: string; version?: number;
-  mode?: 'on' | 'restore'; selected?: string; pending?: number; error?: string }
+  mode?: 'on' | 'restore'; selected?: string; pending?: number; error?: string;
+  reload?: { version: 1; home: string; options: Record<string, unknown> } }
 type FooterBackup = { thread: string; target: Target; selection: FooterSelection }
 type Spec = { target: Target; thread: string; transcript: string; home: string;
   options: Record<string, unknown>; token: string; mode: 'on' | 'restore' }
+type Recovery = { version: 1; spec: Spec }
 type Request = { id: string; action: 'on' | 'off' }
 const exec = promisify(execFile)
 const controlRoot = () => join(tmpdir(), `vargus-control-${process.getuid?.() ?? 'user'}`)
@@ -31,6 +33,7 @@ const recordPath = (target: Target) => join(controlRoot(), createHash('sha256').
 const footerRoot = () => join(controlRoot(), 'footers')
 const footerPath = (target: Target, thread: string) => join(footerRoot(), createHash('sha256').update(JSON.stringify([target.socket, target.pane, target.pid, thread])).digest('hex') + '.json')
 const requestPath = (r: { token: string }) => join(controlRoot(), r.token + '.request')
+const recoveryPath = (target: Target) => recordPath(target) + '.reload'
 const replyPath = (id: string) => join(controlRoot(), id + '.reply')
 const sameTarget = (a: Target, b: Target) => a.socket === b.socket && a.pane === b.pane && a.pid === b.pid
 async function json<T>(file: string): Promise<T | undefined> {
@@ -61,6 +64,9 @@ async function backups(target: Target): Promise<FooterBackup[]> {
   return result
 }
 async function stopWorker(current: Running): Promise<void> {
+  const live = await readRunning(recordPath(current.target))
+  if (!live) return
+  if (live.pid !== current.pid || live.token !== current.token) throw new Error('VArgus helper changed before it could be stopped; retry.')
   process.kill(current.pid, 'SIGTERM')
   const until = Date.now() + 6000
   while (await readRunning(recordPath(current.target)) && Date.now() < until) await delay(50)
@@ -122,6 +128,10 @@ export async function standalone(args: string[], automatic = false): Promise<num
   const bindings = new Map<string, { target: Target; thread: string }>()
   if (thread && !pane && !socket) {
     for (const name of await readdir(controlRoot())) {
+      if (name.endsWith('.json.reload')) {
+        const value = (await json<Recovery>(join(controlRoot(), name)))?.spec
+        if (value?.thread === thread && running(value.target.pid)) bindings.set(recordPath(value.target), value)
+      }
       if (!name.endsWith('.json')) continue
       const value = await readRunning(join(controlRoot(), name))
       if (value?.thread === thread) bindings.set(recordPath(value.target), value)
@@ -145,15 +155,48 @@ export async function standalone(args: string[], automatic = false): Promise<num
   const target = existing?.target ?? await applicationTarget('codex', socket, pane)
   const automaticSelection = automatic ? await savedFooter(process.cwd()) : undefined
   if (automatic && !automaticSelection?.includes('session-id')) return 0
-  return startupControl(home, target, thread, action!, automatic, async () => {
+  const perform = async () => {
   let current = await readRunning(recordPath(target))
+  if (action === 'reload') {
+    const live = await applicationTarget('codex', target.socket, target.pane)
+    if (!sameTarget(live, target) || current && !sameTarget(current.target, target)) throw new Error('Reload stopped: the Codex process in this pane changed.')
+    const recovery = await json<Recovery>(recoveryPath(target))
+    if (!current && !recovery) { console.log('No verified standalone helper; nothing to reload.'); return 0 }
+    if (current && (current.reload?.version !== 1 || !current.transcript || !current.mode)) {
+      throw new Error('This older helper has no reload options metadata. It is still running. Run !vargus off, then !vargus on with your original --config/--theme options once to enable reload.')
+    }
+    const retained: Spec = current ? { target, thread: current.thread, transcript: current.transcript!, home: current.reload!.home,
+      options: current.reload!.options, mode: current.mode!, token: current.token } : recovery!.spec
+    if (!current && recovery?.version !== 1) throw new Error('Reload stopped: unsupported recovery metadata. Run !vargus off, then on with your options.')
+    if (!sameTarget(retained.target, target) || retained.home !== home) throw new Error('Reload stopped: saved helper binding or CODEX_HOME differs.')
+    // Resolve and replay before stopping a healthy helper. Readings are rebuilt by
+    // the replacement, and the saved footer backups remain independently owned.
+    const transcript = await findRollout(home, retained.thread)
+    await new RolloutReader(transcript, retained.thread, process.cwd(), homedir()).poll()
+    // Off admission records intent before delivery; cancellation can leave the
+    // old helper on. Preserve that intent in both replacement and retry state.
+    const mode = await startupSuppressed(home, target, retained.thread) ? 'restore' : retained.mode
+    const spec: Spec = { ...retained, mode, transcript, options: resolveOptions({ ...retained.options, ...options }), token: randomBytes(16).toString('hex') }
+    await save(recoveryPath(target), { version: 1, spec } satisfies Recovery)
+    if (current) await stopWorker(current)
+    try {
+      const reply = await startWorker(spec)
+      await rm(recoveryPath(target), { force: true })
+      console.log(`VArgus helper reloaded. ${description(reply)}`)
+    } catch (error) {
+      await new TmuxOutput(target.socket, target.pane).cleanupAbandoned()
+      throw new Error(`Reload could not start the replacement: ${(error as Error).message} Footer backups and reload options are retained. Retry !vargus reload; !vargus off restores the footer.`)
+    }
+    return 0
+  }
   if (current && !sameTarget(current.target, target)) { await stopWorker(current); current = undefined }
   if (action === 'status') {
     console.log(current ? description(current) : (await backups(target)).length ? 'VArgus is off; footer restoration is pending. Run !vargus off.' : 'VArgus is off.')
     return 0
   }
   const requestedTranscript = action === 'on' ? await findRollout(home, thread!, process.env.VARGUS_CODEX_TRANSCRIPT) : undefined
-  if (current && ((action === 'off' && [2, 3, 4].includes(current.version!)) || (current.version === 4 && current.thread === thread && current.transcript === requestedTranscript))) {
+  await rm(recoveryPath(target), { force: true })
+  if (current && ((action === 'off' && [2, 3, 4, 5].includes(current.version!)) || (current.version === 5 && current.thread === thread && current.transcript === requestedTranscript))) {
     const reply = await request(current, action as 'on' | 'off')
     console.log(action === 'on' ? `VArgus is already on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))
     return 0
@@ -182,7 +225,22 @@ export async function standalone(args: string[], automatic = false): Promise<num
     await save(file, { target, thread: root, selection })
   }
   if (current) await stopWorker(current)
-  const spec: Spec = { target, thread: root, transcript, home, options, token: randomBytes(16).toString('hex'), mode: action === 'on' ? 'on' : 'restore' }
+  const spec: Spec = { target, thread: root, transcript, home, options: resolveOptions(options), token: randomBytes(16).toString('hex'), mode: action === 'on' ? 'on' : 'restore' }
+  try {
+    const reply = await startWorker(spec)
+    console.log(action === 'on' ? `VArgus is on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))
+  } catch (error) {
+    if (newBackup && !(error as Error & { attached?: boolean }).attached) await rm(file, { force: true })
+    throw error
+  }
+  return 0
+  }
+  return startupControl(home, target, thread, action!, automatic,
+    () => action === 'status' ? perform() : withControlLock(recordPath(target) + '.control', perform),
+    automaticSelection?.[0] === 'session-id')
+}
+
+async function startWorker(spec: Spec): Promise<Running> {
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '__row', JSON.stringify(spec)], {
     detached: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'], env: { ...process.env, VARGUS_CLI_MAIN: '1' },
   })
@@ -195,14 +253,18 @@ export async function standalone(args: string[], automatic = false): Promise<num
       child.once('exit', code => { clearTimeout(timer); reject(new Error(`VArgus could not start (${code}). ${errors}`)) })
       child.on('message', value => { attached = true; if ((value as any).stage === 'attached') return; clearTimeout(timer); resolve(value as Running) })
     })
-    console.log(action === 'on' ? `VArgus is on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))
+    return reply
   } catch (error) {
-    child.kill('SIGTERM')
-    if (newBackup && !attached) await rm(file, { force: true })
+    // Wait for detach/runtime cleanup before a retry can acquire the pane lock.
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>(resolve => child.once('exit', () => resolve()))
+      child.kill('SIGTERM')
+      const timer = setTimeout(() => child.kill('SIGKILL'), 2000)
+      try { await exited } finally { clearTimeout(timer) }
+    }
+    ;(error as Error & { attached?: boolean }).attached = attached
     throw error
   } finally { child.stderr!.destroy(); if (child.connected) child.disconnect(); child.unref() }
-  return 0
-  }, automaticSelection?.[0] === 'session-id')
 }
 
 export async function rowWorker(spec: Spec): Promise<number> {
@@ -218,7 +280,8 @@ export async function rowWorker(spec: Spec): Promise<number> {
   let identity: 'first' | 'whole' | 'none' = 'none'
   const stop = () => { stopping = true }
   process.on('SIGTERM', stop); process.on('SIGHUP', stop)
-  const state = async (): Promise<Running> => ({ pid: process.pid, thread, transcript: spec.transcript, target, token: spec.token, version: 4,
+  const state = async (): Promise<Running> => ({ pid: process.pid, thread, transcript: spec.transcript, target, token: spec.token, version: 5,
+    reload: { version: 1, home: spec.home, options },
     mode, selected, pending: (await backups(target)).length, error })
   const step = async () => {
     if (Date.now() >= refreshAt) {
