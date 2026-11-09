@@ -31,6 +31,8 @@ Notable changes to this project. The format follows
 
 ### Fixed
 
+- Codex automatic startup accepts the statusline picker's `thread-id` item as well
+  as the older `session-id` alias, including first-item view recognition.
 - Preload Codex footer settings per workspace before pane observation, removing a
   config read from the first-subagent switch. Existing restore backups remain intact;
   the UI uses the same footer commands without extra cards or menus.

@@ -36,11 +36,11 @@ async function daemonRpc(method: string, params: unknown, env: NodeJS.ProcessEnv
   } finally { socket.close() }
 }
 
-for (const { identity, migration } of [
-  { identity: true, migration: false },
-  { identity: false, migration: false },
-  { identity: true, migration: true },
-]) test(`official Codex SessionStart ${migration ? 'refreshes cached hooks before removing the retired options file' : identity ? 'broadcast activates in shared-daemon mode and respects manual off' : 'skips without an explicit full-ID footer'}`, { timeout: 90000 }, async () => {
+for (const { identity, migration, idItem } of [
+  { identity: true, migration: false, idItem: 'thread-id' },
+  { identity: false, migration: false, idItem: 'thread-id' },
+  { identity: true, migration: true, idItem: 'session-id' },
+]) test(`official Codex SessionStart ${migration ? 'refreshes cached hooks before removing the retired options file' : identity ? 'broadcast activates in shared-daemon mode and respects manual off' : 'skips without an explicit full-ID footer'} (${idItem})`, { timeout: 90000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hooks-test-'))
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
   for (const folder of [cfg, project, temporary]) await mkdir(folder)
@@ -73,7 +73,7 @@ model_reasoning_effort = "low"
 model_context_window = 200000
 check_for_update_on_startup = false
 [tui]
-status_line = ${JSON.stringify(identity ? ['model-with-reasoning', 'current-dir', 'session-id'] : ['model-with-reasoning', 'current-dir'])}
+status_line = ${JSON.stringify(identity ? ['model-with-reasoning', 'current-dir', idItem] : ['model-with-reasoning', 'current-dir'])}
 screen_reader_detection_done = true
 [tui.model_availability_nux]
 "gpt-6.1-sol" = 99
@@ -233,7 +233,7 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     assert.equal(state.thread, seededId)
     console.log('SUFFIXED_TRANSCRIPT_ACTIVE', JSON.stringify({ thread: state.thread, path: state.transcript }))
     const runtimePath = join(runtimeDir, runtime[0]!)
-    await submit('/statusline model-with-reasoning current-dir session-id')
+    await submit('/statusline model-with-reasoning current-dir ' + idItem)
     await wait(footer, footerMatches)
     const staleEvent = { ...hookResult.input, transcript_path: seededPath!.replace('_11111111-1111-1111-1111-111111111111', '') }
     const stale = exec(process.execPath, [resolve('src/cli.ts'), 'hook', 'prompt', '--socket', socket], {
@@ -317,7 +317,7 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     await exec('git', ['init', '-q', '-b', state.thread], { cwd: project })
     await exec('git', ['-c', 'user.name=Local fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture'], { cwd: project })
     await writeFile(join(cfg, 'config.toml'), savedConfig.replace(/^status_line = .*$/m,
-      'status_line = ["git-branch", "model-with-reasoning", "session-id"]'))
+      'status_line = ' + JSON.stringify(['git-branch', 'model-with-reasoning', idItem])))
     pane = await tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'test', launch)
     await tmux('set-window-option', '-t', pane, 'remain-on-exit', 'on')
     await tmux('resize-window', '-t', pane, '-x', '85', '-y', '40')

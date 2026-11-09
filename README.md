@@ -219,7 +219,7 @@ footer that fits one terminal can be clipped in another. There are two separate
 width limits:
 
 - **`on` reports an unknown view:** a clipped session ID can prevent recognition.
-  Shorten the native footer or widen the pane. `session-id` need not be first if
+  Shorten the native footer or widen the pane. `thread-id` need not be first if
   the entire footer fits without clipping. Putting it first in the saved layout
   tolerates clipped later items, provided the full ID remains visible.
 - **`off` asks for a wider pane:** VArgus restores the saved layout by typing
@@ -278,14 +278,15 @@ Add this entry to Codex's `~/.codex/hooks.json`, preserving any existing hooks:
 }
 ```
 
-Include `session-id` in your saved Codex footer selection; it can go at the tail
+Include **Thread ID** (`thread-id`) in your saved Codex footer selection; the older
+`session-id` alias also works. It can go at the tail
 when the entire footer fits. See [Narrow terminals and SSH](#narrow-terminals-and-ssh).
 For example, merge this into the existing `[tui]` table in `~/.codex/config.toml`, retaining any other
 footer items you want restored by `!vargus off`:
 
 ```toml
 [tui]
-status_line = ["model-with-reasoning", "current-dir", "thread-name", "session-id"]
+status_line = ["model-with-reasoning", "current-dir", "thread-name", "thread-id"]
 ```
 
 Start ordinary `codex` in tmux, then review and trust the hook

@@ -199,7 +199,7 @@ a dim placeholder even though their drafts remain editable. Without the optional
 external frontend-selection API. Future host format changes must
 be rechecked against these limits.
 
-For native ID matching, a known first-item `session-id` layout needs the full ID
+For native ID matching, a known first-item `thread-id` (or legacy `session-id`) layout needs the full ID
 prefix to remain visible; later fields may be clipped. Other item orders require
 an untruncated footer with one full UUID field. `views.ts` rejects an ellipsis in
 those fields rather than treating a UUID-valued branch or title as the thread.
@@ -286,7 +286,12 @@ identify the current frontend or concrete thread after a resume.
 The hook broadcasts by scanning foreground Codex panes on the default tmux server
 or an explicit socket. It uses an eight-second retry deadline, then exits. The
 command callback owns this bounded scan; no persistent inbox daemon is needed. It first reads
-effective saved footer settings and requires `session-id` somewhere in the selection.
+effective saved footer settings and requires `thread-id` or its legacy alias
+`session-id` somewhere in the selection. In checked source `8703d32bd0`,
+`tui/src/bottom_pane/status_line_setup.rs` declares
+`#[strum(to_string = "thread-id", serialize = "session-id")]` for `SessionId`.
+The shared `footerIdentity` check preserves the saved spelling and item order for
+hook admission, its locked recheck and the worker's view recognition.
 `hosts/codex/views.ts` splits the first configurable footer line into native
 separator-delimited fields below a recognizably empty composer, and requires one
 complete UUID field. Middle/tail layouts require an untruncated line containing

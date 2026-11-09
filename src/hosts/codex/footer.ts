@@ -1,6 +1,13 @@
 import { codexRead } from './read.ts'
 
 export type FooterSelection = string[] | null
+
+// Codex names the picker item thread-id and retains session-id as an alias.
+export function footerIdentity(selection: FooterSelection | undefined): 'none' | 'first' | 'whole' {
+  const index = selection?.findIndex(item => item === 'thread-id' || item === 'session-id') ?? -1
+  return index < 0 ? 'none' : index === 0 ? 'first' : 'whole'
+}
+
 // Codex c2bd770ca7, chatwidget.rs DEFAULT_STATUS_LINE_ITEMS; live-tested on 0.167.0.
 const DEFAULT_ITEMS = ['model-with-reasoning', 'current-dir', 'thread-name']
 export const clearFooter = '/statusline --clear'

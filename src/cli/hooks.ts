@@ -8,7 +8,7 @@ import { findRollout } from '../hosts/codex/rollout.ts'
 import { resolveOptions } from '../options.ts'
 import { hookSession } from '../hosts/codex/hooks.ts'
 import { setTimeout as delay } from 'node:timers/promises'
-import { savedFooter } from '../hosts/codex/footer.ts'
+import { savedFooter, footerIdentity } from '../hosts/codex/footer.ts'
 import { startupTarget, startupHint, startupDirectory, startupSuppressed } from './startup.ts'
 
 const exec = promisify(execFile)
@@ -45,13 +45,13 @@ export async function hook(args: string[]): Promise<number> {
     }
   }
   if (await findRollout(home, session.thread) !== session.transcript) return 0
-  const selection = await savedFooter(session.cwd)
-  if (!selection?.includes('session-id')) return 0
+  const identity = footerIdentity(await savedFooter(session.cwd))
+  if (identity === 'none') return 0
   await mkdir(startupDirectory(home), { recursive: true, mode: 0o700 })
   const until = Date.now() + 8000
   do {
     try {
-      const target = await startupTarget(session.thread, socket, pane, selection[0] === 'session-id')
+      const target = await startupTarget(session.thread, socket, pane, identity === 'first')
       if (target) {
         // Recheck under the same pane lock used by manual controls. Capture all
         // stdout: SessionStart text would otherwise become model context.

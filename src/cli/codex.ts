@@ -11,7 +11,7 @@ import { findRollout, RolloutReader } from '../hosts/codex/rollout.ts'
 import { Views, hiddenDraft } from '../hosts/codex/views.ts'
 import { applicationTarget, type Target } from '../outputs/tmux/target.ts'
 import { PaneInput } from '../outputs/tmux/input.ts'
-import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, FooterSettings, type FooterSelection } from '../hosts/codex/footer.ts'
+import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, FooterSettings, type FooterSelection } from '../hosts/codex/footer.ts'
 import { resolveOptions } from '../options.ts'
 import { makeTheme } from '../theme/index.ts'
 import { codexLine } from './line.ts'
@@ -157,7 +157,8 @@ export async function standalone(args: string[], automatic = false): Promise<num
   }
   const target = existing?.target ?? await applicationTarget('codex', socket, pane)
   const automaticSelection = automatic ? await savedFooter(process.cwd()) : undefined
-  if (automatic && !automaticSelection?.includes('session-id')) return 0
+  const automaticIdentity = footerIdentity(automaticSelection)
+  if (automatic && automaticIdentity === 'none') return 0
   const perform = async () => {
   let current = await readRunning(recordPath(target))
   const migrating = action === 'on' && current && current.version !== workerVersion &&
@@ -242,7 +243,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
   }
   return startupControl(home, target, thread, action!, automatic,
     () => action === 'status' ? perform() : withControlLock(recordPath(target) + '.control', perform),
-    automaticSelection?.[0] === 'session-id')
+    automaticIdentity === 'first')
 }
 
 async function startWorker(spec: Spec): Promise<Running> {
@@ -302,8 +303,9 @@ export async function rowWorker(spec: Spec): Promise<number> {
       if (saved?.has(view.thread)) return saved.get(view.thread)
       try { return footerSettings.get(view.cwd) } catch { return undefined }
     })
-    identity = layouts.length && layouts.every(layout => layout?.includes('session-id'))
-      ? layouts.every(layout => layout?.[0] === 'session-id') ? 'first' : 'whole' : 'none'
+    const identities = layouts.map(footerIdentity)
+    identity = identities.length && identities.every(value => value !== 'none')
+      ? identities.every(value => value === 'first') ? 'first' : 'whole' : 'none'
     const screen = await input.snapshot(), view = views.selected(screen, identity)
     const changed = selected !== view?.thread
     selected = view?.thread
