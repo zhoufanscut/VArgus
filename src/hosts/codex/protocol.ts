@@ -9,11 +9,6 @@ export type Limits = {
   limitId?: string | null; normalModelSlug?: string | null
   primary?: LimitWindow | null; secondary?: LimitWindow | null
 }
-export type Thread = { id: string; cwd: string; createdAt: number }
 export type Item = {
   id: string; type: string; kind?: string
-}
-
-export type Message = {
-  method: string; params: Record<string, unknown>
 }

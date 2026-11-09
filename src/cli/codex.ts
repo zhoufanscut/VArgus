@@ -8,7 +8,7 @@ import { randomBytes, createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { TmuxOutput } from '../outputs/tmux/client.ts'
 import { findRollout, RolloutReader } from '../hosts/codex/rollout.ts'
-import { Views, hiddenDraft } from '../hosts/codex/views.ts'
+import { Views, hiddenDraft, selectedView, type View, type ViewScreen } from '../hosts/codex/views.ts'
 import { applicationTarget, type Target } from '../outputs/tmux/target.ts'
 import { PaneInput } from '../outputs/tmux/input.ts'
 import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, FooterSettings, type FooterSelection } from '../hosts/codex/footer.ts'
@@ -29,7 +29,7 @@ type Spec = { target: Target; thread: string; transcript: string; home: string;
 type Recovery = { version: 1; spec: Spec }
 type Request = { id: string; action: 'on' | 'off' }
 const exec = promisify(execFile)
-const workerVersion = 6
+const workerVersion = 7
 const controlRoot = () => join(tmpdir(), `vargus-control-${process.getuid?.() ?? 'user'}`)
 const running = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
 const recordPath = (target: Target) => join(controlRoot(), createHash('sha256').update(target.socket + '\0' + target.pane).digest('hex') + '.json')
@@ -75,7 +75,7 @@ async function stopWorker(current: Running): Promise<void> {
   while (await readRunning(recordPath(current.target)) && Date.now() < until) await delay(50)
   if (await readRunning(recordPath(current.target))) throw new Error('VArgus did not finish stopping; retry shortly.')
 }
-async function request(current: Running, action: 'on' | 'off'): Promise<Running> {
+async function request(current: Running, action: 'on' | 'off'): Promise<Running | undefined> {
   const id = randomBytes(16).toString('hex'), path = requestPath(current)
   const lock = path + '.lock'
   return withControlLock(lock, async () => {
@@ -97,6 +97,7 @@ async function request(current: Running, action: 'on' | 'off'): Promise<Running>
           // A restore helper can acknowledge and exit between the two reads.
           const final = await completed()
           if (final) return final
+          if (action === 'on') return
           throw new Error('VArgus helper exited before confirming the control; retry.')
         }
         await delay(50)
@@ -140,6 +141,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
       if (value?.thread === thread) bindings.set(recordPath(value.target), value)
     }
     for (const name of await readdir(footerRoot())) {
+      if (!name.endsWith('.json')) continue
       const value = await json<FooterBackup>(join(footerRoot(), name))
       if (value?.thread === thread && running(value.target.pid)) bindings.set(recordPath(value.target), value)
     }
@@ -202,12 +204,20 @@ export async function standalone(args: string[], automatic = false): Promise<num
   }
   const requestedTranscript = action === 'on' ? await findRollout(home, thread!, process.env.VARGUS_CODEX_TRANSCRIPT) : undefined
   await rm(recoveryPath(target), { force: true })
-  if (current && ((action === 'off' && [2, 3, 4, 5, workerVersion].includes(current.version!)) || (current.version === workerVersion && current.thread === thread && current.transcript === requestedTranscript))) {
+  if (current && ((action === 'off' && (!thread || current.thread === thread) && [2, 3, 4, 5, 6, workerVersion].includes(current.version!)) || (current.version === workerVersion && current.thread === thread && current.transcript === requestedTranscript))) {
     const reply = await request(current, action as 'on' | 'off')
-    console.log(action === 'on' ? `VArgus is already on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))
-    return 0
+    if (reply) {
+      console.log(action === 'on' ? `VArgus is already on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))
+      return 0
+    }
+    // Restoration can finish after on has read the worker but before it reads
+    // the request. Continue normal startup under the same pane admission lock.
+    options = { ...current.reload?.options, ...options }
+    await rm(requestPath(current), { force: true })
+    current = undefined
   }
   const saved = await backups(target)
+  const retainedOptions = action === 'off' ? current?.reload?.options : undefined
   const root = thread ?? current?.thread ?? saved[0]?.thread
   if (!root) { await new TmuxOutput(target.socket, target.pane).cleanupAbandoned(); console.log('VArgus is off.'); return 0 }
   // Off must release abandoned row ownership even when history cannot be read.
@@ -231,7 +241,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
     await save(file, { target, thread: root, selection })
   }
   if (current) await stopWorker(current)
-  const spec: Spec = { target, thread: root, transcript, home, options: resolveOptions(options), token: randomBytes(16).toString('hex'), mode: action === 'on' ? 'on' : 'restore' }
+  const spec: Spec = { target, thread: root, transcript, home, options: resolveOptions({ ...retainedOptions, ...options }), token: randomBytes(16).toString('hex'), mode: action === 'on' ? 'on' : 'restore' }
   try {
     const reply = await startWorker(spec)
     console.log(action === 'on' ? `VArgus is on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))
@@ -286,6 +296,8 @@ export async function rowWorker(spec: Spec): Promise<number> {
   let lastReadings: { thread: string; label: string; line: ReturnType<typeof codexLine> } | undefined
   let paused: Running['paused']
   let identity: 'first' | 'whole' | 'none' = 'none'
+  let candidates: View[] = []
+  const select = (screen: ViewScreen) => selectedView(screen, candidates, thread, identity)
   const stop = () => { stopping = true }
   process.on('SIGTERM', stop); process.on('SIGHUP', stop)
   const state = async (): Promise<Running> => ({ pid: process.pid, thread, transcript: spec.transcript, target, token: spec.token, version: workerVersion,
@@ -297,16 +309,17 @@ export async function rowWorker(spec: Spec): Promise<number> {
       if (mode === 'on') await footerSettings.preload(views.family().map(view => view.cwd))
       refreshAt = Date.now() + 1000
     }
-    const family = views.family()
     const saved = mode === 'restore' ? new Map((await backups(target)).map(backup => [backup.thread, backup.selection])) : undefined
-    const layouts = family.map(view => {
-      if (saved?.has(view.thread)) return saved.get(view.thread)
+    // A new root replaces the reader, but earlier footer backups still belong
+    // to this TUI. Restore those views too; on-mode readings stay in one family.
+    candidates = saved ? views.restoreCandidates(saved.keys()) : views.family()
+    const layouts = saved ? [...saved.values()] : candidates.map(view => {
       try { return footerSettings.get(view.cwd) } catch { return undefined }
     })
     const identities = layouts.map(footerIdentity)
     identity = identities.length && identities.every(value => value !== 'none')
       ? identities.every(value => value === 'first') ? 'first' : 'whole' : 'none'
-    const screen = await input.snapshot(), view = views.selected(screen, identity)
+    const screen = await input.snapshot(), view = select(screen)
     const changed = selected !== view?.thread
     selected = view?.thread
     if (changed) readingError = undefined
@@ -381,7 +394,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
     // Inserting a slash command can hide the contextual agent label. Its exact
     // draft and cursor must still match before Enter; empty-prompt checks bind
     // the operation to the selected view before insertion and after completion.
-    const after = await input.submit(command, (screen, text) => codexComposer(screen, text) && (text !== '' || views.selected(screen, identity)?.thread === expected))
+    const after = await input.submit(command, (screen, text) => codexComposer(screen, text) && (text !== '' || select(screen)?.thread === expected))
     if (footerCommandError(after.lines)) throw new Error('Footer command completion is inconclusive: a native statusline error remains visible. Saved restoration state is retained. Resolve the error and move it out of view before retrying.')
   }
   try {

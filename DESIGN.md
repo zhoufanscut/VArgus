@@ -187,8 +187,8 @@ matches the contextual footer below the composer to `session_meta` child paths a
 parent relationships. In checked source `tui/src/app/agent_navigation.rs`,
 `active_agent_label` returns a backtick-wrapped `agent_path` for a child and
 `Main [default]` for the primary thread. `bottom_pane/footer.rs` retains this label
-when configurable items are cleared. The catalog rejects ambiguous/reused paths
-within the bound family; unrelated families do not select a child. A full unambiguous UUID
+when configurable items are cleared. For on-mode readings, the catalog rejects
+ambiguous/reused paths within the bound family; unrelated families do not select a child. A full unambiguous UUID
 field anywhere in the native footer selects an exact known family member before path
 matching; a full foreign ID stops selection. This also recognizes a child when a
 crowded footer clips its path. Without that ID, clipped paths, popups and other
@@ -198,6 +198,16 @@ thread identity when its Main label is absent; empty parent-owned child views us
 a dim placeholder even though their drafts remain editable. Without the optional startup hook, `/new` and `/resume` require `on` again; this is not a general
 external frontend-selection API. Future host format changes must
 be rechecked against these limits.
+
+Contextual matching reads a complete final label, not arbitrary backtick spans
+inside configured items. In checked source `8703d32bd0`,
+`bottom_pane/footer.rs` builds the row with
+`let suffix = passive_footer_suffix(props, status.is_some());`; that suffix appends
+`active_agent_label` before `" for agents"`. A title such as
+``Review `/root/first` details`` therefore cannot override the following
+`Main [default]` or a different child's label. Without an agent-navigation hint,
+a lone quoted configured item in the empty primary composer does not establish
+a child identity.
 
 For native ID matching, a known first-item `thread-id` (or legacy `session-id`) layout needs the full ID
 prefix to remain visible; later fields may be clipped. Other item orders require
@@ -423,7 +433,7 @@ observation. Views in the same workspace share cached settings, while restore ba
 thread. Explicit `on` starts a fresh settings cache without replacing existing
 backups; failed workspace reads can retry without discarding other cached values.
 No config/read call sits between recognizing a new view and backing it up/clearing
-its footer. Worker v6 replaces older on-mode workers while retaining their backups.
+its footer. Worker v7 replaces older on-mode workers while retaining their backups.
 For a bound helper with reload metadata, bare `on` upgrades the helper and preserves
 its root, home and effective custom options. The retired draft-hold setting is
 dropped when resolving options. Explicit `on` can reuse the same-version helper;
@@ -477,6 +487,8 @@ The CLI backs up the saved selection before row startup and sends the clear comm
 only after successful attachment. Each recognized child gets a separate saved-layout
 backup before its footer changes. A backup is keyed by socket, pane, TUI PID and
 thread, separately from the worker record. Repeated `on` retains original backups.
+Discovery reads only completed `.json` backups. The atomic writer's
+`.json.<pid>.tmp` files are not bindings, including after an interrupted write.
 Startup attachment failure removes a new backup without touching the footer;
 uncertain delivery retains it. A versioned pane controller serializes footer work
 and control requests. Request admission publishes a prepared PID-owned lock; a
@@ -497,6 +509,17 @@ and recognizably empty, then deletes that view's backup. The helper exits when n
 backups remain or its TUI process exits. Drafts, unknown views and visible native
 errors leave restoration pending; `status` reports the pending count and current
 pause. This can keep a helper alive until Codex exits if a view is never revisited.
+Restore mode considers backed-up views from earlier roots in the same TUI, while
+on-mode readings remain limited to the bound family. A full native ID can identify
+an earlier root on a later visit. Path labels remain limited to the bound family:
+different roots can reuse the same agent path. Where that identity is unavailable,
+explicit `off` in its primary conversation uses `CODEX_THREAD_ID` to replace a restore
+helper bound to another root. This scope-only replacement retains the helper's
+effective display options, with supplied flags merged over them. The empty-primary fallback applies to that bound
+root only; it never guesses a different root from the pending backups.
+If a restore helper finishes before acknowledging `on`, that control starts a
+replacement under the same pane admission lock, retaining the previous options
+and removing the abandoned request. An unresponsive live helper still times out.
 No navigation keys are injected. After a worker crash, `off` prunes abandoned tmux
 owners before resolving the transcript, retaining other live panes. If transcript
 resolution fails, the row stays removed and backups stay pending; the control reports
@@ -563,10 +586,13 @@ unverified.
 ### Codex saved-log collector
 
 `protocol.ts` defines the normalized usage, quota and completed-item readings passed
-from `rollout.ts` to the collector. Token totals and counters belong to the selected
-saved log; child histories are not aggregated. View recognition uses saved-session
-metadata rather than an RPC-selected thread. The collector does not track frontend
-requests or maintain a transport connection.
+from `rollout.ts` directly to the collector's typed methods. Each `RolloutReader`
+owns one collector with one set of values and deduplication sets; `rowWorker`
+owns the map of readers for displayed views. The reader checks transcript identity
+and explicit settings/item attribution before updating its collector. Token totals
+and counters belong to that saved log; child histories are not aggregated. View
+recognition uses saved-session metadata. The collector does not route synthetic
+RPC messages, track frontend requests or maintain a transport connection.
 
 The read-only stdio requests for `thread/read` and `config/read` remain under
 `hosts/codex/read.ts`: they resolve the current transcript and saved footer settings.
@@ -1220,6 +1246,8 @@ What the types and docs alone can't settle and no live session has settled yet; 
   real app-server/localhost mock-provider turns and isolated tmux lifecycle tests.
   Standalone tests copy source, the Bash entry and package metadata without `dist` or
   `node_modules`; legacy-worker and reload probes change the copied `.ts` files.
+  Standalone and sibling-view command helpers require the current shell marker's
+  native completion footer and an idle activity indicator before sending another control.
   Daemon-heavy Node cases run serially to bound resource use.
 - `npm run test:claude` runs the existing Claude checks listed below. In this development
   environment the engine test workers require execution outside the restricted sandbox; the

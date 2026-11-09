@@ -58,6 +58,13 @@ export class Views {
     }
     return [...this.known.values()].filter(v => result.has(v.thread))
   }
+  restoreCandidates(threads: Iterable<string>): View[] {
+    const pending = new Set(threads), family = new Set(this.family().map(view => view.thread))
+    // Agent paths are family-local and can be reused by another root. Such
+    // backups may be selected by full ID, but never by a foreign path label.
+    return [...this.known.values()].filter(view => pending.has(view.thread))
+      .map(view => family.has(view.thread) ? view : { ...view, path: undefined })
+  }
   selected(screen: ViewScreen, identity: 'first' | 'whole' | 'none' = 'whole'): View | undefined {
     return selectedView(screen, this.family(), this.root, identity)
   }
@@ -154,7 +161,7 @@ export function selectedView<T extends { thread: string; path?: string }>(screen
     const composer = plain(screen.lines[draft?.start ?? screen.y] ?? '')
     if (!composer.startsWith('› ') && !(draft && composer.startsWith('! '))) return
     const rows = draft?.footer ?? screen.lines.slice(screen.y + 1, screen.y + 4).map(plain).filter(l => l.trim())
-    const footer = rows.join('\n').trim()
+    const footer = rows.map(row => row.trim()).join('\n')
     if (identity !== 'none') {
       const fields = draft ? rows[0]?.split(' · ').map(item => item.trim()) : footerFields(screen)
       const id = threadField(fields, identity === 'first')
@@ -162,12 +169,14 @@ export function selectedView<T extends { thread: string; path?: string }>(screen
         return id ? family.find(view => view.thread === id) : undefined
       }
     }
-    const paths = [...footer.matchAll(/`([^`]+)`/g)].map(m => m[1])
-    if (paths.length) {
-      const matched = family.filter(v => v.path && paths.includes(v.path))
+    // Codex appends the contextual label after configurable items, before the
+    // agent-navigation hint. Titles and branches can also contain backticks.
+    const label = [...footer.matchAll(/(?:^| · )(Main \[default\]|`([^`\n]+)`)(?= · [^·\n]* for agents\b|[ \t]*(?:\d+% context left)?$)/gm)].at(-1)
+    if (label?.[1] === 'Main [default]') return family.find(view => view.thread === root)
+    if (label?.[2] && (footer.includes(' for agents') || composer.startsWith('› Viewing sub-agent') || draft)) {
+      const matched = family.filter(v => v.path === label[2])
       return matched.length === 1 ? matched[0] : undefined
     }
-    if (/^Main \[default\](?: ·|$)/.test(footer)) return family.find(view => view.thread === root)
     // Empty parent-owned children use a dim placeholder but allow editable
     // drafts. Only the empty primary fallback can use the activation root.
     // Standalone /new and /resume still require a fresh !vargus on binding.

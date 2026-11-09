@@ -10,7 +10,7 @@ test('paused readings clone the last rendered values and time by default', async
   let now = 60000
   t.mock.method(Date, 'now', () => now)
   const collector = new CodexCollector(process.cwd(), undefined)
-  collector.selectThread({ id: 'main', cwd: process.cwd(), createdAt: 0 })
+  collector.start(process.cwd(), 0)
   const value = collector.snapshot()!
   value.session.model = 'gpt-6.1-sol'
   value.session.effort = 'xhigh'
@@ -36,7 +36,7 @@ test('paused readings clone the last rendered values and time by default', async
 
 test('a retained obsolete false option cannot disable paused readings', async () => {
   const collector = new CodexCollector(process.cwd(), undefined)
-  collector.selectThread({ id: 'main', cwd: process.cwd(), createdAt: 0 })
+  collector.start(process.cwd(), 0)
   collector.snapshot()!.session.model = 'gpt-6.1-sol'
   const options = resolveOptions({ codexDraftHold: false })
   assert.equal('codexDraftHold' in options, false)

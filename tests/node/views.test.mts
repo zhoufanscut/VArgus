@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Views, footerThread, footerCandidates, hiddenDraft, type ViewScreen } from '../../src/hosts/codex/views.ts'
+import { Views, selectedView, footerThread, footerCandidates, hiddenDraft, type ViewScreen } from '../../src/hosts/codex/views.ts'
 import { codexComposer } from '../../src/hosts/codex/footer.ts'
 
 const screen = (footer: string, composer = 'Viewing sub-agent — direct input is disabled'): ViewScreen => ({
@@ -40,6 +40,36 @@ test('view identity uses the contextual footer and known family, rejecting missi
     await write('reused-path', 'parent', '/root/first'); await views.refresh()
     assert.equal(views.selected(screen('`/root/first` · ← for agents')), undefined)
   } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+test('configured titles and branches cannot replace the contextual agent label', () => {
+  const views = new Views('/unused', 'parent')
+  views.known.set('parent', { thread: 'parent', file: '/parent', cwd: '/project' })
+  views.known.set('first', { thread: 'first', parent: 'parent', path: '/root/first', file: '/first', cwd: '/project' })
+  views.known.set('second', { thread: 'second', parent: 'parent', path: '/root/second', file: '/second', cwd: '/project' })
+  for (const title of ['Fix `parser.ts` now', 'Review `/root/first` details', '`/root/first`', '`/unknown`']) {
+    assert.equal(views.selected(screen(title + ' · Main [default] · ← for agents', 'Ask Codex to do anything'), 'none')?.thread, 'parent')
+    assert.equal(views.selected(screen(title + ' · `/root/second` · ← for agents'), 'none')?.thread, 'second')
+    const separate = screen(title, 'Ask Codex to do anything')
+    separate.lines.push('  Main [default] · ← for agents')
+    assert.equal(views.selected(separate, 'none')?.thread, 'parent')
+  }
+  assert.equal(views.selected(screen('`/root/first`', 'Ask Codex to do anything'), 'none')?.thread, 'parent',
+    'a saved title alone cannot establish a child identity')
+  assert.equal(views.selected(screen('Review `/root/first` details · `/unknown` · ← for agents'), 'none'), undefined)
+})
+
+test('restoration uses full IDs across roots while path labels remain family-local', () => {
+  const first = '01a1bdc7-7e98-7dd3-bfbf-0dd7710dcd91', foreign = '01a1bdc7-869e-78d0-a59c-bac2ec7bd0ae'
+  const views = new Views('/unused', 'parent')
+  views.known.set('parent', { thread: 'parent', file: '/parent', cwd: '/project' })
+  views.known.set(first, { thread: first, parent: 'parent', path: '/root/first', file: '/first', cwd: '/project' })
+  views.known.set(foreign, { thread: foreign, parent: 'other', path: '/root/first', file: '/foreign', cwd: '/project' })
+  const candidates = views.restoreCandidates([first, foreign])
+  assert.equal(selectedView(screen('`/root/first` · ← for agents'), candidates, views.root, 'none')?.thread, first)
+  assert.equal(selectedView(screen(foreign + ' · model'), candidates, views.root)?.thread, foreign)
+  assert.equal(selectedView(screen('`/root/first` · ← for agents'), views.restoreCandidates([foreign]), views.root, 'none'), undefined)
+  assert.equal(views.known.get(foreign)?.path, '/root/first', 'candidate projection leaves saved metadata unchanged')
 })
 
 

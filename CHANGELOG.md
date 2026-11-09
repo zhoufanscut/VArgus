@@ -31,6 +31,15 @@ Notable changes to this project. The format follows
 
 ### Fixed
 
+- Keep the Codex contextual agent label identifiable when earlier footer items
+  contain backtick-quoted text, fixing the quoted-title restoration failure.
+- Incomplete temporary footer-backup writes no longer break ordinary `on`, `off`
+  or `status` discovery.
+- Footer restoration includes backups from earlier root conversations in the
+  same TUI. Explicit `off` in an older primary conversation rebinds restoration
+  when its saved footer has no full thread ID, retaining the helper's display
+  options. `on` also preserves those options when restoration finishes before
+  its request can be acknowledged.
 - Codex automatic startup accepts the statusline picker's `thread-id` item as well
   as the older `session-id` alias, including first-item view recognition.
 - Preload Codex footer settings per workspace before pane observation, removing a

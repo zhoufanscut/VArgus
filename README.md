@@ -172,6 +172,12 @@ layout as you visit affected views with an empty composer; it exits once all pen
 views are restored or the Codex terminal process exits. Inactive views cannot be
 restored immediately through Codex's session-only command. `!vargus status` reports
 pending restorations. Running `on` again reuses the helper and original backups.
+Backups from before `/new` or `/resume` remain eligible for restoration. Visit
+each affected conversation with an empty composer; if its saved footer has no
+full thread ID, run `!vargus off` in that conversation's primary view to confirm
+its identity and finish restoration, using pane/socket selection when needed.
+Rebinding a pending restore helper with `off` preserves its display options for
+a later `on`.
 
 VArgus preloads saved footer settings per known workspace before checking the view,
 so a first subagent visit can use the cached layout. Explicit `on` refreshes that

@@ -76,9 +76,16 @@ trust_level = "trusted"
   const row = async () => {
     try { return await tmux('show-options', '-p', '-v', '-t', pane, '@vargus_line') } catch { return '' }
   }
+  let newThreadChoice = false
   const wait = async (read: () => Promise<string>, match: RegExp) => {
     let got = '', until = Date.now() + 12000
-    do { got = await read(); if (match.test(got)) return got; await delay(100) } while (Date.now() < until)
+    do {
+      if (newThreadChoice && (await screen()).includes('Where should the new conversation run?')) {
+        newThreadChoice = false
+        await tmux('send-keys', '-t', pane, 'Enter')
+      }
+      got = await read(); if (match.test(got)) return got; await delay(100)
+    } while (Date.now() < until)
     assert.match(got, match, await screen()); return got
   }
   let controls = 0
@@ -94,14 +101,19 @@ trust_level = "trusted"
     }
     await delay(200)
     await tmux('send-keys', '-t', pane, 'Enter')
+    if (text === '/new') newThreadChoice = true
     if (marker) {
       await wait(screen, new RegExp('^\\s*(?:└ )?' + marker + '\\s*$', 'm'))
       const activity = async () => {
         const text = await screen()
         return text.slice(text.lastIndexOf(marker) + marker.length)
       }
-      const until = Date.now() + 3000
-      while (/^• (?:Running|Working) /m.test(await activity()) && Date.now() < until) await delay(50)
+      // Shell stdout can precede Codex's completion event. Require its footer
+      // before treating a momentarily absent Working indicator as settled.
+      await wait(async () => {
+        const value = await activity()
+        return /^\s*Worked for /m.test(value) && !/^• (?:Running|Working) /m.test(value) ? 'idle' : 'busy'
+      }, /^idle$/)
       assert.doesNotMatch(await activity(), /^• (?:Running|Working) /m)
     }
   }
@@ -158,6 +170,18 @@ trust_level = "trusted"
     const originalBackup = JSON.parse(await readFile(join(footerDir, backups[0]!), 'utf8'))
     assert.deepEqual(originalBackup.selection, selection)
     await writeFile(join(cfg, 'config.toml'), savedConfig)
+    // A crash between opening an atomic-write temporary and renaming it must
+    // not poison discovery of the completed backup, including ordinary off.
+    const unfinished = join(footerDir, backups[0] + '.' + process.pid + '.tmp')
+    await writeFile(unfinished, '')
+    const controlEnv = { ...env, CODEX_THREAD_ID: originalBackup.thread }
+    assert.match((await exec(entry, ['status'], { cwd: project, env: controlEnv })).stdout, /VArgus is on/)
+    assert.match((await exec(entry, ['on'], { cwd: project, env: controlEnv })).stdout, /already on/)
+    assert.match((await exec(entry, ['off'], { cwd: project, env: controlEnv })).stdout, /VArgus is off/)
+    await wait(row, /^$/)
+    await rm(unfinished)
+    await submit(command('on', '--socket ' + quote(socket) + ' --pane ' + pane))
+    await wait(row, /session:/)
     assert.equal(posts, beforeControls)
     await submit('Print a local test reply.')
     await wait(screen, /LOCAL CONTROL RESPONSE/)
@@ -190,7 +214,7 @@ trust_level = "trusted"
       await cp(install, legacyRoot, { recursive: true })
       const oldPath = join(legacyRoot, 'src/cli.ts')
       for (const [file, from, to] of [
-        ['src/cli/codex.ts', 'const workerVersion = 6', 'const workerVersion = 5'],
+        ['src/cli/codex.ts', 'const workerVersion = 7', 'const workerVersion = 5'],
         ['src/options.ts', 'export const DEFAULTS = {', 'export const DEFAULTS = { codexDraftHold: false,'],
         ['src/cli/codex.ts', 'const hold = !!(lastReadings', 'const hold = !!(options.codexDraftHold && lastReadings'],
       ] as const) {
@@ -212,7 +236,7 @@ trust_level = "trusted"
       assert.match(upgraded.stdout, /helper upgraded/)
       const active = await runtime(), input = new PaneInput(active.target)
       assert.notEqual(active.pid, legacy.pid)
-      assert.equal(active.version, 6)
+      assert.equal(active.version, 7)
       assert.equal(active.thread, legacy.thread)
       assert.equal(active.transcript, legacy.transcript)
       assert.deepEqual(active.target, legacy.target)
@@ -440,6 +464,86 @@ trust_level = "trusted"
     await wait(row, /^$/)
     await submit(command('on', '--socket ' + quote(socket) + ' --pane ' + pane))
     await wait(row, new RegExp('token:' + expectedTokens.replace('.', '\\.')))
+    if (selection === null || selection.length) {
+      const stateDirectory = join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`)
+      const readRuntime = () => readFile(join(stateDirectory, activeFile), 'utf8').then(JSON.parse)
+      const original = await readRuntime()
+      await submit('/new')
+      await wait(footer, footerMatches)
+      await submit(command('on', '--socket ' + quote(socket) + ' --pane ' + pane
+        + (selection === null ? ' --theme ember --config ' + quote(optionsFile) : '')))
+      const replacement = await readRuntime()
+      assert.notEqual(replacement.thread, original.thread)
+      assert.equal(replacement.target.pid, original.target.pid)
+      assert.equal((await readdir(footerDir)).length, 2)
+      await submit(command('off'))
+      await wait(footer, footerMatches)
+      assert.equal((await readRuntime()).pending, 1)
+      await submit('/resume ' + original.thread)
+      await submit('!printf "ROOT_VISIT=%s\\n" "$CODEX_THREAD_ID"')
+      await wait(screen, new RegExp('ROOT_VISIT=' + original.thread))
+      if (selection === null) {
+        // Keep the restore helper alive to observe options before and after a
+        // scope-only rebind. The draft must survive without any injected keys.
+        await tmux('send-keys', '-l', '-t', pane, 'preserved restore draft')
+        await wait(screen, /preserved restore draft/)
+        const input = new PaneInput(original.target), draft = await input.snapshot()
+        const controlEnv = { ...env, CODEX_THREAD_ID: original.thread }
+        await exec(entry, ['off'], { cwd: project, env: controlEnv })
+        const rebound = await readRuntime(), after = await input.snapshot()
+        assert.equal(rebound.thread, original.thread)
+        assert.notEqual(rebound.pid, replacement.pid)
+        assert.deepEqual(rebound.reload.options, replacement.reload.options)
+        assert.equal(after.lines[after.y], draft.lines[draft.y])
+        assert.equal(after.x, draft.x)
+        // Force normal restore completion between on's last worker lookup and
+        // request delivery. Capture real ps output before clearing the draft.
+        const raceBin = join(dir, 'on-race-bin'), witness = join(dir, 'on-race.json')
+        await mkdir(raceBin)
+        await writeFile(join(raceBin, 'ps'), `#!/usr/bin/env python3
+import sys,subprocess,pathlib,time,json,os
+args=sys.argv[1:]
+result=subprocess.run(['/usr/bin/ps']+args,capture_output=True,text=True)
+if '-p' in args and args[args.index('-p')+1]==${JSON.stringify(String(rebound.pid))}:
+    file=pathlib.Path(${JSON.stringify(witness)})
+    calls=json.loads(file.read_text())['calls']+1 if file.exists() else 1
+    data={'calls':calls}
+    if calls==2:
+        assert result.returncode==0 and '__row' in result.stdout
+        subprocess.run(['tmux','-S',${JSON.stringify(socket)},'send-keys','-t',${JSON.stringify(pane)},'C-e','C-u'],check=True)
+        until=time.monotonic()+6
+        while (os.path.exists(${JSON.stringify(join(stateDirectory, activeFile))}) or os.path.exists('/proc/${rebound.pid}/exe')) and time.monotonic()<until: time.sleep(0.01)
+        data['completed']=not os.path.exists(${JSON.stringify(join(stateDirectory, activeFile))}) and not os.path.exists('/proc/${rebound.pid}/exe')
+        assert data['completed'], 'restore helper did not finish'
+    file.write_text(json.dumps(data))
+sys.stdout.write(result.stdout)
+sys.stderr.write(result.stderr)
+sys.exit(result.returncode)
+`, { mode: 0o700 })
+        await exec(entry, ['on'], { cwd: project, env: { ...controlEnv, PATH: raceBin + ':' + process.env.PATH } })
+        const resumed = await readRuntime()
+        assert.equal(JSON.parse(await readFile(witness, 'utf8')).completed, true)
+        assert.notEqual(resumed.pid, rebound.pid)
+        assert.equal(resumed.thread, original.thread)
+        assert.deepEqual(resumed.target, original.target)
+        assert.deepEqual(resumed.reload.options, replacement.reload.options)
+        assert.equal((await readdir(stateDirectory)).includes(rebound.token + '.request'), false)
+        console.log('RESTORE_ON_COMPLETION', JSON.stringify({ before: rebound.pid, after: resumed.pid,
+          options: resumed.reload.options, witness: JSON.parse(await readFile(witness, 'utf8')) }))
+        await wait(row, new RegExp('token:' + expectedTokens.replace('.', '\\.')))
+        assert.doesNotMatch(await row(), /session:/)
+        await submit(command('off'))
+      }
+      await wait(async () => String((await readdir(footerDir)).length), /^0$/)
+      await wait(async () => String((await readdir(stateDirectory)).filter(name => name.endsWith('.json')).length), /^0$/)
+      assert.equal(await row(), '')
+      assert.equal(await readFile(join(cfg, 'config.toml'), 'utf8'), savedConfig)
+      assert.equal(posts, afterTurn)
+      console.log('ROOT_RESTORED', JSON.stringify({ original: original.thread, replacement: replacement.thread,
+        explicitOff: selection === null, pending: (await readdir(footerDir)).length, providerPosts: posts }))
+      await submit(command('on', '--socket ' + quote(socket) + ' --pane ' + pane))
+      await wait(row, new RegExp('token:' + expectedTokens.replace('.', '\\.')))
+    }
     if (selection?.length) {
       await submit(command('off'))
       await wait(row, /^$/)
@@ -470,5 +574,13 @@ trust_level = "trusted"
     await exec('codex', ['app-server', 'daemon', 'stop'], { env }).catch(() => {})
     provider.closeAllConnections(); await new Promise<void>(done => provider.close(() => done()))
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    for (const pid of (await readdir('/proc')).filter(p => /^\d+$/.test(p))) {
+      try {
+        const fs = await import('node:fs/promises')
+        const exe = await fs.readlink('/proc/' + pid + '/exe')
+        const args = (await fs.readFile('/proc/' + pid + '/cmdline', 'utf8')).split('\0')
+        if (exe.startsWith(cfg + '/packages/') && exe.endsWith(' (deleted)') && args.slice(1,4).join(' ') === 'app-server daemon pid-update-loop') process.kill(Number(pid),'SIGTERM')
+      } catch {}
+    }
   }
 })

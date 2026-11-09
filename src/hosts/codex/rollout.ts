@@ -96,8 +96,7 @@ export class RolloutReader {
         && Number.isSafeInteger(p.subagent_history_start_ordinal) && p.subagent_history_start_ordinal > 0) {
         this.historyStart = p.subagent_history_start_ordinal
       }
-      this.collector.selectThread({ id: p.id, cwd: p.cwd,
-        createdAt: Date.parse(p.timestamp ?? record.timestamp!) / 1000 })
+      this.collector.start(p.cwd, Date.parse(p.timestamp ?? record.timestamp!) / 1000)
       this.selected = true
     }
     if (!this.selected) return
@@ -116,17 +115,12 @@ export class RolloutReader {
       v.session.model = settings.model
       v.session.effort = settings.effort ?? settings.reasoning_effort ?? undefined
     } else if (record.type === 'event_msg' && p.type === 'token_count') {
-      if (p.info) this.collector.fromServer({ method: 'thread/tokenUsage/updated', params: {
-        threadId: this.thread, tokenUsage: { total: usage(p.info.total_token_usage),
-          last: usage(p.info.last_token_usage), modelContextWindow: p.info.model_context_window },
-      } })
-      if (p.rate_limits) this.collector.fromServer({ method: 'account/rateLimits/updated', params: {
-        rateLimits: { limitId: p.rate_limits.limit_id, normalModelSlug: p.rate_limits.normal_model_slug, primary: window(p.rate_limits.primary),
-          secondary: window(p.rate_limits.secondary) },
-      } })
+      if (p.info) this.collector.updateUsage({ total: usage(p.info.total_token_usage),
+        last: usage(p.info.last_token_usage), modelContextWindow: p.info.model_context_window })
+      if (p.rate_limits) this.collector.updateLimits({ limitId: p.rate_limits.limit_id,
+        normalModelSlug: p.rate_limits.normal_model_slug, primary: window(p.rate_limits.primary), secondary: window(p.rate_limits.secondary) })
     } else if (record.type === 'compacted' || (record.type === 'event_msg' && p.type === 'context_compacted')) {
-      v.session.contextPercent = undefined
-      v.session.contextTokens = undefined
+      this.collector.compact()
     } else if (record.type === 'event_msg' && p.type === 'item_completed') {
       if (p.thread_id && p.thread_id !== this.thread) return
       const item = p.item
@@ -139,15 +133,11 @@ export class RolloutReader {
       // retain their completed-visible-item contract.
       const spawn = item.type === 'SubAgentActivity' && item.kind === 'started'
         || item.type === 'CollabAgentToolCall' && item.tool === 'spawn_agent' && item.status === 'completed'
-      if (this.countersAttributed && spawn) this.collector.fromServer({ method: 'item/started', params: {
-        threadId: this.thread, item: { id: item.id, type: 'subAgentActivity', kind: 'started' },
-      } })
+      if (this.countersAttributed && spawn) this.collector.completeItem({ id: item.id, type: 'subAgentActivity', kind: 'started' })
       const types: Record<string, string> = { CommandExecution: 'commandExecution', FileChange: 'fileChange',
         McpToolCall: 'mcpToolCall', DynamicToolCall: 'dynamicToolCall', WebSearch: 'webSearch',
         ImageGeneration: 'imageGeneration', ImageView: 'imageView', ContextCompaction: 'contextCompaction' }
-      if (types[item.type]) this.collector.fromServer({ method: 'item/started', params: {
-        threadId: this.thread, item: { id: item.id, type: types[item.type] },
-      } })
+      if (types[item.type]) this.collector.completeItem({ id: item.id, type: types[item.type]! })
     }
   }
 

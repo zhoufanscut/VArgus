@@ -8,12 +8,12 @@ import type { FragmentInput } from '../core/types.ts'
 
 export function codexLine(collector: CodexCollector, o: ReturnType<typeof resolveOptions>, t: ReturnType<typeof makeTheme>) {
   let confirmed: FragmentInput | undefined
-  let line: (width: number, thread?: string) => Promise<string>
+  let line: (width: number) => Promise<string>
       let gitAt = 0
       let gitCwd = ''
       let gitReading: Promise<void> | undefined
-      line = async (width, thread) => {
-        const v = collector.snapshot(thread)
+      line = async width => {
+        const v = collector.snapshot()
         if (!v) return ''
         v.core.columns = width
         if (!gitReading && (v.core.cwd !== gitCwd || Date.now() >= gitAt)) {

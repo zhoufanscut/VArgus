@@ -9,7 +9,7 @@ import { makeTheme } from '../../src/theme/index.ts'
 
 test('Codex short names retain full IDs internally and preserve unfamiliar model IDs', () => {
   const collector = new CodexCollector('/repo', '/home/u')
-  collector.selectThread({ id: 'main', cwd: '/repo', createdAt: 0 })
+  collector.start('/repo', 0)
   const v = collector.snapshot()!
   const input = { v, o: DEFAULTS, l: en, t: makeTheme('graphite', true), now: 0 }
   v.session.effort = 'xhigh'

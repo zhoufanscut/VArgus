@@ -18,8 +18,10 @@ for (const fixture of [
   { initialPrompt: '', selection: ['session-id'], crowded: false },
   { initialPrompt: '', selection: crowdedSelection, crowded: true },
   { initialPrompt: '', selection: ['thread-id', ...crowdedSelection], crowded: true },
-]) test(`official Codex follows sibling views and restores them on visit${fixture.crowded ? ' (crowded fullscreen footer, cold config' + (fixture.selection[0] === 'thread-id' ? ', full ID' : '') + ')' : ''}`, { timeout: 90000 }, async () => {
+  { initialPrompt: '', selection: ['thread-name'], crowded: false },
+]) test(`official Codex follows sibling views and restores them on visit${fixture.crowded ? ' (crowded fullscreen footer, cold config' + (fixture.selection[0] === 'thread-id' ? ', full ID' : '') + ')' : fixture.selection[0] === 'thread-name' ? ' (quoted title)' : ''}`, { timeout: 90000 }, async () => {
   const { initialPrompt, selection, crowded } = fixture
+  const quotedTitle = !crowded && selection[0] === 'thread-name'
   const columns = crowded ? 177 : 157
   const dir = await mkdtemp(join(tmpdir(), 'vargus-standalone-test-'))
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
@@ -83,7 +85,7 @@ os.execv(${JSON.stringify(git)}, ['git']+sys.argv[1:])
     ] : [
       { type: 'response.created', response: { id } },
       { type: 'response.output_item.done', item: { type: 'message', role: 'assistant', id: `msg_${id}`,
-        content: [{ type: 'output_text', text: title ? JSON.stringify({ title: 'Local control test' }) : 'LOCAL CONTROL RESPONSE' }] } },
+        content: [{ type: 'output_text', text: title ? JSON.stringify({ title: quotedTitle ? 'Review `/root/first` details' : 'Local control test' }) : 'LOCAL CONTROL RESPONSE' }] } },
       { type: 'response.completed', response: { id, usage: { input_tokens: child === 'first' ? 8000 : child === 'second' ? 16000 : 42424, input_tokens_details: { cached_tokens: child ? 0 : 40000 },
         output_tokens: 777, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: child === 'first' ? 8777 : child === 'second' ? 16777 : 43201 } } },
     ]
@@ -148,8 +150,10 @@ trust_level = "trusted"
         const text = await screen()
         return text.slice(text.lastIndexOf(marker) + marker.length)
       }
-      const until = Date.now() + 3000
-      while (/^• (?:Running|Working) /m.test(await activity()) && Date.now() < until) await delay(50)
+      await wait(async () => {
+        const value = await activity()
+        return /^\s*Worked for /m.test(value) && !/^• (?:Running|Working) /m.test(value) ? 'idle' : 'busy'
+      }, /^idle$/)
       assert.doesNotMatch(await activity(), /^• (?:Running|Working) /m)
     }
   }
@@ -191,7 +195,7 @@ trust_level = "trusted"
     await wait(row, /session:/)
     assert.equal(posts, 0)
     let active = (await records())[0]
-    assert.equal(active.version, 6)
+    assert.equal(active.version, 7)
     if (!crowded) {
       const fake = join(dir, 'fake'), trace = join(dir, 'ps-trace.jsonl')
       await mkdir(fake)
@@ -230,6 +234,24 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     }))
     const afterTurns = posts
     assert.ok(afterTurns > 0, 'positive control: real turns reached the same mock provider')
+    if (quotedTitle) {
+      for (let cycle = 0; cycle < 2; cycle++) {
+        await submit(command('off'))
+        await wait(async () => String((await records()).length), /^0$/)
+        assert.deepEqual(await readdir(join(controlRoot, 'footers')), [])
+        assert.match(await screen(), /Review `\/root\/first` details · Main \[default\]/)
+        assert.equal(await row(), '')
+        if (!cycle) {
+          await submit(command('on', activation))
+          await wait(row, /token:4\.2k/)
+          assert.equal((await records())[0].selected, active.thread)
+          assert.equal((await readdir(join(controlRoot, 'footers'))).length, 1, 'the title must not create a child backup')
+        }
+      }
+      assert.equal(await readFile(join(cfg, 'config.toml'), 'utf8'), savedConfig)
+      assert.equal(posts, afterTurns)
+      return
+    }
     const childFooter = async () => {
       const text = await screen(), at = text.lastIndexOf('Viewing sub-agent')
       return at < 0 ? '' : text.slice(at)
