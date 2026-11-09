@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { PaneInput } from './input'
-import { tmuxLine } from './format'
+import { tmuxLine, TMUX_PADDING } from './format'
 
 const exec = promisify(execFile)
 type Owner = { pid: number; pane: string; token: string; priorLine?: string }
@@ -190,7 +190,7 @@ export class TmuxOutput {
   }
 
   async width(): Promise<number> {
-    return Number(await this.command('display-message', '-p', '-t', this.pane, '#{window_width}'))
+    return Math.max(0, Number(await this.command('display-message', '-p', '-t', this.pane, '#{window_width}')) - TMUX_PADDING.length)
   }
 
   async update(ansi: string): Promise<void> {

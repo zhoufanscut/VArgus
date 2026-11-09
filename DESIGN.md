@@ -59,8 +59,9 @@ explicit settings. At tmux's five-row limit it refuses to overwrite a row. The e
 Each wrapped process owns a pane's `@vargus_line`. The row's `#{@vargus_line}` lookup follows
 that client's active pane. It does not use `E:` or a shell `#()` formatter: repository text
 cannot become a format command through recursive expansion. The encoder converts VArgus's
-SGR colours and bold to tmux styles and escapes literal hashes. Tests use a dedicated server,
-not the person's current tmux server.
+SGR colours and bold to tmux styles and escapes literal hashes. Nonempty rows begin
+with two spaces; the Node renderer's width budget excludes that padding. Empty rows
+stay blank. Tests use a dedicated server, not the person's current tmux server.
 
 A short lock serializes session setup and cleanup across wrappers. A prepared nonempty owner
 directory is published atomically; owner filenames are unique, so stale cleanup cannot remove
