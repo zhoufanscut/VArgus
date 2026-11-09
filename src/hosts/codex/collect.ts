@@ -1,3 +1,4 @@
+import { selectedView, type ViewScreen } from './views'
 import { initialSession } from '../../core/session'
 import { initialLimits, type RateLimit } from '../../core/limits'
 import { initialVcs } from '../../core/vcs'
@@ -5,7 +6,7 @@ import type { Values } from '../../core/types'
 import type { Item, Limits, Message, Thread, TokenUsage } from './protocol'
 
 const TOOL_ITEMS = new Set(['commandExecution', 'fileChange', 'mcpToolCall', 'dynamicToolCall', 'collabAgentToolCall', 'webSearch', 'imageGeneration', 'imageView'])
-type State = { values: Values; seen: Set<string>; agentItems: Set<string>; usage: number; parent?: string; hidden: boolean }
+type State = { values: Values; seen: Set<string>; agentItems: Set<string>; usage: number; parent?: string; path?: string; hidden: boolean }
 
 // Tracks cumulative readings, rather than adding cumulative totals repeatedly.
 // Counts cover the visible item stream of this launch; skills have no item here.
@@ -33,6 +34,8 @@ export class CodexCollector {
   private thread(thread: Thread, result?: Record<string, unknown>): State {
     const state = this.state(thread.id)
     state.parent = thread.parentThreadId ?? undefined
+    const subagent = typeof thread.source === 'object' ? thread.source?.subAgent : undefined
+    state.path = typeof subagent === 'object' ? subagent.thread_spawn?.agent_path ?? undefined : undefined
     // Match Codex's own hidden-helper rule. Ephemeral user chats remain valid.
     state.hidden = thread.ephemeral === true && ['system', 'thread_title'].includes(thread.threadSource ?? '')
     const v = state.values
@@ -134,13 +137,32 @@ export class CodexCollector {
     this.limits.set(id, { ...old, ...Object.fromEntries(Object.entries(next).filter(([, v]) => v != null)) })
   }
 
-  snapshot(): Values | undefined {
-    if (!this.active) return undefined
-    const state = this.state(this.active)
+  // RPC selection can lag cached frontend navigation. Resolve the visible view
+  // from observed thread metadata without changing the server-selected thread.
+  displayedThread(screen: ViewScreen): string | undefined {
+    if (!this.active) return
+    let root = this.active
+    const seen = new Set<string>()
+    while (!seen.has(root)) {
+      seen.add(root)
+      const parent = this.threads.get(root)?.parent
+      if (!parent || !this.threads.has(parent) || this.threads.get(parent)!.hidden) break
+      root = parent
+    }
+    const family = [...this.threads].filter(([id]) => this.belongsTo(id, root))
+      .map(([thread, state]) => ({ thread, path: state.path }))
+    // The launcher clears configurable items; UUID-looking footer text is not
+    // a configured session-id. Contextual labels identify cached views instead.
+    return selectedView(screen, family, root, 'none')?.thread
+  }
+
+  snapshot(selected = this.active): Values | undefined {
+    if (!selected) return undefined
+    const state = this.state(selected)
     const v = state.values
     // Child totals are included only for children present in this stream.
     v.session.counts.tokens = [...this.threads.entries()].reduce((n, [id, s]) =>
-      n + (this.belongsTo(id, this.active!) ? s.usage : 0), 0)
+      n + (this.belongsTo(id, selected) ? s.usage : 0), 0)
     const limit = [...this.limits.values()].find(l => v.session.model !== undefined && l.normalModelSlug === v.session.model)
       ?? this.limits.get('codex')
     v.limits.engine = limit ? [this.window(limit.primary, 'five_hour'), this.window(limit.secondary, 'seven_day')]

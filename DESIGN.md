@@ -135,7 +135,9 @@ It retains incomplete records and UTF-8 bytes between polls. It normalizes recor
 into the existing Codex collector: session metadata for creation time and cwd,
 `turn_context` / `thread_settings_applied` for recorded model and effort,
 `token_count` for cumulative usage, native context-window gauge and quota snapshots,
-and completed visible items for tools. User-shell controls are excluded from tool
+and completed visible items for tools. The quota translation retains `normal_model_slug`
+as `normalModelSlug`, so the shared collector can prefer the active model's named
+bucket before the general `codex` bucket. User-shell controls are excluded from tool
 counts. Explicitly attributed settings/items for another thread are ignored.
 Compaction drops the old context reading until new usage arrives. Token totals
 remain within the selected thread; child histories are not aggregated into the
@@ -396,8 +398,12 @@ and recognizably empty, then deletes that view's backup. The helper exits when n
 backups remain or its TUI process exits. Drafts, unknown views and visible native
 errors leave restoration pending; `status` reports the pending count and current
 pause. This can keep a helper alive until Codex exits if a view is never revisited.
-No navigation keys are injected. After a worker crash, `off` restarts restoration
-and prunes abandoned tmux owners while retaining other live panes. A new TUI PID
+No navigation keys are injected. After a worker crash, `off` prunes abandoned tmux
+owners before resolving the transcript, retaining other live panes. If transcript
+resolution fails, the row stays removed and backups stay pending; the control reports
+that restoration needs `/statusline`, a Codex restart, or another `off` after the log
+becomes available. It starts no restore helper against an unknown transcript. With
+a readable log, `off` restarts restoration. A new TUI PID
 does not inherit old backups; saved config needs no repair on TUI exit.
 
 `outputs/tmux/input.ts` handles generic capture and key delivery without host
@@ -455,7 +461,17 @@ uses:
   model and effort; explicit child selection is allowed. Successful `turn/start` overrides update
   those fields. Null effort inherits the thread's effective setting. A picker choice that has
   not reached the server is not inferred from config files. `thread/started` notifications record
-  metadata but do not select a different conversation.
+  metadata but do not select a different conversation. RPC selection is the current
+  family anchor, not proof of the displayed view: cached frontend switches can send
+  no start/resume/turn request. The launcher captures its own tmux pane on each refresh
+  and uses the shared contextual-footer recognition to choose a known family member's
+  readings. The family comes from observed `parentThreadId` and
+  `source.subAgent.thread_spawn.agent_path`; generated 0.167.0 `v2/SessionSource.ts`
+  spells the app-server variant `"subAgent"`, while saved logs use `subagent`.
+  The foreground command can be the Node launcher while its Codex child owns the
+  terminal; only this wrapper's executable name is normalized for recognition.
+  Unrecognized, clipped or ambiguous views blank the row. Selection adds no RPC and
+  does not change the server's active-thread anchor or infer a picker model choice.
 - Ephemeral helpers whose `threadSource` is `system` or `thread_title` are excluded from
   selection and token totals, including their own frontend start/turn requests. This is the
   same instance-level rule as `tui/src/app/app_server_events.rs` in local revision `c2bd770ca7`.
@@ -492,8 +508,12 @@ Startup and cleanup were probed with the real Codex 0.167.0 and Claude 2.1.319 T
 permanent Codex engine test uses a localhost mock Responses provider and scratch CODEX_HOME:
 user turns and background title generation report different usage, so it catches helper-thread
 selection errors and checks tokens, context and quota delivery through the real engine/bridge.
-Compaction, selected-child and V2-agent accounting use protocol fixtures; an actual generated
-subagent turn and billed model endpoints have not been used for those checks.
+A real engine/localhost-provider regression supplies sibling spawn calls, visits each
+child, returns to Main and repeats the navigation. It checks distinct child totals
+and the parent's observed subtree total without another provider request. This
+covers cached frontend selection as well as first visits. Compaction and V2-agent
+accounting also use protocol fixtures; model-chosen delegation, billed endpoints
+and macOS remain unverified.
 
 ### Codex model names and call counts
 

@@ -228,3 +228,17 @@ const fs=require('node:fs'),r=require('node:readline').createInterface({input:pr
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+
+test('saved model-specific quota metadata selects the named bucket before the general quota', () => {
+  const r = new RolloutReader('/unused', 'thread-a', '/repo', '/home/user')
+  r.observe(meta); r.observe(settings); r.observe(count)
+  assert.equal(r.collector.snapshot()!.limits.engine[0]!.percentUsed, 27.5)
+  r.observe({ type: 'event_msg', payload: { type: 'token_count', rate_limits: {
+    limit_id: 'model-pool', normal_model_slug: 'gpt-6.1-sol',
+    primary: { used_percent: 73, window_minutes: 300, resets_at: null },
+  } } })
+  assert.equal(r.collector.snapshot()!.limits.engine[0]!.percentUsed, 73)
+  r.observe({ ...settings, payload: { ...settings.payload, thread_settings: { ...settings.payload.thread_settings, model: 'gpt-6-luna' } } })
+  assert.equal(r.collector.snapshot()!.limits.engine[0]!.percentUsed, 27.5)
+})

@@ -169,3 +169,33 @@ test('legacy and V2 agent starts are deduplicated by their canonical call item i
   c.fromServer(usage('child', 700, 500, 50))
   assert.equal(c.snapshot()!.session.counts.tokens, 250)
 })
+
+test('displayed thread selection follows cached views without changing RPC selection', () => {
+  const c = new CodexCollector('/repo', undefined)
+  start(c)
+  const child = { ...thread('child', 'main'), source: { subAgent: { thread_spawn: { agent_path: '/root/child' } } } }
+  c.fromServer({ method: 'thread/started', params: { thread: child } })
+  c.fromServer(usage('main')); c.fromServer(usage('child', 700, 500, 50))
+  const screen = (footer: string, composer = 'Viewing sub-agent — direct input is disabled') => ({
+    lines: ['› ' + composer, '', footer], x: 2, y: 0, visible: true, command: 'codex',
+  })
+  for (let revisit = 0; revisit < 2; revisit++) {
+    const selected = c.displayedThread(screen('`/root/child` · ← for agents'))
+    assert.equal(selected, 'child')
+    assert.equal(c.snapshot(selected)!.session.counts.tokens, 250)
+    assert.equal(c.displayedThread(screen('Main [default]', 'Ask Codex to do anything')), 'main')
+    assert.equal(c.snapshot('main')!.session.counts.tokens, 4650)
+    assert.equal(c.active, 'main')
+  }
+  assert.equal(c.displayedThread(screen('`/root/chi…')), undefined)
+  assert.equal(c.displayedThread(screen('`/foreign`')), undefined)
+  assert.equal(c.displayedThread({ ...screen('`/root/child`'), visible: false }), undefined)
+  const alias = { ...child, id: 'alias' }
+  c.fromServer({ method: 'thread/started', params: { thread: alias } })
+  assert.equal(c.displayedThread(screen('`/root/child`')), undefined)
+  // Resume a child through RPC; Main still identifies the observed family root.
+  c.fromClient({ id: 9, method: 'thread/resume' })
+  c.fromServer({ id: 9, result: { thread: child } })
+  assert.equal(c.active, 'child')
+  assert.equal(c.displayedThread(screen('Main [default]', 'Ask Codex to do anything')), 'main')
+})

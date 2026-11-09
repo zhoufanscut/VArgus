@@ -54,27 +54,7 @@ export class Views {
     return [...this.known.values()].filter(v => result.has(v.thread))
   }
   selected(screen: ViewScreen, identity: 'first' | 'whole' | 'none' = 'whole'): View | undefined {
-    if (!screen.visible || screen.command !== 'codex') return
-    const composer = plain(screen.lines[screen.y] ?? '')
-    if (!composer.startsWith('› ')) return
-    const footer = screen.lines.slice(screen.y + 1, screen.y + 4).map(plain).filter(l => l.trim()).join('\n').trim()
-    const family = this.family()
-    if (identity !== 'none') {
-      const id = footerThread(screen, identity === 'first')
-      if (footerCandidates(screen).length || footerFields(screen)?.some(field => field.includes('…'))) {
-        return id ? family.find(view => view.thread === id) : undefined
-      }
-    }
-    const paths = [...footer.matchAll(/`([^`]+)`/g)].map(m => m[1])
-    if (paths.length) {
-      const matched = family.filter(v => v.path && paths.includes(v.path))
-      return matched.length === 1 ? matched[0] : undefined
-    }
-    if (/^Main \[default\](?: ·|$)/.test(footer)) return this.known.get(this.root)
-    // Parent-owned child views use the read-only placeholder. The writable
-    // primary may lack a Main label (including before tracked children load).
-    // /new and /resume still require a fresh !vargus on binding.
-    if (composer === '› Ask Codex to do anything') return this.known.get(this.root)
+    return selectedView(screen, this.family(), this.root, identity)
   }
 }
 
@@ -99,4 +79,29 @@ export function footerThread(screen: ViewScreen, firstItem = false): string | un
   if (fields.some(field => field.includes('…'))) return
   const ids = fields.filter(isId)
   return ids.length === 1 ? ids[0] : undefined
+}
+
+// Both saved-log and transport catalogs use the same versioned UI recognition.
+export function selectedView<T extends { thread: string; path?: string }>(screen: ViewScreen,
+  family: T[], root: string, identity: 'first' | 'whole' | 'none' = 'whole'): T | undefined {
+    if (!screen.visible || screen.command !== 'codex') return
+    const composer = plain(screen.lines[screen.y] ?? '')
+    if (!composer.startsWith('› ')) return
+    const footer = screen.lines.slice(screen.y + 1, screen.y + 4).map(plain).filter(l => l.trim()).join('\n').trim()
+    if (identity !== 'none') {
+      const id = footerThread(screen, identity === 'first')
+      if (footerCandidates(screen).length || footerFields(screen)?.some(field => field.includes('…'))) {
+        return id ? family.find(view => view.thread === id) : undefined
+      }
+    }
+    const paths = [...footer.matchAll(/`([^`]+)`/g)].map(m => m[1])
+    if (paths.length) {
+      const matched = family.filter(v => v.path && paths.includes(v.path))
+      return matched.length === 1 ? matched[0] : undefined
+    }
+    if (/^Main \[default\](?: ·|$)/.test(footer)) return family.find(view => view.thread === root)
+    // Parent-owned child views use the read-only placeholder. The writable
+    // primary may lack a Main label (including before tracked children load).
+    // Standalone /new and /resume still require a fresh !vargus on binding.
+    if (composer === '› Ask Codex to do anything') return family.find(view => view.thread === root)
 }

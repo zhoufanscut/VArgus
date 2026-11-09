@@ -118,7 +118,7 @@ export class RolloutReader {
           last: usage(p.info.last_token_usage), modelContextWindow: p.info.model_context_window },
       } })
       if (p.rate_limits) this.collector.fromServer({ method: 'account/rateLimits/updated', params: {
-        rateLimits: { limitId: p.rate_limits.limit_id, primary: window(p.rate_limits.primary),
+        rateLimits: { limitId: p.rate_limits.limit_id, normalModelSlug: p.rate_limits.normal_model_slug, primary: window(p.rate_limits.primary),
           secondary: window(p.rate_limits.secondary) },
       } })
     } else if (record.type === 'compacted' || (record.type === 'event_msg' && p.type === 'context_compacted')) {

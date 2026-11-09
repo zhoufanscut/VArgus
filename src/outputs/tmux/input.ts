@@ -9,7 +9,7 @@ export type PaneSnapshot = { lines: string[]; x: number; y: number; width: numbe
 // The host supplies its composer recognition. Never erase input, and recheck the
 // complete inserted command before submitting: a changed draft must not be sent.
 export class PaneInput {
-  constructor(private target: Target) {}
+  constructor(private target: Pick<Target, 'socket' | 'pane'>) {}
   private async tmux(...args: string[]) {
     return (await exec('tmux', ['-S', this.target.socket, ...args], { timeout: 5000 })).stdout
   }

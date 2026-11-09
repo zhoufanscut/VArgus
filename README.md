@@ -163,7 +163,10 @@ agent label can still pause automation. No status cards or extra menus are opene
 VArgus sends session-only `/statusline` commands through tmux, including in read-only
 subagent views. Codex's shortcut/context hint
 row remains. Saved config files are not rewritten. Backups survive a helper crash;
-`!vargus off` restarts restoration. An already-empty saved footer stays empty.
+`!vargus off` restarts restoration. If its transcript is unavailable after a crash,
+`off` still removes the abandoned row and keeps footer backups pending. Restore the
+native footer through `/statusline` or restart Codex; retry `off` when the log is
+available to resume automatic restoration. An already-empty saved footer stays empty.
 
 Leave the composer empty when switching views and wait for footer automation before
 typing. Drafts pause automation and are preserved. A narrow pane may need widening
@@ -324,7 +327,9 @@ same keys as the Claude plugin's `userConfig`. `NO_COLOR` disables VArgus colour
 wrapper's explicit options apply to its inline-loaded copy, so pass your preferred theme here.
 
 Codex reads model/effort, context, usage, rate limits and visible tool/agent items from its
-app-server messages. Missing readings stay hidden. Token counts are cumulative uncached input
+app-server messages. It follows cached parent/child view switches through the visible
+contextual footer; an unrecognized or clipped view blanks the row. Missing readings
+stay hidden. Token counts are cumulative uncached input
 plus output for observed threads, including descendants whose updates reach this connection;
 old or unobserved child totals are not rebuilt. This differs from Claude's per-request counter
 since mod load/clear/resume. Codex tool counts cover visible lead-thread items of this launch;
@@ -334,8 +339,9 @@ use `-c` config overrides. The bridge uses Codex's experimental Unix WebSocket t
 
 Startup and cleanup were checked with both real CLIs. Codex turns also run against a localhost
 mock provider in the tests, checking that user metrics survive background title generation.
-Compaction, child selection and V2 agent accounting have protocol-fixture coverage; billed
-provider turns and generated subagents remain unchecked.
+Sibling subagents and repeated parent/child view switches are checked through the real
+engine with supplied mock tool calls. Compaction and V2 agent accounting also have
+protocol-fixture coverage; billed provider turns and model-chosen delegation remain unchecked.
 [DESIGN.md](DESIGN.md#hosts-and-outputs) has the source contracts and verification limits.
 
 ## Requirements

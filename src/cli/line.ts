@@ -6,12 +6,12 @@ import { makeTheme } from '../theme'
 import { en } from '../i18n/en'
 
 export function codexLine(collector: CodexCollector, o: ReturnType<typeof resolveOptions>, t: ReturnType<typeof makeTheme>) {
-  let line: (width: number) => Promise<string>
+  let line: (width: number, thread?: string) => Promise<string>
       let gitAt = 0
       let gitCwd = ''
       let gitReading: Promise<void> | undefined
-      line = async width => {
-        const v = collector.snapshot()
+      line = async (width, thread) => {
+        const v = collector.snapshot(thread)
         if (!v) return ''
         v.core.columns = width
         if (!gitReading && (v.core.cwd !== gitCwd || Date.now() >= gitAt)) {

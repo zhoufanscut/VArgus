@@ -161,8 +161,19 @@ export async function standalone(args: string[], automatic = false): Promise<num
   const saved = await backups(target)
   const root = thread ?? current?.thread ?? saved[0]?.thread
   if (!root) { await new TmuxOutput(target.socket, target.pane).cleanupAbandoned(); console.log('VArgus is off.'); return 0 }
-  // Validate history before replacing a live worker or changing any footer.
-  const transcript = requestedTranscript ?? await findRollout(home, root)
+  // Off must release abandoned row ownership even when history cannot be read.
+  // Keep backups for a later retry; unknown views must not receive footer keys.
+  if (action === 'off') {
+    if (current) { await stopWorker(current); current = undefined }
+    await new TmuxOutput(target.socket, target.pane).cleanupAbandoned()
+  }
+  let transcript: string
+  try { transcript = requestedTranscript ?? await findRollout(home, root) }
+  catch (error) {
+    if (action !== 'off') throw error
+    console.log(`VArgus is off; ${saved.length} footer(s) pending restoration. Cannot read the saved transcript: ${(error as Error).message} Restore through /statusline or restart Codex; retry off when the transcript is available.`)
+    return 0
+  }
   const file = footerPath(target, root)
   const newBackup = action === 'on' && !await json(file)
   if (newBackup) {

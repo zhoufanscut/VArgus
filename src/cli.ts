@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir, homedir } from 'node:os'
-import { join, resolve, dirname } from 'node:path'
+import { join, resolve, dirname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
@@ -110,7 +110,15 @@ export async function main(argv: string[]): Promise<number> {
         server: message => collector.fromServer(message),
       })
       childArgs = ['--remote', bridge.endpoint, '-c', 'tui.status_line=[]', ...args]
-      line = codexLine(collector, o, t)
+      const renderLine = codexLine(collector, o, t)
+      line = async width => {
+        const screen = await tmux.snapshot()
+        // tmux reports the foreground Node wrapper while its Codex child owns
+        // the terminal. Keep the ordinary Codex screen guard for other commands.
+        if (screen.command === basename(process.execPath)) screen.command = 'codex'
+        const selected = collector.displayedThread(screen)
+        return selected ? renderLine(width, selected) : ''
+      }
     } else {
       command = 'claude'
       const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')

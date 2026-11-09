@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { once } from 'node:events'
@@ -215,6 +215,17 @@ trust_level = "trusted"
     const live = JSON.parse(await readFile(join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`, activeFile), 'utf8'))
     process.kill(live.pid, 'SIGKILL')
     await delay(300)
+    if (selection === null) {
+      await rename(live.transcript, live.transcript + '.held')
+      const result = await exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: live.thread } })
+      assert.match(result.stdout, /pending restoration/)
+      assert.equal(await row(), '')
+      assert.equal(await tmux('show-options', '-t', 'test'), before)
+      assert.deepEqual(JSON.parse(await readFile(join(footerDir, (await readdir(footerDir))[0]!), 'utf8')).selection, selection)
+      assert.match((await exec(resolve('bin/vargus'), ['status'], { cwd: project, env: { ...env, CODEX_THREAD_ID: live.thread } })).stdout, /pending/)
+      await rename(live.transcript + '.held', live.transcript)
+    }
+
     await submit(command('off'))
     await wait(footer, footerMatches)
     await wait(row, /^$/)

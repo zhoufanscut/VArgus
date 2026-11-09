@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile, unlink, rmdir, readdir, rename } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
+import { PaneInput } from './input'
 import { tmuxLine } from './format'
 
 const exec = promisify(execFile)
@@ -182,6 +183,10 @@ export class TmuxOutput {
       this.attached = true
       await this.command('set-option', '-p', '-t', this.pane, '@vargus_owner', this.owner.token)
     })
+  }
+
+  snapshot() {
+    return new PaneInput({ socket: this.socket, pane: this.pane }).snapshot()
   }
 
   async width(): Promise<number> {

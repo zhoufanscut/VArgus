@@ -14,6 +14,7 @@ export type Thread = {
   id: string; parentThreadId?: string | null; model?: string | null
   reasoningEffort?: string | null; cwd: string; createdAt: number
   ephemeral?: boolean; threadSource?: string | null
+  source?: string | { subAgent?: string | { thread_spawn?: { agent_path?: string | null } } }
 }
 export type Item = {
   id: string; type: string; tool?: string; receiverThreadIds?: string[]

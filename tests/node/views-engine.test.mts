@@ -15,11 +15,12 @@ const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
 
 const crowdedSelection = ['current-dir', 'model-with-reasoning', 'five-hour-limit', 'weekly-limit', 'context-used', 'approval-mode', 'permissions', 'run-state', 'git-branch', 'branch-changes']
 for (const fixture of [
-  { initialPrompt: '', selection: ['session-id'], crowded: false },
-  { initialPrompt: '', selection: crowdedSelection, crowded: true },
-  { initialPrompt: '', selection: ['session-id', ...crowdedSelection], crowded: true },
-]) test(`official Codex follows sibling views and restores them on visit${fixture.crowded ? ' (crowded fullscreen footer, cold config' + (fixture.selection[0] === 'session-id' ? ', full ID' : '') + ')' : ''}`, { timeout: 90000 }, async () => {
-  const { initialPrompt, selection, crowded } = fixture
+  { initialPrompt: '', selection: ['session-id'], crowded: false, transport: false },
+  { initialPrompt: '', selection: crowdedSelection, crowded: true, transport: false },
+  { initialPrompt: '', selection: ['session-id', ...crowdedSelection], crowded: true, transport: false },
+  { initialPrompt: '', selection: ['session-id'], crowded: false, transport: true },
+]) test(`official Codex follows sibling views and restores them on visit${fixture.transport ? ' (launcher cached revisits)' : ''}${fixture.crowded ? ' (crowded fullscreen footer, cold config' + (fixture.selection[0] === 'session-id' ? ', full ID' : '') + ')' : ''}`, { timeout: 90000 }, async () => {
+  const { initialPrompt, selection, crowded, transport } = fixture
   const columns = crowded ? 177 : 157
   const dir = await mkdtemp(join(tmpdir(), 'vargus-standalone-test-'))
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
@@ -165,11 +166,30 @@ trust_level = "trusted"
     await delay(300)
 
     const launch = ['env', `CODEX_HOME=${cfg}`, `TMPDIR=${temporary}`, 'VARGUS_LOCAL_TEST_KEY=local-test-only',
-      'NO_PROXY=127.0.0.1,localhost', 'no_proxy=127.0.0.1,localhost', 'codex', ...(crowded ? [] : ['--no-alt-screen']), '-C', project].map(quote).join(' ')
+      'NO_PROXY=127.0.0.1,localhost', 'no_proxy=127.0.0.1,localhost', ...(transport ? [resolve('bin/vargus'), 'codex', '--tmux', '--'] : ['codex']), ...(crowded ? [] : ['--no-alt-screen']), '-C', project].map(quote).join(' ')
     await tmux('respawn-pane', '-k', '-t', pane, launch + (initialPrompt ? ' ' + quote(initialPrompt) : ''))
     await wait(screen, /Ask Codex/)
     await delay(1000)
     const savedConfig = await readFile(join(cfg, 'config.toml'), 'utf8')
+    if (transport) {
+      await submit('Run the local fixture.')
+      await wait(screen, /LOCAL CONTROL RESPONSE/)
+      // Main includes both observed children; the two child views have distinct totals.
+      await wait(row, /token:29\.8k/)
+      const afterTurns = posts
+      for (let round = 0; round < 2; round++) {
+        for (const [label, tokens] of [['`/root/second`', '16.8k'], ['`/root/first`', '8.8k'], ['Main [default]', '29.8k']]) {
+          await tmux('send-keys', '-t', pane, 'M-Left')
+          await wait(screen, new RegExp(label!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+          const value = await wait(row, new RegExp('token:' + tokens!.replace('.', '\\.')))
+          if (label === 'Main [default]') assert.match(value, /🤖2/)
+          else assert.doesNotMatch(value, /🤖\d+/)
+        }
+      }
+      assert.equal(posts, afterTurns, 'navigation makes no additional model request')
+      console.log('LAUNCHER_REVISITS', JSON.stringify({ rounds: 2, providerCalls: posts }))
+      return
+    }
     const controlRoot = join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`)
     const records = async () => {
       const values: any[] = []
