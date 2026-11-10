@@ -47,6 +47,8 @@ Notable changes to this project. The format follows
 
 ### Fixed
 
+- Keep Codex's last-confirmed readings visible while typing when a native warning
+  notice follows the context or shell-mode hint.
 - Keep the Codex contextual agent label identifiable when earlier footer items
   contain backtick-quoted text, fixing the quoted-title restoration failure.
 - Incomplete temporary footer-backup writes no longer break ordinary `on`, `off`

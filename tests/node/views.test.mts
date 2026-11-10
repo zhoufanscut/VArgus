@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Views, selectedView, footerThread, footerCandidates, hiddenDraft, type ViewScreen } from '../../src/hosts/codex/views.ts'
@@ -172,4 +172,33 @@ test('unlabelled drafts retain unknown identity while footer and startup readers
   assert.equal(views.selected(draft(['draft'], 0, ['  unrelated dialog'])), undefined)
   assert.equal(views.selected(draft(['Ask Codex to do anything'], 0, ['  unrelated dialog'])), undefined,
     'typing placeholder words is not evidence of an empty primary editor, even without the draft hint')
+})
+
+test('native warning notices retain draft readings without admitting footer commands or startup identity', async () => {
+  // Bottom of the official Codex 0.167.0 frame that blanked the row while typing.
+  const captured: ViewScreen = JSON.parse(await readFile(new URL('./fixtures/codex-warning-draft.json', import.meta.url), 'utf8'))
+  const parent = 'parent', foreign = '01a10000-0000-0000-0000-000000000000'
+  for (const notice of ['', '⚠ 1 warning · \x1b[1mf2\x1b[0m to view', '⚠ 2 warnings · /warnings to view',
+    '⚠ 3 · ctrl+w', '⚠ 4']) {
+    for (const shell of [false, true]) {
+      const current = structuredClone(captured)
+      current.lines[current.lines.length - 1] = current.lines.at(-1)!.replace(/⚠.*$/, notice)
+      if (shell) {
+        current.lines[current.y] = current.lines[current.y]!.replace('›', '!')
+        current.lines[current.lines.length - 1] = current.lines.at(-1)!.replace('82% context left', 'Shell mode')
+      }
+      const detail = JSON.stringify({ notice, shell })
+      assert.equal(hiddenDraft(current), true, detail)
+      assert.equal(selectedView(current, [{ thread: parent }], parent), undefined, detail)
+      assert.equal(codexComposer(current, ''), false, detail)
+      assert.equal(footerThread(current), undefined, detail)
+      assert.deepEqual(footerCandidates(current), [], detail)
+      for (const metadata of [foreign, '`/root/child…']) {
+        const explicit = structuredClone(current)
+        explicit.lines.splice(explicit.lines.length - 1, 0, '  ' + metadata)
+        assert.equal(hiddenDraft(explicit), false, detail + ' ' + metadata)
+        assert.equal(selectedView(explicit, [{ thread: parent }], parent), undefined, detail + ' ' + metadata)
+      }
+    }
+  }
 })

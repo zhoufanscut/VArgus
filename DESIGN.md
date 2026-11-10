@@ -260,6 +260,14 @@ The display-only draft frame requires a bold live arrow (or `!`) and a native
 `% context left` hint (or `Shell mode` with a live `!`) below the textarea. It
 locates the complete footer after wrapped/multiline input, keeping typed agent
 paths and UUIDs outside that metadata. Native IDs retain ambiguity/clipping rules.
+Codex can append a warning notice on the same hint row. Source `8703d32bd0`,
+`bottom_pane/chat_composer/warning_notice.rs`, emits `format!("{count} warning{plural}")`
+with a shortcut, then falls back to count-plus-shortcut or count-only notices.
+Draft recognition removes these suffixes from the hint check only; the original
+footer still supplies identity and clipping checks. A captured official 0.167.0
+draft frame with `82% context left` followed by `⚠ 1 warning · f2 to view` was
+rejected before the fix; removing only the notice restored recognition. Fixtures
+cover context and shell hints with each notice form; compact forms are source-derived.
 No paused snapshot is shown for explicit foreign/clipped metadata, dim history or
 placeholders, reversed picker arrows, or other unrecognized screens. Existing
 Main/path selection remains intact. Startup matching and footer delivery retain

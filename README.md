@@ -251,7 +251,8 @@ extra label in the row; `!vargus status` reports that the current view is unknow
 These historical readings may belong to a different view after navigation.
 Live readings resume when the view is identified again. This needs a previously
 rendered snapshot in the current helper plus the native `% context left` or matched
-`Shell mode` hint. Dialogs, explicit foreign/clipped identities and unsupported
+`Shell mode` hint. A native warning notice beside the hint keeps these readings
+visible. Dialogs, explicit foreign/clipped identities and unsupported
 layouts still blank the row. Reloading discards the snapshot until a view is
 recognized again. See [Narrow terminals and SSH](#narrow-terminals-and-ssh) for
 footer clipping and restore commands that would wrap. A visible native statusline error

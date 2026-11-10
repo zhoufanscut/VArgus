@@ -119,7 +119,9 @@ function draftFrame(screen: ViewScreen): { start: number; footer: string[] } | u
   if (screen.x < 2) return
   let end = screen.lines.length - 1
   while (end > screen.y && !plain(screen.lines[end]!).trim()) end--
-  const hint = plain(screen.lines[end] ?? '').trim(), shell = /\bShell mode$/.test(hint)
+  // Codex can share this hint row with a full, compact or count-only warning notice.
+  const hint = plain(screen.lines[end] ?? '').trim().replace(/\s+⚠ \d+(?: warnings? · .+ to view| · .+)?$/, '')
+  const shell = /\bShell mode$/.test(hint)
   if (end <= screen.y || (!shell && !/\b\d+% context left$/.test(hint))) return
   let footer = end
   while (footer > screen.y + 1 && plain(screen.lines[footer - 1]!).trim()) footer--
