@@ -6,6 +6,16 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Codex Fast-mode selection appears beside the model and effort as
+  `sol:max(fast)`, or `sol(fast)` when effort is hidden.
+
+### Changed
+
+- Codex always uses short names for recognized model families, matching Claude's
+  display rule. The `codexShortModel` switch is removed; existing values are ignored.
+
 ## [0.4.1] - 2026-11-10
 
 ### Added

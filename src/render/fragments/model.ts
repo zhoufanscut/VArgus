@@ -3,7 +3,7 @@ import { cleanText } from '../text.ts'
 
 // 2. model: the model's short name, with `:effort` when the effort option is on
 // and the model has one (`opus:high`) (DESIGN, "Fragments"; VantageHUD's
-// elements/model.js, format `short`).
+// elements/model.js, format `short`). Recorded Fast mode adds `(fast)`.
 
 // The short name (VantageHUD's modelFamilyKey), so a family that ships later
 // needs no change: a Claude id or name gives the word after `claude`
@@ -48,10 +48,11 @@ export function effortColor(t: Theme, effort: string | number | undefined): Rgb 
 
 export const model: Fragment = ({ v, o, t }) => {
   const id = v.session.model === undefined ? '' : cleanText(v.session.model)
-  const name = v.core.host === 'codex' ? (o.codexShortModel ? shortCodexModelName(id) : id) : shortModelName(id)
+  const name = v.core.host === 'codex' ? shortCodexModelName(id) : shortModelName(id)
   if (!name) return null
+  const fast = v.session.fast ? t.paint('faint', '(fast)') : ''
   const effort = o.effort ? v.session.effort : undefined
-  if (effort === undefined || effort === '') return t.paint(effortColor(t, undefined), name)
+  if (effort === undefined || effort === '') return t.paint(effortColor(t, undefined), name) + fast
   const level = cleanText(String(effort)).toLowerCase()
-  return t.paint('label', `${name}:`) + t.paint(effortColor(t, effort), level)
+  return t.paint('label', `${name}:`) + t.paint(effortColor(t, effort), level) + fast
 }

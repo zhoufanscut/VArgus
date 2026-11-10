@@ -767,16 +767,38 @@ controls are the supported Codex path. The live engine and footer limits above a
 
 ### Codex model names and call counts
 
-The maintainer explicitly chose on-by-default Codex naming and counters. The
-separate `codexShortModel`, `codexAgentCounts` and `codexSkillCounts` userConfig
-switches default to true and have no effect on Claude. The existing `model` and
-`callCounts` switches still gate their whole fragments. Names shorten only GPT
+The maintainer chose short family names without a full-name display switch, as
+on Claude. The former `codexShortModel` userConfig key is removed; existing JSON
+options containing it are ignored by `resolveOptions`. The separate
+`codexAgentCounts` and `codexSkillCounts` userConfig switches default to true and
+have no effect on Claude. The existing `model` and `callCounts` switches still
+gate their whole fragments. Names shorten only GPT
 version IDs ending in the checked families `astra`, `sol`, `terra` or `luna`;
 unknown IDs remain whole. Both `gpt-6-sol` and `gpt-6.1-sol` become `sol`. This is
 presentation only: the collector retains the full ID for quota matching and
 recorded settings. The local model catalog checked on 2026-11-08 contains those
 five IDs, and the official [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
 gives `gpt-6.1-sol` as its ID.
+
+Recorded Fast selection adds a faint `(fast)` suffix to the same fragment:
+`sol:max(fast)`, or `sol(fast)` with effort hidden/unavailable. It has no separate
+option and is visible by default. In checked Codex source `8703d32bd0`,
+`protocol/src/protocol.rs` defines `ThreadSettingsSnapshot.service_tier` as
+`pub service_tier: Option<String>`; the installed 0.167.0 engine saves Fast as
+`"priority"` and off as `"default"` in `thread_settings_applied`. The reader also
+accepts the legacy `"fast"` spelling. Other or missing tiers omit the suffix.
+The snapshot belongs to its recorded thread, so another thread's settings and a
+paginated child's inherited parent prefix cannot set its Fast reading.
+`turn_context` carries no tier in this version: the reader keeps the last
+selection for the same model and clears it when an unattributed model change
+leaves that selection unknown. Global saved config is not used to infer this
+per-thread reading. The suffix reports selection, not delivered provider speed.
+
+The real 0.167.0 app-server/localhost-provider Fast test changes settings between
+completed turns. Its row moves from `sol:max` to `sol:max(fast)` and back without
+another provider request; a later same-model turn and cold replay retain Fast.
+These are saved-setting checks, not verification of paid Fast routing, latency
+or billing. Native Windows Fast transitions remain unverified.
 
 The standalone reader maps completed `SubAgentActivity` records with
 `kind:started` to the collector's existing agent-start path. Legacy completed

@@ -485,13 +485,19 @@ Pass it with `!vargus on --config /absolute/path/to/vargus.json`, or with
 `!vargus reload --config /absolute/path/to/vargus.json` for an existing helper.
 `NO_COLOR` disables colours in the environment that starts the helper.
 
-Codex displays known model families as `astra`, `sol`, `terra` or `luna`, for example
+Codex always displays known model families as `astra`, `sol`, `terra` or `luna`, for example
 `sol:xhigh`. Both `gpt-6-sol` and `gpt-6.1-sol` display `sol`; unfamiliar IDs remain
-whole. Short names, subagent counts and skill counts default to on for Codex and
-have individual switches: `codexShortModel`, `codexAgentCounts`, `codexSkillCounts`.
-Set any to `false` in a JSON options file passed with `--config` when starting the
-helper. These switches do not affect Claude. `model` and `callCounts` still control
-their whole fragments.
+whole. The former `codexShortModel` option is ignored in existing options files.
+Subagent counts and skill counts default to on for Codex; set `codexAgentCounts`
+or `codexSkillCounts` to `false` in a JSON options file passed with `--config` to
+disable either. These switches do not affect Claude. `model` and `callCounts`
+still control their whole fragments.
+
+Codex Fast mode adds `(fast)` beside the model and effort, such as `sol:max(fast)`.
+The suffix is on by default when the displayed thread's saved settings select
+Fast; Standard or unrecorded settings leave it out. Use Codex's `/fast` command
+to toggle the mode. With `effort: false`, the display is `sol(fast)`.
+The suffix follows recorded settings, like the model and effort readings.
 
 Skill loads come from Codex's marked instruction injections or successful,
 recognizable reads of a catalogued local `SKILL.md`. Repeated loads in the same

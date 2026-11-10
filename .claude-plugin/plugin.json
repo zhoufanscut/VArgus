@@ -130,12 +130,6 @@
       "description": "Publish a separate line for an explicitly launched VArgus tmux companion",
       "default": false
     },
-    "codexShortModel": {
-      "type": "boolean",
-      "title": "Codex: short model name",
-      "description": "Shorten known Codex model IDs to astra, sol, terra or luna; has no effect in Claude",
-      "default": true
-    },
     "codexAgentCounts": {
       "type": "boolean",
       "title": "Codex: subagent count",

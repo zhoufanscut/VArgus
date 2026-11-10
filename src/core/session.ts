@@ -7,6 +7,8 @@ export type SessionValues = {
   model: string | undefined
   // Effective main-thread effort; undefined before the host supplies it.
   effort: string | number | undefined
+  // Recorded Fast-mode selection; undefined before the host supplies it.
+  fast: boolean | undefined
   // Host context percent, 0-100; undefined before a reading.
   contextPercent: number | undefined
   // the same reading's tokens in use and window size, for the detail view;
@@ -29,7 +31,7 @@ export function zero(): Counts {
 
 export function initialSession(): SessionValues {
   return {
-    model: undefined, effort: undefined, contextPercent: undefined, contextTokens: undefined,
+    model: undefined, effort: undefined, fast: undefined, contextPercent: undefined, contextTokens: undefined,
     contextWindow: undefined, startedAt: undefined, compactPending: false,
     counts: zero(),
   }

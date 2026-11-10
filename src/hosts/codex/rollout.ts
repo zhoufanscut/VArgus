@@ -111,6 +111,12 @@ export class RolloutReader {
     } else if (record.type === 'turn_context' || (record.type === 'event_msg' && p.type === 'thread_settings_applied')) {
       if (p.thread_id && p.thread_id !== this.thread) return
       const settings = record.type === 'turn_context' ? p : p.thread_settings
+      if (record.type === 'event_msg') {
+        v.session.fast = settings.service_tier === 'priority' || settings.service_tier === 'fast'
+      } else if (settings.model !== v.session.model) {
+        // turn_context has no tier: keep it for the same model, clear on a switch.
+        v.session.fast = undefined
+      }
       v.core.cwd = settings.cwd
       v.session.model = settings.model
       v.session.effort = settings.effort ?? settings.reasoning_effort ?? undefined

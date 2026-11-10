@@ -58,6 +58,30 @@ test('rollout polling waits for complete UTF-8 JSONL records and selects the exa
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
+test('Fast selection follows thread settings and survives same-model turn contexts', () => {
+  const r = new RolloutReader('/unused', 'thread-a', '/repo', '/home/user')
+  r.observe(meta)
+  const v = r.collector.snapshot()!
+  assert.equal(v.session.fast, undefined)
+  const select = (service_tier: string | null | undefined, thread_id = 'thread-a') => r.observe({
+    ...settings, payload: { ...settings.payload, thread_id, thread_settings: { ...settings.payload.thread_settings, service_tier } },
+  })
+  select('priority')
+  assert.equal(v.session.fast, true)
+  r.observe({ type: 'turn_context', payload: { model: 'gpt-6.1-sol', cwd: '/repo', effort: 'max' } })
+  assert.equal(v.session.fast, true)
+  select('default', 'other')
+  assert.equal(v.session.fast, true)
+  for (const tier of ['default', null, undefined, 'flex', 'ultrafast']) {
+    select(tier)
+    assert.equal(v.session.fast, false)
+    select('fast')
+    assert.equal(v.session.fast, true)
+  }
+  r.observe({ type: 'turn_context', payload: { model: 'gpt-6-luna', cwd: '/repo' } })
+  assert.equal(v.session.fast, undefined)
+})
+
 test('recorded subagent starts count once without changing tool totals or summing child histories', () => {
   const r = new RolloutReader('/unused', 'thread-a', '/repo', '/home/user')
   r.observe(meta)
