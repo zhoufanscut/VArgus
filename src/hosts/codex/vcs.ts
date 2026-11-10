@@ -7,7 +7,7 @@ const exec = promisify(execFile)
 export async function readGit(cwd: string) {
   const v = initialVcs()
   const run = (args: string[]) => exec('git', ['-c', 'core.fsmonitor=false', ...args], {
-    cwd, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, timeout: 30000, maxBuffer: 4 * 1024 * 1024,
+    cwd, windowsHide: true, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, timeout: 30000, maxBuffer: 4 * 1024 * 1024,
   })
   try {
     const { stdout } = await run(['status', '--porcelain=v2', '--branch'])

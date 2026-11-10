@@ -31,7 +31,7 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
 | Claude Code | tmux row | [Launch `vargus claude --tmux`](#claude-tmux-launcher) |
 
 The Claude plugin installation is only for Claude Code. Codex uses this clone's
-Bash entry and does not need the Claude plugin. Automatic startup in Codex requires
+CLI entry and does not need the Claude plugin. Automatic startup in Codex requires
 [hook setup and trust](#automatic-startup-in-codex); manual controls work without it.
 
 ## Requirements
@@ -40,6 +40,7 @@ Bash entry and does not need the Claude plugin. Automatic startup in Codex requi
 |---|---|
 | Claude inline | Claude Code 2.1.299 or later in a terminal; POSIX `sh` on Linux/macOS, or Git for Windows on Windows |
 | Either host through tmux | The host CLI, Bash, Node.js 24.12 or later, and tmux on Linux or macOS; Codex also needs saved session logs |
+| Codex through native Windows psmux | Codex CLI, PowerShell, Node.js 24.12 or later, psmux, and saved session logs |
 
 The Claude inline plugin needs no Node install. The tmux commands run TypeScript
 source directly and need no npm install or build. Git supplies repository readings;
@@ -48,6 +49,8 @@ Claude's collector also supports svn working copies. Codex currently reads git o
 Live tmux checks cover Linux with Node.js 24.14.1, tmux 3.5a, Codex 0.167.0 and
 Claude Code 2.1.319. Other host versions and macOS need their own live verification.
 Claude inline Windows checks and limitations are described [below](#claude-code).
+Native Windows Codex checks cover Codex 0.167.0, Node.js 24.21.0 and psmux 3.4.0
+with an isolated local mock provider. See [Windows setup](#native-windows-setup).
 
 ## What it shows
 
@@ -154,6 +157,10 @@ When the user requests this setup, the agent should:
 The following sections provide the exact symlink command, hook JSON and footer
 TOML for this workflow.
 
+On native Windows, follow [Windows setup](#native-windows-setup): use a `.cmd`
+PATH entry and Windows hooks instead of the Bash symlink. Preserve an existing
+unrelated command, hooks and saved footer items in the same way.
+
 ### Set up Codex
 
 Clone VArgus and expose its Bash entry through a symlink in a directory on your
@@ -193,6 +200,62 @@ A custom tmux socket also needs `--socket /path/to/socket`. Codex's shared daemo
 can inherit another terminal's environment, so pane selection does not trust
 `TMUX_PANE`. Once attached, `off`, `status` and `reload` use the saved thread binding.
 `--theme ember` and `--config /path/to/options.json` apply on activation.
+
+### Native Windows setup
+
+Run Codex in native **psmux**, with Windows Node and PowerShell. Use this checkout's
+`bin\vargus.cmd`; it runs the TypeScript source directly and needs no Bash, build
+or npm install. Put a small forwarding file named `vargus.cmd` in a user PATH
+directory, for example `%USERPROFILE%\.local\bin`:
+
+```bat
+@echo off
+"H:\VArgus\bin\vargus.cmd" %*
+```
+
+Replace `H:\VArgus` with your checkout's absolute path. Inspect any existing
+`vargus` command before writing this file. Add its directory to the **user** PATH
+if needed and reopen the terminal, then check `vargus --help`. A forwarding file
+keeps the repository-relative entry intact and needs no symlink privileges.
+
+Use the [automatic startup](#automatic-startup-in-codex) JSON structure, replacing
+the two command strings with PowerShell commands for your actual user path:
+
+```json
+"command": "& 'C:\\Users\\you\\.local\\bin\\vargus.cmd' hook session-start"
+```
+
+```json
+"command": "& 'C:\\Users\\you\\.local\\bin\\vargus.cmd' hook prompt"
+```
+
+Keep `async: true`, `timeout: 30` and the SessionStart matcher. Use Windows
+`CODEX_HOME` when set, otherwise `%USERPROFILE%\.codex`; create
+`vargus\autostart` there and include one full `thread-id` in the saved footer.
+Preserve existing callbacks and settings. Reopen Codex in psmux, trust both
+callbacks through `/hooks`, send a normal prompt and check `!vargus status`.
+
+Windows background child processes use hidden windows. Windows process lookup
+uses CIM rather than Unix `ps`. With psmux's built-in bar, VArgus appears above
+the original session/window/right-side information. The bar stays at its saved
+top/bottom position, and disabling VArgus restores the original scalar settings.
+Unwrapped panes keep the original information while their VArgus header stays
+blank. Routine updates publish differences together and use psmux's automatic
+redraw instead of forcing another refresh for unchanged readings.
+psmux 3.4.0 cannot read raw custom `status-format[]` values; an existing custom
+first row or multi-row layout is retained, with VArgus appended after it. Original
+formats that execute `#()` commands also retain that layout to preserve psmux's
+asynchronous command cache. Inactive
+windows wait for a visit before footer automation; an existing inactive custom
+slot blocks activation, even when its text currently expands empty. VArgus
+retains its own hidden format slot for repeat activation without overwriting row zero. An originally hidden
+bar uses two rows while VArgus is active and returns to hidden on shutdown.
+Windows verification covers automatic
+startup, token display, `on/status/reload/off`, preserving a custom first row and
+sharing the added row between two owners. Windows subagent navigation and draft
+scenarios and shared-daemon mode need their own live verification. The native
+TUI rig uses `--no-daemon`; an independent real-TUI probe also verified `!` shell
+controls and that a normal prompt after manual off leaves the row off.
 
 ### Readings and view changes
 
@@ -478,6 +541,9 @@ does not build or install anything.
    launcher through that command. Delete the clone only when neither integration
    uses it; a Claude plugin installed from that folder still needs it.
 
+On native Windows, remove only the forwarding `vargus.cmd` file you created,
+after inspecting its checkout path. Keep the PATH directory if other commands use it.
+
 The saved footer selection from hook setup is yours to keep or edit. `off` restores
 that saved layout; it does not remove your `thread-id` preference.
 
@@ -686,6 +752,8 @@ wrapper's explicit options apply to its inline-loaded copy, so pass your preferr
   checked.
 - [AGENTS.md](AGENTS.md): working rules for coding agents in this repo.
 - Node development only: `npm ci`, `npm test` (tests require Codex CLI and tmux).
+  On Windows, `npm test` runs shared checks and the native Codex/psmux rig;
+  POSIX executable-shim and Linux engine rigs are excluded and reported.
   All npm dependencies are development/test tools; users run the source directly.
 - Claude checks: `npm run test:claude` runs plugin validation, type-checking, engine
   tests, and the reader/manifest checks. DESIGN.md "Tests" has the details.

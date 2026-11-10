@@ -57,7 +57,7 @@ export async function hook(args: string[]): Promise<number> {
         // stdout: SessionStart text would otherwise become model context.
         await exec(process.execPath, [fileURLToPath(new URL('../cli.ts', import.meta.url)), '__hook-on', ...flags,
           '--socket', target.socket, '--pane', target.pane], {
-          cwd: session.cwd, env: { ...process.env, CODEX_THREAD_ID: session.thread, VARGUS_CODEX_TRANSCRIPT: session.transcript, VARGUS_CLI_MAIN: '1' },
+          cwd: session.cwd, windowsHide: true, env: { ...process.env, CODEX_THREAD_ID: session.thread, VARGUS_CODEX_TRANSCRIPT: session.transcript, VARGUS_CLI_MAIN: '1' },
         })
         return 0
       }

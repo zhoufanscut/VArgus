@@ -1,5 +1,4 @@
-import { spawn, execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { spawn } from 'node:child_process'
 import { readFile, rm, mkdir, writeFile, readdir, rename } from 'node:fs/promises'
 import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
@@ -18,6 +17,7 @@ import { codexLine } from './line.ts'
 import { withControlLock } from './lock.ts'
 import { startupControl, startupTarget, hasStartupState, startupSuppressed } from './startup.ts'
 import { cleanText } from '../render/text.ts'
+import { applicationArguments } from '../outputs/tmux/process.ts'
 
 type Running = { pid: number; thread: string; transcript?: string; target: Target; token: string; version?: number;
   mode?: 'on' | 'restore'; selected?: string; pending?: number; error?: string;
@@ -28,7 +28,6 @@ type Spec = { target: Target; thread: string; transcript: string; home: string;
   options: Record<string, unknown>; token: string; mode: 'on' | 'restore' }
 type Recovery = { version: 1; spec: Spec }
 type Request = { id: string; action: 'on' | 'off' }
-const exec = promisify(execFile)
 const workerVersion = 7
 const controlRoot = () => join(tmpdir(), `vargus-control-${process.getuid?.() ?? 'user'}`)
 const running = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
@@ -53,7 +52,7 @@ async function readRunning(file: string): Promise<Running | undefined> {
   if (!r || !running(r.pid)) return
   // Retain the original token check when migrating a pre-follow worker.
   try {
-    const args = (await exec('ps', ['-ww', '-p', String(r.pid), '-o', 'args='])).stdout
+    const args = await applicationArguments(r.pid)
     return args.includes('__row') && args.includes(`"token":"${r.token}"`) ? r : undefined
   } catch (error) { if ((error as any).code !== 1) throw error }
 }
@@ -258,7 +257,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
 
 async function startWorker(spec: Spec): Promise<Running> {
   const child = spawn(process.execPath, [fileURLToPath(new URL('../cli.ts', import.meta.url)), '__row', JSON.stringify(spec)], {
-    detached: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'], env: { ...process.env, VARGUS_CLI_MAIN: '1' },
+    detached: true, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'], env: { ...process.env, VARGUS_CLI_MAIN: '1' },
   })
   let errors = '', attached = false
   child.stderr!.on('data', chunk => { errors += String(chunk) })
