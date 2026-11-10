@@ -3,7 +3,7 @@
 A status line for **Claude Code and Codex CLI**: context, rate limits with reset
 countdowns, token and call counts, and repository status.
 
-Claude Code can show it under the prompt through a plugin, or in tmux. Codex CLI
+Claude Code shows it under the prompt through a plugin. Codex CLI
 uses a tmux row inside ordinary, unmodified Codex. Both hosts share the renderer,
 fragment switches and colour themes; each collects its own readings.
 
@@ -19,7 +19,7 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
   [automatic startup](#automatic-startup-in-codex),
   [configure](#configure-codex), [update](#update-codex), [uninstall](#uninstall-codex)
 - [Claude Code](#claude-code): [setup](#set-up-claude), [configure](#configure-claude),
-  [update](#update-claude), [uninstall](#uninstall-claude), [tmux launcher](#claude-tmux-launcher)
+  [update](#update-claude), [uninstall](#uninstall-claude)
 - [Development](#development)
 
 ## Choose your setup
@@ -28,7 +28,6 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
 |---|---|---|
 | Claude Code | Inline row under the prompt | [Install the Claude plugin](#set-up-claude) |
 | Codex CLI | tmux row | [Ask an agent to set it up](#set-up-codex-with-an-agent), or [set it up by hand](#set-up-codex) |
-| Claude Code | tmux row | [Launch `vargus claude --tmux`](#claude-tmux-launcher) |
 
 The Claude plugin installation is only for Claude Code. Codex uses this clone's
 CLI entry and does not need the Claude plugin. Automatic startup in Codex requires
@@ -39,15 +38,15 @@ CLI entry and does not need the Claude plugin. Automatic startup in Codex requir
 | Display | Requirements |
 |---|---|
 | Claude inline | Claude Code 2.1.299 or later in a terminal; POSIX `sh` on Linux/macOS, or Git for Windows on Windows |
-| Either host through tmux | The host CLI, Bash, Node.js 24.12 or later, and tmux on Linux or macOS; Codex also needs saved session logs |
+| Codex through tmux | Codex CLI, Bash, Node.js 24.12 or later, tmux on Linux or macOS, and saved session logs |
 | Codex through native Windows psmux | Codex CLI, PowerShell, Node.js 24.12 or later, psmux, and saved session logs |
 
 The Claude inline plugin needs no Node install. The tmux commands run TypeScript
 source directly and need no npm install or build. Git supplies repository readings;
 Claude's collector also supports svn working copies. Codex currently reads git only.
 
-Live tmux checks cover Linux with Node.js 24.14.1, tmux 3.5a, Codex 0.167.0 and
-Claude Code 2.1.319. Other host versions and macOS need their own live verification.
+Live tmux checks cover Linux with Node.js 24.14.1, tmux 3.5a and Codex 0.167.0.
+Other host versions and macOS need their own live verification.
 Claude inline Windows checks and limitations are described [below](#claude-code).
 Native Windows Codex checks cover Codex 0.167.0, Node.js 24.21.0 and psmux 3.4.0
 with an isolated local mock provider. See [Windows setup](#native-windows-setup).
@@ -107,8 +106,7 @@ Claude detail pane and workflow count are not available in Codex.
 
 Claude Code's plugin keeps a mod loaded in the session. The mod observes usage,
 tools, agents and repository changes, renders the line, and writes it to a file.
-The inline `statusLine` command prints that file. The optional Claude tmux launcher
-reads a separate launch-local line from the same mod.
+The inline `statusLine` command prints that file.
 
 Codex uses a background helper that reads saved session logs, identifies the
 conversation currently displayed, and sends the rendered line to tmux. It hides
@@ -319,6 +317,10 @@ row remains. Saved config files are not rewritten. Backups survive a helper cras
 `off` still removes the abandoned row and keeps footer backups pending. Restore the
 native footer through `/statusline` or restart Codex; retry `off` when the log is
 available to resume automatic restoration. An already-empty saved footer stays empty.
+
+To remove an abandoned row without restoring Codex's footer, run
+`vargus tmux-reset` inside the affected tmux session. It refuses while a VArgus
+helper still owns a row; use `!vargus off` to restore the footer too.
 
 Leave the composer empty when switching views and wait for footer automation before
 typing. Drafts pause footer automation and are preserved. Standalone Codex keeps
@@ -557,8 +559,7 @@ does not build or install anything.
    hook definitions; reopening only `/hooks` inside a running TUI keeps the removed
    entries in its cached inventory.
 4. Remove the PATH symlink you created for `vargus`, after checking its target with
-   `readlink "$HOME/.local/bin/vargus"`. Keep it if you still use the Claude tmux
-   launcher through that command. Delete the clone only when neither integration
+   `readlink "$HOME/.local/bin/vargus"`. Delete the clone only when neither integration
    uses it; a Claude plugin installed from that folder still needs it.
 
 On native Windows, remove only the forwarding `vargus.cmd` file you created,
@@ -569,9 +570,9 @@ that saved layout; it does not remove your `thread-id` preference.
 
 ## Claude Code
 
-The inline plugin uses Claude's native status-line row. Its `vargus-setup` skill
-handles that integration only. For a tmux row instead, use the
-[Claude tmux launcher](#claude-tmux-launcher).
+The plugin uses Claude's native status-line row. Its `vargus-setup` skill handles
+the integration. The `vargus claude --tmux` launcher is removed; start `claude`
+normally and use the inline setup below.
 
 ### Inline requirements
 
@@ -734,37 +735,6 @@ The Claude integration carries over VantageHUD's fragment order and presentation
 rules. [DESIGN.md](DESIGN.md#rules-carried-over-from-vantagehud) records each rule
 and its tests; Codex's saved-log collection is described separately under
 [Hosts and outputs](DESIGN.md#hosts-and-outputs).
-
-### Claude tmux launcher
-
-Clone VArgus using the [clone instructions above](#set-up-codex), or use your existing
-clone. Run from that clone; no npm install or `node_modules` folder is needed:
-
-```sh
-./bin/vargus claude --tmux
-```
-
-Put Claude arguments after `--`; VArgus options go before it:
-
-```sh
-./bin/vargus claude --tmux --theme ember -- --model sonnet
-```
-
-The launcher adds a row above your existing bar when the bar is at the bottom. It follows the
-active tmux pane; switching to an unwrapped pane leaves the VArgus row blank. Multiple wrapped
-panes share the row, and exiting the last wrapper restores the original bar. A bar already using
-five rows is left alone. If you change its status formats while VArgus runs, your newer settings
-are kept. After a killed/crashed wrapper, run `./bin/vargus tmux-reset` inside that tmux session;
-it refuses while a wrapped process is still running.
-
-The launcher hides Claude's configurable inline status line for that launch. Saved settings
-are not edited. Claude's `tmuxOutput` option
-defaults to off; the wrapper enables it through command-line settings and loads this clone's
-mod with `--plugin-dir`. Enabling that option alone does not create a tmux row.
-
-Use `--config /path/to/vargus.json` for a JSON object of fragment switches and theme, with the
-same keys as the Claude plugin's `userConfig`. `NO_COLOR` disables VArgus colours. The Claude
-wrapper's explicit options apply to its inline-loaded copy, so pass your preferred theme here.
 
 ## Development
 

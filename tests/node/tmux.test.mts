@@ -2,11 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, rm, mkdir, writeFile, chmod } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { TmuxOutput } from '../../src/outputs/tmux/client.ts'
-import { fileURLToPath } from 'node:url'
 
 const exec = promisify(execFile)
 async function rig() {
@@ -126,27 +125,4 @@ test('real concurrent processes can start and exit without losing the session lo
       assert.equal(await r.run('show-options', '-t', 'test'), before)
     }
   } finally { await r.close() }
-})
-
-test('a host cleanup error still restores tmux and preserves the host exit status', { timeout: 15000 }, async () => {
-  const r = await rig()
-  const sealed = join(r.dir, 'sealed')
-  try {
-    const fakeBin = join(r.dir, 'bin')
-    const runTmp = join(r.dir, 'tmp')
-    await mkdir(fakeBin)
-    await mkdir(runTmp)
-    await mkdir(sealed, { mode: 0 })
-    await writeFile(join(fakeBin, 'claude'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
-    const before = await r.run('show-options', '-t', 'test')
-    const { stderr } = await exec(fileURLToPath(new URL('../../bin/vargus', import.meta.url)), ['claude', '--tmux', '--', '--help'], {
-      env: { ...process.env, PATH: fakeBin + ':' + process.env.PATH, TMPDIR: runTmp,
-        CLAUDE_CONFIG_DIR: sealed, TMUX: `${r.socket},1,0`, TMUX_PANE: r.pane },
-    })
-    assert.match(stderr, /VArgus cleanup \(Claude alias\)/)
-    assert.equal(await r.run('show-options', '-t', 'test'), before)
-  } finally {
-    await chmod(sealed, 0o700).catch(() => {})
-    await r.close()
-  }
 })

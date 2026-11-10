@@ -10,8 +10,6 @@ export type Writer = {
   // macOS a drive path comes only from a CLAUDE_CONFIG_DIR or HOME set to
   // one, or a drive-path USERPROFILE with HOME unset or not a `/` path).
   dir: string | null
-  // Only the opt-in tmux publisher uses a launch-local alias.
-  targetId?: string
   // how the line is moved into place and folders removed: `mv` and `rm`, or
   // on Windows (a drive-letter data folder) cmd.exe
   tools: 'posix' | 'cmd'
@@ -135,7 +133,7 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
   while (w.pending !== null) {
     const next = w.pending
     w.pending = null
-    const id = w.targetId ?? await $.session.id()
+    const id = await $.session.id()
     if (!w.dir || !id || id === w.ended) continue
     const now = w.heartbeatMs === null ? 0 : await $.clock.now()
     const same = w.last?.id === id && w.last.text === next
@@ -158,15 +156,4 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
     if (!moved) await $.fs.write(line, next)
     w.last = { id, text: next, at: now }
   }
-}
-
-// The launcher supplies a random run id; paths stay inside the plugin data
-// folder. The native writer continues to follow the host's actual session id.
-export async function createTmuxWriter($: EngineInterface): Promise<Writer | null> {
-  const runId = await $.env.get('VARGUS_TMUX_RUN_ID')
-  if (!runId || !/^[0-9a-f]{32}$/.test(runId)) return null
-  const w = await createWriter($)
-  w.targetId = `tmux-${runId}`
-  w.heartbeatMs = 30_000
-  return w
 }

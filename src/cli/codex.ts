@@ -286,7 +286,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const { target, thread } = spec
   const file = recordPath(target), views = new Views(spec.home, thread, spec.transcript), input = new PaneInput(target)
   const output = new TmuxOutput(target.socket, target.pane)
-  const options = resolveOptions({ ...spec.options, tmuxOutput: true }), theme = makeTheme(options.theme, !!process.env.NO_COLOR)
+  const options = resolveOptions(spec.options), theme = makeTheme(options.theme, !!process.env.NO_COLOR)
   const readers = new Map<string, { reader: RolloutReader; line: ReturnType<typeof codexLine> }>()
   const suppressed = new Set<string>(), footerSettings = new FooterSettings()
   let mode = spec.mode, selected: string | undefined, error: string | undefined

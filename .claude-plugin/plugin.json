@@ -124,12 +124,6 @@
       "description": "The /vargus command: a live pane with every rate limit, the context window, tokens by agent and git or svn detail",
       "default": false
     },
-    "tmuxOutput": {
-      "type": "boolean",
-      "title": "tmux output",
-      "description": "Publish a separate line for an explicitly launched VArgus tmux companion",
-      "default": false
-    },
     "codexAgentCounts": {
       "type": "boolean",
       "title": "Codex: subagent count",

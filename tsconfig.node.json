@@ -5,5 +5,5 @@
     "noEmit": true, "skipLibCheck": true, "types": ["node"], "esModuleInterop": true,
     "allowImportingTsExtensions": true, "verbatimModuleSyntax": true, "erasableSyntaxOnly": true
   },
-  "include": ["src/cli.ts", "src/cli", "src/hosts/codex", "src/hosts/claude/launch-node.ts", "src/outputs", "tests/node"]
+  "include": ["src/cli.ts", "src/cli", "src/hosts/codex", "src/outputs", "tests/node"]
 }

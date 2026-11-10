@@ -19,6 +19,11 @@ Notable changes to this project. The format follows
 - Codex always uses short names for recognized model families, matching Claude's
   display rule. The `codexShortModel` switch is removed; existing values are ignored.
 
+### Removed
+
+- Claude Code's `vargus claude --tmux` launcher and its `tmuxOutput` publisher
+  option. Start Claude normally and use the VArgus inline plugin instead.
+
 ## [0.4.1] - 2026-11-10
 
 ### Added

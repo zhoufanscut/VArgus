@@ -26,7 +26,7 @@ test('shared modules have no host, display, Node or Claude API imports; host col
   }
 })
 
-test('the reachable Claude mod graph excludes Node code and its Node-side launcher', async () => {
+test('the reachable Claude mod graph excludes Node code', async () => {
   const manifest = JSON.parse(await readFile('hooks/hooks.json', 'utf8')) as { modules: string[] }
   const pending = manifest.modules.map(spec => resolve('hooks', spec))
   const visited = new Set<string>()
@@ -34,7 +34,6 @@ test('the reachable Claude mod graph excludes Node code and its Node-side launch
     const file = pending.pop()!
     if (visited.has(file)) continue
     visited.add(file)
-    assert.ok(!file.endsWith('launch-node.ts'), 'Claude mod reaches the Node-side launcher')
     const text = await readFile(file, 'utf8')
     for (const [, spec] of text.matchAll(/(?:from\s+|import\s*)['"]([^'"]+)['"]/g)) {
       if (!spec!.startsWith('.')) {

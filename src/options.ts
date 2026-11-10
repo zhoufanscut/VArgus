@@ -19,7 +19,6 @@ export const DEFAULTS = {
   theme: 'graphite',
   blankStopped: false,
   detailView: false,
-  tmuxOutput: false,
   codexAgentCounts: true,
   codexSkillCounts: true,
   codexAutoStart: true,

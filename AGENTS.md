@@ -2,7 +2,7 @@
 
 Guidance for coding agents (Claude Code reads it through `CLAUDE.md`) working on VArgus.
 
-VArgus supports Claude Code and Codex CLI, with an opt-in tmux output for both.
+VArgus supports Claude Code's inline status line and an opt-in tmux output for Codex CLI.
 The existing Claude inline status line has two parts: a mod (a plugin hooks module) that collects the
 numbers and writes the finished line to a file, and a `statusLine` command that prints it. It
 replaces VantageHUD (github.com/zhoufanscut/VantageHUD, last release 0.6.0) and shares no code
@@ -23,7 +23,7 @@ DESIGN.md "Unsettled" with a throwaway mod before building on it.
 - `src/core`, `src/render`, `src/theme`, `src/i18n` and `src/options.ts` hold shared values and
   presentation. They import no host API, host module or output adapter.
 - `src/hosts/claude` owns the mod, its collectors, state contract integration and detail pane.
-  Its `launch-node.ts` is Node-side only and must stay outside the mod's import graph.
+  The mod imports no Node code.
 - `src/hosts/codex` owns Codex saved-session collection and metadata reads. Host adapters do not import
   each other or a display adapter.
 - `src/outputs` owns display encoding and tmux lifecycle; it imports no host code.

@@ -13,13 +13,12 @@ import { render } from '../../render'
 import { makeTheme } from '../../theme'
 import { viewModel } from './view/model'
 import { drawView } from './view/pane'
-import { createWriter, createTmuxWriter, endSession, homeDir, pruneOld, writeLine, type Writer } from './write'
+import { createWriter, endSession, homeDir, pruneOld, writeLine, type Writer } from './write'
 
 // Wiring only. Module values start over on a hot reload, which runs register
 // and session.start again (DESIGN, "The host"); what must survive one lives in
 // $.state, kept by the collectors.
 let writer: Writer | null = null
-let tmuxWriter: Writer | null = null
 let tick: Timer | null = null
 let theme: Theme | null = null
 let options: Options | null = null
@@ -45,7 +44,6 @@ async function refresh($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
   const text = render({ v: values, o: options, l: labels, t: theme, now })
   await writeLine($, writer, text)
-  if (tmuxWriter) await writeLine($, tmuxWriter, text)
 }
 
 async function isWsl($: EngineInterface): Promise<boolean> {
@@ -66,7 +64,6 @@ export const register: Register = (on, given) => {
     // Only an interactive session shows a status line (DESIGN, "When the line is written").
     if (e.isInteractive) {
       writer = await createWriter($)
-      if (options?.tmuxOutput) tmuxWriter = await createTmuxWriter($)
       // DESIGN, "The reader": the file's age tells the reader the mod stopped
       writer.heartbeatMs = options?.blankStopped ? 30_000 : null
       startVcs($, values.vcs, e, options?.detachedHead ?? false)
@@ -136,9 +133,6 @@ export const register: Register = (on, given) => {
     if (options?.detailView) agentsEnding($, agents, e, values.session.counts.tokens)
     // a failed removal leaves the folder, as before
     if (writer) await endSession($, writer, e.sessionId).catch(() => {})
-    if (tmuxWriter?.targetId && e.reason !== 'clear' && e.reason !== 'resume') {
-      await endSession($, tmuxWriter, tmuxWriter.targetId).catch(() => {})
-    }
     return next(e)
   })
 

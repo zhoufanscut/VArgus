@@ -444,7 +444,7 @@ export class TmuxOutput {
       const state = await this.state()
       if (!state) return
       await this.prune(state)
-      if (state.owners.length) throw new Error('VArgus is still running; exit its wrapped sessions before resetting the row.')
+      if (state.owners.length) throw new Error('VArgus is still running; run !vargus off or exit Codex before resetting the row.')
       await this.restore(state)
     })
   }

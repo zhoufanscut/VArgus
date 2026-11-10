@@ -1,7 +1,7 @@
 # VArgus — design
 
 VArgus supports Claude Code through its mod and Codex CLI through a standalone saved-log reader.
-Both can opt into a tmux row. The existing Claude inline status line has two parts. A mod (a plugin hooks module that stays
+Codex uses a tmux row. The existing Claude inline status line has two parts. A mod (a plugin hooks module that stays
 loaded for the whole session) hears the engine's events, keeps the numbers in memory, renders the
 line and writes it to a file. The `statusLine` command is a shell one-liner that prints that file.
 The line stays where VantageHUD's was, under the prompt. VArgus replaces VantageHUD and shares no
@@ -41,7 +41,7 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
 - Output adapters import no host code. `src/cli.ts` and `src/cli` wire collection to display.
 - The Claude mod imports no Node code. The manifest points directly to its register module:
   Claude Code 2.1.319 validation rejects a re-exported `register` entry point.
-- The normal Claude plugin, standalone Codex helper and Claude tmux launcher need no npm
+- The Claude plugin and standalone Codex helper need no npm
   install or `node_modules` folder. npm supplies development/test tools only; `ws` is used
   by the hook regression rig to inspect Codex's daemon. `.test.mts` keeps Node tests outside
   the Claude engine's `.test.ts` runner.
@@ -49,8 +49,8 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
 ### User-facing setup paths
 
 README.md documents each host separately: Claude's inline plugin install and
-`vargus-setup` skill, Codex's clone/PATH entry and optional startup hooks, and the
-Claude tmux launcher. Plugin installation and `/config` belong to Claude. Codex
+`vargus-setup` skill, and Codex's clone/PATH entry and optional startup hooks.
+Plugin installation and `/config` belong to Claude. Codex
 reads CLI options resolved against `src/options.ts`; installing the Claude plugin
 does not install Codex hooks. The tmux commands run from the clone, so removal
 finishes footer restoration or exits the TUI before removing shared source.
@@ -68,11 +68,8 @@ fragment descriptions instead of applying the Claude-only rules to both hosts.
 
 ### Opt-in tmux row
 
-`bin/vargus claude --tmux` enables the output for that Claude launch. Codex uses the
-standalone `on`/`off` controls inside ordinary Codex. Without `--tmux` the Claude launcher
-refuses to change the bar. Claude's `tmuxOutput` userConfig
-flag defaults to false; the wrapper enables it through command-line settings. Saved Claude,
-Codex and tmux configuration files are not edited.
+Codex uses the standalone `on`/`off` controls inside ordinary Codex. Saved Codex
+and tmux configuration files are not edited.
 
 On POSIX tmux the output prepends a row to the session's existing status rows and shifts their effective
 formats down. It stores the original local overrides, so exit restores inheritance as well as
@@ -81,43 +78,23 @@ explicit settings. At tmux's five-row limit it refuses to overwrite a row. The e
 Native Windows psmux places VArgus above its built-in bar through the scalar
 layout; existing custom format arrays retain their order. The limits are below.
 
-Each wrapped process owns a pane's `@vargus_line`. The row's `#{@vargus_line}` lookup follows
+Each helper owns a pane's `@vargus_line`. The row's `#{@vargus_line}` lookup follows
 that client's active pane. It does not use `E:` or a shell `#()` formatter: repository text
 cannot become a format command through recursive expansion. The encoder converts VArgus's
 SGR colours and bold to tmux styles and escapes literal hashes. Nonempty rows begin
 with two spaces; the Node renderer's width budget excludes that padding. Empty rows
 stay blank. Tests use a dedicated server, not the person's current tmux server.
 
-A short lock serializes session setup and cleanup across wrappers. A prepared nonempty owner
+A short lock serializes session setup and cleanup across helpers. A prepared nonempty owner
 directory is published atomically; owner filenames are unique, so stale cleanup cannot remove
 a replacement owner's record. Disappearing lock paths are retried. The last owner restores the
 bar. If status/status-format changed while running, the newer options are kept instead.
-Every resource gets its cleanup even if another cleanup fails; errors are reported separately
-without replacing the host's exit status or original error. SIGTERM and SIGHUP pass through
-cleanup; an uncatchable exit can leave the row. A later launch
+SIGTERM and SIGHUP stop the helper through its cleanup path; an uncatchable exit can leave
+the row. A later attachment
 or `bin/vargus tmux-reset` prunes dead owners. Reset refuses while an owner is still running.
 State is under the OS temporary directory, keyed by tmux socket and session; credentials and
 conversation messages are not persisted there. PID reuse and loss of the OS temporary files
-while a wrapper is alive are not recovered automatically.
-
-### Claude through tmux
-
-The existing mod remains the collector and native writer. With `tmuxOutput` on and the
-wrapper's random `VARGUS_TMUX_RUN_ID` present, a second writer publishes the same rendered line
-under `<data>/tmux-<run id>/line`. The alias stays fixed across clear/resume, while the native
-writer still follows the real session id. It uses the same atomic replace path, with a
-30-second heartbeat; the wrapper blanks an alias older than two minutes. Session exit and
-wrapper cleanup remove that launch's alias. Without the flag, the additional writer is absent.
-
-The wrapper loads this clone with `--plugin-dir`, supplies inline options and replaces the
-native statusLine command with `true` for this invocation. The `vargus` and `vargus@inline`
-option keys are both supplied, matching the 2.1.319 reference's description of inline options.
-The existing installed plugin and settings files are not rewritten.
-
-Mod facts were checked in the installed `plugin-authoring` material for Claude Code 2.1.319:
-`reference.md` says a module runs with "no DOM and no Node"; `SessionRateLimit` has `kind`,
-`percentUsed` and optional ISO `resetsAt`. The shared rate-limit shape preserves those fields.
-Existing `$` calls remain under the Claude host and are checked by `claude plugin validate .`.
+while a helper is alive are not recovered automatically.
 
 ### Standalone controls in official Codex
 
@@ -140,8 +117,8 @@ constructor parameter properties. Its typecheck enforces erasable syntax and
 explicit type imports. Hooks and background workers start the same source entry;
 no bundle, TypeScript loader or build step is used. Supported runtime entry points
 use Node built-ins and local source modules; npm packages are development/test dependencies.
-The feature is off until explicit `on` or the optional startup hook enables
-`tmuxOutput` for its helper. The normal Claude mod graph does not reach this script or Node code.
+The row starts when explicit `on` or installed startup hooks start its helper.
+The Claude mod graph does not reach this script or Node code.
 
 `outputs/tmux/target.ts` discovers a named foreground application through tmux and
 `ps` on POSIX, or a pane-rooted Windows CIM process tree on Windows. The outermost matching application process identifies the frontend; nested
@@ -909,10 +886,9 @@ own tmux pane, code shared with VantageHUD.
 hooks/hooks.json                 points directly to ../src/hosts/claude/register.ts
 src/hosts/claude/register.ts      Claude mod lifecycle and wiring
 src/hosts/claude/collect/         Claude collectors, authentication and polling
-src/hosts/claude/write.ts         Claude native line and optional tmux alias
+src/hosts/claude/write.ts         Claude native line file
 src/hosts/claude/paths.ts         pure Claude config/data path rules
 src/hosts/claude/view/            existing /vargus pane
-src/hosts/claude/launch-node.ts   Node launcher; outside the mod import graph
 src/hosts/codex/                 Codex saved-log collection, view recognition, footer policy
 src/cli/                        Node-side host/output wiring and standalone controller
 src/core/                       shared readings, defaults and pure git parsers
@@ -922,7 +898,7 @@ src/theme/                      palettes and ANSI colour encoding
 src/i18n/                       labels
 src/outputs/ansi.ts             decode the renderer's SGR vocabulary
 src/outputs/tmux/                tmux encoding, pane ownership and row lifecycle
-src/cli.ts                      CLI dispatch and optional Claude launcher
+src/cli.ts                      CLI dispatch
 bin/vargus                      Bash symlink entry for the TypeScript CLI
 types/index.d.ts                self-contained Claude $.state contract
 tests/*.test.ts                 Claude engine and shared rendering tests
@@ -1320,7 +1296,6 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 - `blankStopped` (0.1.3, off): the heartbeat write and the second reader
   ([The reader](#the-reader)).
 - `detailView` (0.2.0, off): the `/vargus` pane ([The detail view](#the-detail-view)).
-- `tmuxOutput` (off): the launch-local Claude publisher ([Hosts and outputs](#hosts-and-outputs)).
 - Built in at VantageHUD's defaults: the short model name (`opus`); call counts as emoji (`🔧73`), as
   text (`T:73`) on WSL, as VantageHUD's `auto` did (WSL: `WSLENV` set, or `/proc/version` containing
   "microsoft", read with `$.env.get` and `$.fs.read`); the context thresholds 70 / 80 / 85 % and the
@@ -1506,7 +1481,7 @@ Later:
   `labels` config).
 
 Not planned for the Claude integration: payload-only data in the line; additional UI
-beyond the inline status line, `/vargus` pane and optional tmux output; seeing
+beyond the inline status line and `/vargus` pane; seeing
 teammates that run in their own tmux pane; a live-agents row (`agents: reviewer running 1m17s
 8.2k | Explore done 9.2k`), since Claude Code lists each running agent under the prompt with what
 it is doing, its time and its tokens (seen on 2.1.300: `◯ Explore  Grepping labels.test.ts for

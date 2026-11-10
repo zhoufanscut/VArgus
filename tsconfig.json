@@ -27,7 +27,6 @@
     "src/cli.ts",
     "src/cli",
     "src/hosts/codex",
-    "src/hosts/claude/launch-node.ts",
     "src/outputs/tmux",
     "tests/node"
   ]
