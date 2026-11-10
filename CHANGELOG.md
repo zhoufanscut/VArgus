@@ -6,6 +6,18 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-10
+
+### Added
+
+- Native Windows Codex support through psmux, with `bin/vargus.cmd`, PowerShell
+  startup hooks and CIM process discovery. The CLI and helpers run with Windows
+  Node directly, without Bash, an npm install or a build. README includes setup
+  and verification limits.
+- A Windows status row that preserves psmux's original bar. With the built-in
+  bar, VArgus appears above the session/window/right-side information; custom
+  formats and asynchronous shell formatters retain their native layout.
+
 ### Fixed
 
 - Native Windows attachment rolls back bar settings and owner registration on
@@ -188,7 +200,8 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
-[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/zhoufanscut/VArgus/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/zhoufanscut/VArgus/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/zhoufanscut/VArgus/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/zhoufanscut/VArgus/compare/v0.1.3...v0.2.0
