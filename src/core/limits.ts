@@ -10,6 +10,9 @@ export type ExtraBucket = Bucket & { spentUsd: number; limitUsd: number }
 
 
 export type UsageData = {
+  // Direct providers' windows; an engine reading takes precedence.
+  fiveHour?: Bucket
+  monthly?: Bucket
   sonnet: Bucket | null
   opus: Bucket | null
   // other models' weekly caps, labelled by the API's model name (modelLabel)

@@ -4,6 +4,9 @@
 // - five_hour / seven_day / spend_limit are the engine's: `$.session.usage()`
 //   at session.start, then pushed by `session.measure` after each main-thread
 //   turn and when a window moves a whole point. Never marked stale.
+// - Kimi Code's five-hour and monthly-total windows come from its direct
+//   usage API after an exact coding base-URL match, using the existing env
+//   credential; session.authorize() is not called.
 // - Per-model weekly (sn, op, others) and extra usage come only from the OAuth
 //   usage API, read every 90 s and cached in `$.store` per account.
 //
@@ -13,7 +16,8 @@
 
 import { initialLimits, MAX_STALE_MS, type Bucket, type ModelBucket, type ExtraBucket, type UsageData, type ApiError, type LimitsValues } from '../../../core/limits'
 export { initialLimits, MAX_STALE_MS, type Bucket, type ModelBucket, type ExtraBucket, type UsageData, type ApiError, type LimitsValues } from '../../../core/limits'
-import type { EngineInterface, SessionMeasureInput, SessionRateLimit, SessionStartInput, Timer } from 'claude-code'
+import type { EngineInterface, HttpInit, SessionMeasureInput, SessionRateLimit, SessionStartInput, Timer } from 'claude-code'
+import { directUsageProvider } from './usage-providers'
 
 // What `$.store` keeps per account, shared by every session of that account.
 export type UsageCache = {
@@ -114,31 +118,54 @@ function asCache(stored: unknown): UsageCache | null {
     : null
 }
 
+type UsageRequest = {
+  url: string
+  init?: HttpInit
+  parse: (body: unknown) => UsageData | null
+}
+
 // One read: the account's cache when it is fresh (this or another session
-// read it), else the API. One key per account: CLAUDE_CONFIG_DIR picks the
-// credentials, and one shared cache once showed one account's numbers in
-// another's session (DESIGN, "Usage cache and staleness").
+// read it), else the API. One key per provider and account: CLAUDE_CONFIG_DIR
+// picks the credentials, and one shared cache once showed one account's
+// numbers in another's session (DESIGN, "Usage cache and staleness").
 async function readUsage($: EngineInterface, values: LimitsValues): Promise<void> {
   if (reading) return
   reading = true
   try {
-    // Both checks come before any cache read: the cache is per config folder,
-    // not per login, so a session behind a gateway, on an API key or with no
-    // login would otherwise show another login's numbers (VantageHUD checked
-    // its provider "before any cache read so a stale cache cannot leak").
-    if (await isApiSkipped($)) return show(values, null)
-    // Never refresh an OAuth token: refresh tokens are single-use, so a
-    // refresh revokes Claude Code's own token (anthropics/claude-code#42603).
-    // The engine holds the credential; the mod only borrows a handle. Null
-    // (a gateway, a 3P provider, no login) or an API key: the OAuth endpoint
-    // has nothing for it, so no API numbers and no badge.
-    const auth = await $.session.authorize()
-    if (!auth || auth.kind !== 'bearer') return show(values, null)
-    const key = `usage:${(await $.env.get('CLAUDE_CONFIG_DIR')) ?? ''}`
+    const provider = directUsageProvider(await $.env.get('ANTHROPIC_BASE_URL'))
+    // Direct third-party providers deliberately bypass the nonessential-
+    // traffic flag. Their exact URL match and own credential are the boundary;
+    // the Anthropic OAuth path below keeps every existing skip.
+    if (!provider && await isApiSkipped($)) return show(values, null)
+
+    let key: string
+    let request: UsageRequest
+    if (provider) {
+      // Literal names: plugin validation lists every environment variable read.
+      const token = (await $.env.get('ANTHROPIC_AUTH_TOKEN'))?.trim()
+        || (await $.env.get('ANTHROPIC_API_KEY'))?.trim()
+      if (!token) return show(values, null)
+      key = `usage:${provider.id}:${(await $.env.get('CLAUDE_CONFIG_DIR')) ?? ''}`
+      request = { url: provider.usageUrl, init: { headers: { Authorization: `Bearer ${token}` } }, parse: provider.parse }
+    } else {
+      // Never refresh an OAuth token: refresh tokens are single-use, so a
+      // refresh revokes Claude Code's own token (anthropics/claude-code#42603).
+      // The engine holds the credential; the mod only borrows a handle. Null
+      // (a gateway, a 3P provider, no login) or an API key: the OAuth endpoint
+      // has nothing for it, so no API numbers and no badge.
+      const auth = await $.session.authorize()
+      if (!auth || auth.kind !== 'bearer') return show(values, null)
+      key = `usage:${(await $.env.get('CLAUDE_CONFIG_DIR')) ?? ''}`
+      request = {
+        url: USAGE_URL,
+        init: { headers: { 'anthropic-beta': 'oauth-2025-04-20' }, auth: auth.handle },
+        parse: parseUsage,
+      }
+    }
     const now = await $.clock.now()
     const cache = asCache(await $.store.get(key))
     if (cache && now < cache.retryAt) return show(values, cache)
-    const next = await fetchUsage($, auth.handle, cache, now)
+    const next = await fetchUsage($, cache, now, request)
     show(values, next)
     await $.store.set(key, next)
   } finally {
@@ -148,9 +175,9 @@ async function readUsage($: EngineInterface, values: LimitsValues): Promise<void
 
 async function fetchUsage(
   $: EngineInterface,
-  handle: string,
   cache: UsageCache | null,
   now: number,
+  request: UsageRequest,
 ): Promise<UsageCache> {
   const failed = (error: ApiError, retryAt: number, rateLimitedCount = 0): UsageCache => ({
     data: cache?.data ?? null,
@@ -161,7 +188,7 @@ async function fetchUsage(
   })
   let res
   try {
-    res = await $.http.fetch(USAGE_URL, { headers: { 'anthropic-beta': 'oauth-2025-04-20' }, auth: handle })
+    res = await $.http.fetch(request.url, request.init)
   } catch {
     // refused (a policy), timed out, unreachable
     return failed('network', now + RETRY_MS)
@@ -173,9 +200,9 @@ async function fetchUsage(
   }
   // 401: the server rejected the credential. VantageHUD kept a fingerprint of
   // the rejected token so it would not re-send that token faster than the
-  // transient pace while re-reading the store for a new one. A mod never sees
-  // the token, and the handle is opaque (the types do not say it changes with
-  // the credential), so every 401 waits that pace; after a re-login the
+  // transient pace while re-reading the store for a new one. The Anthropic
+  // OAuth path never sees the token, and the handle is opaque (the types do not
+  // say it changes with the credential), so every 401 waits that pace; after a re-login the
   // badge or the stale mark can stay up to RETRY_MS (+ CHECK_MS).
   if (res.status === 401) return failed('auth', now + RETRY_MS)
   // 403 is what a region block answers too, which no credential fixes: a
@@ -183,7 +210,7 @@ async function fetchUsage(
   if (res.status !== 200) return failed('network', now + RETRY_MS)
   let data: UsageData | null = null
   try {
-    data = parseUsage(JSON.parse(res.text))
+    data = request.parse(JSON.parse(res.text))
   } catch {
     // not JSON: a proxy or captive portal answering 200
   }

@@ -16,6 +16,13 @@ const T0 = Date.parse('2026-10-15T09:00:00.000Z')
 const SEC = 1000
 const MIN = 60 * SEC
 const URL = 'https://api.anthropic.com/api/oauth/usage'
+const KIMI_URL = 'https://api.kimi.com/coding/v1/usages'
+const KIMI_BODY = JSON.stringify({
+  usages: {
+    limit_5h: { used_ratio: 0.2453, reset_time: '2026-10-15T13:37:00Z' },
+    limit_month_total: { used_ratio: 0.1109, reset_time: '2026-11-15T09:00:00Z' },
+  },
+})
 
 const BODY = JSON.stringify({
   five_hour: { utilization: 50, resets_at: null },
@@ -96,6 +103,40 @@ describe('limits collector', () => {
     expect(line(w)).toBe('5h:4% op:12%')
     // never a token or a refresh: only the engine's handle rides the request
     expect(w.fetches[0]).toEqual({ url: URL, init: { headers: { 'anthropic-beta': 'oauth-2025-04-20' }, auth: 'h1' } })
+  })
+
+  test('Kimi: direct 5h and 1m usage with the env credential, never session.authorize', opts, async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const w = world(on, clock, {
+      ANTHROPIC_BASE_URL: 'https://api.kimi.com/coding/',
+      ANTHROPIC_AUTH_TOKEN: 'kimi-secret',
+    })
+    w.engine = []
+    w.answer = () => reply(200, KIMI_BODY)
+    await $.session.start(start)
+    await clock.advance(SEC)
+    expect(w.fetches).toEqual([{
+      url: KIMI_URL,
+      init: { headers: { Authorization: 'Bearer kimi-secret' } },
+    }])
+    expect(w.authorizations).toBe(0)
+    expect(line(w)).toBe('5h:25%(4h36m) 1m:11%(30d23h)')
+  })
+
+  test('Kimi: direct providers bypass the nonessential-traffic flag, never session.authorize', opts, async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const w = world(on, clock, {
+      ANTHROPIC_BASE_URL: 'https://api.kimi.com/coding/',
+      ANTHROPIC_AUTH_TOKEN: 'kimi-secret',
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    })
+    w.engine = []
+    w.answer = () => reply(200, KIMI_BODY)
+    await $.session.start(start)
+    await clock.advance(SEC)
+    expect(w.fetches).toHaveLength(1)
+    expect(w.authorizations).toBe(0)
+    expect(line(w)).toBe('5h:25%(4h36m) 1m:11%(30d23h)')
   })
 
   test('session.measure pushes the engine windows', opts, async ($, on) => {

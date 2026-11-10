@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { initialLimits, modelLabel, parseUsage, retryAfterMs, type LimitsValues, type UsageData } from '../src/hosts/claude/collect/limits'
+import { directUsageProvider } from '../src/hosts/claude/collect/usage-providers'
 import { initialSession } from '../src/hosts/claude/collect/session'
 import { initialVcs } from '../src/hosts/claude/collect/vcs'
 import type { FragmentInput, Theme } from '../src/core/types'
@@ -47,6 +48,16 @@ const good = (data: UsageData): Partial<LimitsValues> => ({ api: data, lastSucce
 describe('limits fragment', () => {
   test('the engine windows: 5h:4%(4h37m) 7d:39%(5d6h)', async () => {
     expect(draw({ engine })).toBe('5h:4%(4h37m) 7d:39%(5d6h)')
+  })
+
+  test('direct provider 5h and 1m windows; engine 5h wins without a duplicate', async () => {
+    const fiveHour = { percent: 24.53, resetsAt: NOW + 277 * MIN }
+    const monthly = { percent: 11.09, resetsAt: NOW + 31 * 24 * 60 * MIN }
+    expect(draw(good(api({ fiveHour, monthly })))).toBe('5h:25%(4h37m) 1m:11%(31d0h)')
+    expect(draw({ engine: [engine[0]!], ...good(api({ fiveHour: { ...fiveHour, percent: 90 }, monthly })) }))
+      .toBe('5h:4%(4h37m) 1m:11%(31d0h)')
+    expect(draw({ ...good(api({ fiveHour, monthly })), error: 'network' }))
+      .toBe('5h:25%*(~4h37m) 1m:11%*(~31d0h)')
   })
 
   test('a window past its reset is not drawn; one with no reset time is kept', async () => {
@@ -130,11 +141,12 @@ describe('limits fragment', () => {
       engine: [...engine, { kind: 'spend_limit', percentUsed: 1 }],
       ...good(api({
         sonnet: { percent: 90, resetsAt: null }, opus: { percent: 1, resetsAt: null },
+        monthly: { percent: 2, resetsAt: null },
         extra: { percent: 1, resetsAt: null, spentUsd: 1, limitUsd: 2 },
       })),
     }
     const text = draw(all, { spendLimit: true }, { l: marked })!
-    expect(text).toBe('⟦fiveHour⟧:4%(4h37m) ⟦sevenDay⟧:39%(5d6h) ⟦sonnetWeekly⟧:90% ⟦opusWeekly⟧:1% ⟦extra⟧:1%($1.00/$2.00) ⟦spendLimit⟧:1%')
+    expect(text).toBe('⟦fiveHour⟧:4%(4h37m) ⟦sevenDay⟧:39%(5d6h) ⟦monthly⟧:2% ⟦sonnetWeekly⟧:90% ⟦opusWeekly⟧:1% ⟦extra⟧:1%($1.00/$2.00) ⟦spendLimit⟧:1%')
     expect(draw({ error: 'network' }, {}, { l: marked })).toBe('⟦apiError⟧')
     expect(draw({ error: 'auth' }, {}, { l: marked })).toBe('⟦apiAuth⟧')
     expect(draw({ error: 'rate_limited' }, {}, { l: marked })).toBe('⟦apiRateLimited⟧')
@@ -202,5 +214,65 @@ describe('usage API parser', () => {
     expect(retryAfterMs('999999')).toBe(3_600_000)
     expect(retryAfterMs('Wed, 21 Oct 2026 07:28:00 GMT')).toBe(0)
     expect(retryAfterMs(undefined)).toBe(0)
+  })
+})
+
+describe('Kimi direct usage provider', () => {
+  test('matches only the two exact coding base URLs, allowing trailing slashes', async () => {
+    expect(directUsageProvider('https://api.kimi.com/coding/')?.usageUrl)
+      .toBe('https://api.kimi.com/coding/v1/usages')
+    expect(directUsageProvider('https://api.kimi.ai/coding')?.usageUrl)
+      .toBe('https://api.kimi.ai/coding/v1/usages')
+    expect(directUsageProvider('https://api.kimi.com/coding/v1')).toBeNull()
+    expect(directUsageProvider('https://api.kimi.com.evil.example/coding/')).toBeNull()
+    expect(directUsageProvider('http://api.kimi.com/coding/')).toBeNull()
+    expect(directUsageProvider('https://gateway.example.com/coding/')).toBeNull()
+  })
+
+  test('parses the measured 5h ratio and membership monthly total', async () => {
+    const kimi = directUsageProvider('https://api.kimi.com/coding/')!
+    const parsed = kimi.parse({
+      usages: {
+        limit_5h: { used_ratio: 0.2453, reset_time: '2026-11-10T10:11:17Z' },
+        limit_month_total: { used_ratio: 0.1109, reset_time: '2026-12-09T00:00:00Z' },
+        limit_month_code: { used_ratio: 0.1107, reset_time: '2026-12-09T00:00:00Z' },
+      },
+    })
+    expect(parsed?.fiveHour?.percent).toBe(24.53)
+    expect(parsed?.fiveHour?.resetsAt).toBe(Date.parse('2026-11-10T10:11:17Z'))
+    expect(parsed?.monthly?.percent).toBe(11.09)
+    expect(parsed?.monthly?.resetsAt).toBe(Date.parse('2026-12-09T00:00:00Z'))
+  })
+
+  test('falls back to the 300-minute count window; a non-usage answer fails', async () => {
+    const kimi = directUsageProvider('https://api.kimi.com/coding/')!
+    expect(kimi.parse({
+      limits: [{
+        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+        detail: { limit: '100', used: '25', remaining: '75', resetTime: '2026-11-10T10:11:17.357463Z' },
+      }],
+    })?.fiveHour).toEqual({ percent: 25, resetsAt: Date.parse('2026-11-10T10:11:17.357463Z') })
+    expect(kimi.parse({ error: 'x' })).toBeNull()
+  })
+
+  test('keeps monthly with a 5h fallback and accepts the cited remaining-only shape', async () => {
+    const kimi = directUsageProvider('https://api.kimi.com/coding/')!
+    const mixed = kimi.parse({
+      usages: { limit_month_total: { used_ratio: 0.1109, reset_time: '2026-12-09T00:00:00Z' } },
+      limits: [{
+        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+        detail: { limit: '100', used: '25', resetTime: '2026-11-10T10:11:17Z' },
+      }],
+    })
+    expect(mixed?.fiveHour).toEqual({ percent: 25, resetsAt: Date.parse('2026-11-10T10:11:17Z') })
+    expect(mixed?.monthly).toEqual({ percent: 11.09, resetsAt: Date.parse('2026-12-09T00:00:00Z') })
+    const cited = kimi.parse({
+      usage: { limit: '100', remaining: '100', resetTime: '2026-03-09T11:16:04.416717Z' },
+      limits: [{
+        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+        detail: { limit: '100', remaining: '100', resetTime: '2026-03-03T11:16:04.416717Z' },
+      }],
+    })
+    expect(cited?.fiveHour).toEqual({ percent: 0, resetsAt: Date.parse('2026-03-03T11:16:04.416717Z') })
   })
 })

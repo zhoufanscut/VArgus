@@ -197,12 +197,15 @@ function windows(f: ViewInput): { list: Window[]; notes: Row[] } {
   const engine = (r: SessionRateLimit | undefined, label: string, unclamped = false) => {
     if (r) list.push({ label, percent: r.percentUsed, resetsAt: engineTime(r.resetsAt), unclamped })
   }
-  engine(L.engine.find(r => r.kind === 'five_hour'), l.fiveHour)
+  const engineFive = L.engine.find(r => r.kind === 'five_hour')
+  engine(engineFive, l.fiveHour)
   engine(L.engine.find(r => r.kind === 'seven_day'), l.sevenDay)
   const notes: Row[] = []
   const api = L.api && L.lastSuccessAt !== null && now - L.lastSuccessAt <= MAX_STALE_MS ? L.api : null
   const stale = L.error !== null
   if (api) {
+    if (!engineFive && api.fiveHour) list.unshift({ label: l.fiveHour, ...api.fiveHour, stale })
+    if (api.monthly) list.push({ label: l.monthly, ...api.monthly, stale })
     if (api.sonnet) list.push({ label: l.sonnetWeekly, ...api.sonnet, stale })
     if (api.opus) list.push({ label: l.opusWeekly, ...api.opus, stale })
     for (const m of api.others) list.push({ ...m, label: cleanText(m.label), stale })

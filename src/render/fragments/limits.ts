@@ -45,17 +45,20 @@ export const limits: Fragment = ({ v, o, l, t, now }) => {
   const L = v.limits
   const parts: (string | null)[] = []
   const engine = (kind: string) => L.engine.find(r => r.kind === kind)
+  const api = L.api && L.lastSuccessAt !== null && now - L.lastSuccessAt <= MAX_STALE_MS ? L.api : null
+  const stale = L.error !== null
 
-  // The engine's windows are live: never stale-marked.
+  // The engine's windows are live: never stale-marked. A direct provider's
+  // 5h reading is a fallback only, so an engine reading never appears twice.
   for (const [kind, label] of [['five_hour', l.fiveHour], ['seven_day', l.sevenDay]] as const) {
     const r = engine(kind)
     if (r) parts.push(drawWindow(t, now, { label: r.label ?? label, percent: r.percentUsed, resetsAt: engineTime(r.resetsAt) }))
+    else if (kind === 'five_hour' && api?.fiveHour) parts.push(drawWindow(t, now, { label, ...api.fiveHour, stale }))
   }
+  if (api?.monthly) parts.push(drawWindow(t, now, { label: l.monthly, ...api.monthly, stale }))
 
-  // The usage API's numbers: shown up to 15 min after the last good read,
-  // stale-marked while the last read failed; past that, the error instead.
-  const api = L.api && L.lastSuccessAt !== null && now - L.lastSuccessAt <= MAX_STALE_MS ? L.api : null
-  const stale = L.error !== null
+  // The usage API's remaining numbers: shown up to 15 min after the last good
+  // read, stale-marked while the last read failed; past that, the error instead.
   if (api) {
     const shown = (p: number) => Math.round(p) >= MODEL_WEEKLY_FROM
     if (api.sonnet && shown(api.sonnet.percent)) parts.push(drawWindow(t, now, { label: l.sonnetWeekly, ...api.sonnet, stale }))

@@ -942,6 +942,7 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
 | Folder, model, effort | `$.session.cwd()` and `$.session.model()` on each tick (a `/model` switch raises no event but the classic `PostModelSwitch`, and classic hooks don't run where an organization manages Claude Code), `effort` on the main loop's `turn.step` input, so none shows before a session's first request. Not filled in earlier from settings and the model's default: the engine's order (model-config docs) also takes `--effort`, a session-only `/effort`, an organization default and caps, which a mod can't read | types, docs |
 | Tool / agent / skill / workflow counts | the main loop's `tool.call` (no `e.agentId`): every call, `Agent`, `Skill`, and `Workflow` other than a resume; counted when the call is asked for, a refused one included, as VantageHUD counted the transcript's tool_use blocks. Not `agent.spawn`: it fires for each workflow agent too | types |
 | Per-model weekly (`sn:`/`op:`/others), `extra:` | OAuth usage API via `$.http.fetch` + `$.session.authorize()`, cached in `$.store` per config folder (`CLAUDE_CONFIG_DIR`, which picks the login); the store is checked every 15 s and the API read when the cache's retry time has passed (90 s after a success, 2 min after a network or auth failure, the larger of the backoff and `Retry-After` after a 429). No read, and no cached numbers shown, when `authorize()` gives null or an API key (the endpoint is OAuth-only; checked before the cache, so another login's numbers can't show), or with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` set (the engine refuses a plugin's request carrying `auth`). Another process's `$.store.set` is seen here on the next check. Each `authorize()` mints a new handle and only the newest few stay valid, so the 15 s calls pile nothing up; the handle is spent at once | measured: HTTP 200 on the dev machine, where the API answers only through `HTTPS_PROXY` (2.1.300); two sessions writing one key each to `$.store` every second and reading the other's: 52 of 52 writes seen, 0.33-0.75 s later, then after a hot reload 77 of 79 (0.79-0.95 s; the two missed were overwritten before the next read) and 78 of 78 (0.07-0.22 s); 70 `authorize()` calls gave 70 distinct handles, of which the newest 4 still worked and the 5th-newest and older were refused ("unknown auth handle"), and the process's `VmRSS` (`/proc`) moved 337 to 339 MB over a 100-call burst (2.1.301) |
+| Kimi Code `5h:` and `1m:` | Exact normalized `ANTHROPIC_BASE_URL` matches for `https://api.kimi.com/coding/` and `https://api.kimi.ai/coding/` (trailing slashes ignored) select the direct provider; no gateway or lookalike host inherits it. `GET` the matched host's fixed `/coding/v1/usages` URL with the existing `ANTHROPIC_AUTH_TOKEN`, else `ANTHROPIC_API_KEY`, as Bearer; never call `session.authorize()` or cache the token. Parse `usages.limit_5h` and `limit_month_total` (`used_ratio` × 100, `reset_time`), with the 300-minute `limits[]` count window (`used`, else `limit` - `remaining`) as the 5h fallback. The shared 90 s read, 15 s store check, retry/backoff and 15 min stale rules are reused; the cache key includes provider and `CLAUDE_CONFIG_DIR`. Every direct third-party provider deliberately bypasses `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`; the Anthropic OAuth path keeps its existing skip | Kimi 2.5.2's [usage parser](https://github.com/MoonshotAI/kimi-code/blob/1c142a007c10e881602690def96057c23a2baa12/packages/oauth/src/managed-usage.ts#L118-L136) names the same fields; live probe on the dev machine, 2026-11-10: HTTP 200, `limit_5h` 0.2453 and `limit_month_total` 0.1109 with reset times. The direct endpoint is [experimental](https://forum.moonshot.ai/t/error-code-429-were-receiving-too-many-requests-at-the-moment/191/7), so the pinned client and live response are the compatibility evidence |
 | git | `$.session.repo()` (in a repo or not, and the remote URL: the push URL when one is set, where VantageHUD read the fetch URL), then `git rev-parse --absolute-git-dir` and `git status --porcelain=v2 --branch` with `GIT_OPTIONAL_LOCKS=0` (no `index.lock` against the person's own git) and `-c core.fsmonitor=false` (a repo's config could start a hook program or a daemon); the host runs git with repo hooks off. Detached-HEAD naming and the operation are read from files, the naming only with the `detachedHead` option on. Read at session start, after a file-changing tool (`Bash`, `Edit`, `Write`, `NotebookEdit`, `EnterWorktree`, `ExitWorktree`) returns, and every 5 s otherwise; each walk holds off the next for 10× its length (VantageHUD did so for walks of 1 s or more). `git status` took a median 2.7 ms on this repo (17 files) and 75.9 ms on a 9,227-file repo (git 2.47.3, 2026-10-15), so the 5 s poll costs about 1.5 % of a core on the larger | types; timing measured |
 | svn | `svn --non-interactive info --xml` and `status --xml` (no `-u`), only when the folder is not in a git worktree; the working copy found by `.svn` upward from the resolved folder. Same 5 s poll and hold-off as git, where VantageHUD kept a 30 s memo checked against `wc.db`: a 510 ms walk (VantageHUD's figure for a 96k-file checkout) would cost about 9 % of a core | types; no svn on the dev machine: the XML in the tests is written to svn's documented shape, never run |
 | Clock-driven fragments (countdowns, session time) | `$.clock.every(1000)`, which keeps running between turns (mods/api: "keeps running between turns and doesn't start one") | docs |
@@ -981,7 +982,7 @@ sub-option is a `userConfig` boolean.
 |---|---|---|---|---|
 | 1 | folder | `~/proj/VArgus` | on | |
 | 2 | model | `opus:high` | on | effort (on) |
-| 3 | rate limits | `5h:4%(4h37m) 7d:39%(5d6h)` | on | spend limit (off), other models' weekly (off) |
+| 3 | rate limits | `5h:4%(4h37m) 7d:39%(5d6h)`; Kimi also `1m:11%(28d12h)` | on | spend limit (off), other models' weekly (off) |
 | 4 | context | `ctx:20%` | on | |
 | 5 | prompt cache | `cache:warm(14:30)` | not in 0.1.0 | |
 | 6 | tokens | `token:69.5k` | on | |
@@ -1359,15 +1360,16 @@ for it, not the code.
 - **Usage API** (`src/hud/usage-api.js`): never refresh OAuth tokens — refresh tokens are
   single-use, so a refresh revokes Claude Code's own token and forces a re-login
   (anthropics/claude-code#42603, closed "not planned"); 401 → `auth` error (VantageHUD kept a
-  fingerprint of the rejected token so a new login retried at once; a mod never sees the token, so
-  VArgus retries after 2 min, and `[API auth]` can outlast a re-login by up to 2 min 15 s); 403 is
+  fingerprint of the rejected token so a new login retried at once; the Anthropic OAuth path never
+  sees the token, so VArgus retries after 2 min, and `[API auth]` can outlast a re-login by up to 2 min 15 s); 403 is
   `network` (region block), not auth; 429 honours a numeric `Retry-After` (capped at 1 h); per-model
   weekly caps come from `limits[]` entries of kind `weekly_scoped` (the flat
-  `seven_day_opus`/`seven_day_sonnet` are null); skip the call when `ANTHROPIC_BASE_URL` is a
-  non-Anthropic gateway or Bedrock/Vertex/Foundry is on. Only per-model weekly and `extra:` need
-  this API; the engine gives the rest.
+  `seven_day_opus`/`seven_day_sonnet` are null); skip the Anthropic OAuth call when
+  `ANTHROPIC_BASE_URL` is a non-Anthropic gateway or Bedrock/Vertex/Foundry is on. Exact Kimi
+  coding matches instead use the direct provider in [Data sources](#data-sources). Only per-model
+  weekly and `extra:` need the Anthropic API; the engine gives its other windows.
 - **Usage cache and staleness** (`src/hud/usage-api.js`, AGENTS.md "Usage/rate-limit data"): one
-  cache per account (keyed by `CLAUDE_CONFIG_DIR`, which picks the credentials), because one shared
+  cache per provider and account (keyed by provider and `CLAUDE_CONFIG_DIR`, which picks the credentials), because one shared
   file once showed one account's numbers in another account's session; after a failed refresh the
   last numbers stay marked stale (`*`) for up to 15 min (`MAX_STALE_DATA_MS`), then the error
   shows; never mark the engine's own fresh numbers stale.
@@ -1413,8 +1415,9 @@ for it, not the code.
   off an Enterprise plan only; a mod can't read the plan (`$.session.identity()` answers only a
   mod that managed settings install), so VArgus reads the `limit_usd`/`spent_usd` form alone,
   and shows no `extra:` when `used_credits` is present (VantageHUD's rule for an unknown plan).
-  `5h:`/`7d:` come only from the engine: until its first reading in a session they are absent,
-  where VantageHUD fell back to the API.
+  For Anthropic, `5h:`/`7d:` come only from the engine: until its first reading in a session they
+  are absent, where VantageHUD fell back to the API. Kimi's direct `5h:`/`1m:` readings are the
+  provider exception described in [Data sources](#data-sources).
 - Teammates running in their own tmux pane: each "runs no loop here", so their requests are not
   seen.
 - The old payload's `cost.total_cost_usd` included teammates; whether `$.session.usage().cost`
@@ -1487,7 +1490,8 @@ the Claude mod. A throwaway mod run in a live session settles each.
 - Run programs with `$.process.run` and an argument list; never a shell.
 - Colours come only from the theme's tokens; control characters in a fragment become `?`.
 - The mod writes only inside its data folder.
-- Never refresh an OAuth token; the usage API is read with `$.session.authorize()` alone.
+- Never refresh an OAuth token; the Anthropic usage API is read with `$.session.authorize()` alone.
+  Direct third-party providers instead use the existing environment credential after an exact URL match.
 - Comment the reason for anything that isn't obvious.
 - When a design decision changes, update this file in the same commit, in place.
 

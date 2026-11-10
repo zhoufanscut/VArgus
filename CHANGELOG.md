@@ -8,6 +8,9 @@ Notable changes to this project. The format follows
 
 ### Added
 
+- Claude Code with Kimi Code shows the rolling five-hour and membership monthly
+  total quotas as `5h` and `1m`, using Kimi's direct usage endpoint. Direct
+  third-party usage providers bypass `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
 - Codex Fast-mode selection appears beside the model and effort as
   `sol:max(fast)`, or `sol(fast)` when effort is hidden.
 

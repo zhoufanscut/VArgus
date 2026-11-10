@@ -70,6 +70,22 @@ describe('view: limits', () => {
     expect(rows[5]).toContain('$20.00/$50.00')
   })
 
+  test('direct provider 5h and 1m windows appear without duplicating engine 5h', () => {
+    const api = {
+      fiveHour: { percent: 24.53, resetsAt: at(16, 14, 20) },
+      monthly: { percent: 11.09, resetsAt: at(30, 0, 0) },
+      sonnet: null, opus: null, others: [], extra: null,
+    }
+    const direct = { engine: [], api, lastSuccessAt: NOW, error: null }
+    const rows = card(viewModel(input({ limits: direct })).cards, 'Limits').rows.map(text)
+    expect(rows.map(r => r.split(' ')[0])).toEqual(['5h', '1m'])
+    expect(rows[0]).toContain(' 25% ')
+    const both = { ...direct, engine: [{ kind: 'five_hour', percentUsed: 4, resetsAt: iso(at(16, 14, 20)) }] }
+    const withEngine = card(viewModel(input({ limits: both })).cards, 'Limits').rows.map(text)
+    expect(withEngine.map(r => r.split(' ')[0])).toEqual(['5h', '1m'])
+    expect(withEngine[0]).toContain(' 4% ')
+  })
+
   test('the reset: today as HH:MM, within a week with the weekday, with the countdown', () => {
     const rows = card(viewModel(input({ limits: FULL_LIMITS, columns: 100 })).cards, 'Limits').rows.map(text)
     expect(rows[0]).toContain('resets 14:20 · 5h20m')

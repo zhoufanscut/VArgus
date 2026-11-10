@@ -70,13 +70,23 @@ Codex CLI:
 |---|---|
 | `~/proj/VArgus` | the working folder |
 | `opus:high` / `sol:xhigh` | the model and effort level |
-| `5h:` `7d:` | reported rate-limit windows, used percent and time until reset; Codex uses the recorded window duration |
+| `5h:` `7d:` `1m:` | reported rate-limit windows, used percent and time until reset; `1m` is Kimi Code's membership monthly total; Codex uses the recorded window duration |
 | `ctx:` | how full the context window is |
 | `token:` | uncached input plus output tokens; the collection scope differs by host, as described below |
 | `session:` | age from the host-reported start time; Codex uses the displayed saved log's creation time |
 | `🔧` `🤖` `⚡` | tool, agent and skill counts, with host-specific rules below |
 | `repo:` `branch:` | repository and branch; Claude supports git and svn, Codex supports git |
 | `?4` | working-tree status: staged `+`, modified `!`, untracked `?`, conflicts `✗`, ahead `⇡`, behind `⇣` |
+
+With Claude Code on Kimi Code, an exact match for
+`https://api.kimi.com/coding/` or `https://api.kimi.ai/coding/` enables Kimi's
+`/coding/v1/usages` read and its `5h` and `1m` windows. It uses the existing
+`ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` as a Bearer token, only for the
+matched HTTPS host; the token is not cached. No Claude OAuth read or extra
+setting is involved. Usage reads share the 90-second cache. Direct third-party
+providers deliberately bypass `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`; the
+flag still blocks the Anthropic OAuth usage read. Kimi's direct usage endpoint
+is experimental, so its response shape may change.
 
 Claude's token total includes the main conversation and subagents since the mod
 first loaded, or since the last `/clear` or in-session resume. Cache reads and

@@ -30,6 +30,7 @@ export const en = {
   extra: 'extra',
   fiveHour: '5h',
   sevenDay: '7d',
+  monthly: '1m',
   sonnetWeekly: 'sn',
   opusWeekly: 'op',
   detachedAt: '@',
