@@ -122,8 +122,8 @@ test('Windows built-in bar keeps session/window/right information below the VArg
   }
 })
 
-test('Windows updates publish only changed cells in one batch without forced refresh and keep shell formatters asynchronous', { skip: !windows, timeout: 40000 }, async () => {
-  for (const scenario of ['steady', 'shell', 'bare-alias']) {
+test('Windows updates publish only changed cells in one batch without forced refresh and keep shell formatters asynchronous', { skip: !windows, timeout: 60000 }, async () => {
+  for (const scenario of ['steady', 'shell', 'bare-alias', 'separator']) {
     const dir = await mkdtemp(join(tmpdir(), 'vargus-windows-diff-test-')), socket = join(dir, 'server')
     const run = async (...args: string[]) => (await exec('tmux', ['-S', socket, ...args],
       { windowsHide: true, env: { ...process.env, TMUX: '' } })).stdout.replace(/\r?\n$/, '')
@@ -156,16 +156,17 @@ test('Windows updates publish only changed cells in one batch without forced ref
         const format = `#(powershell.exe -NoProfile -EncodedCommand ${encoded})`
         if (scenario === 'bare-alias') await run('set-option', '@shell_value', format)
         const configured = scenario === 'bare-alias' ? '#{E:shell_value}' : format
-        await run('set-option', 'status-right', configured)
+        const option = scenario === 'separator' ? 'window-status-separator' : 'status-right'
+        await run('set-option', '-g', option, configured)
         await output.attach()
         await output.update('HEADER WITH SLOW ORIGINAL FORMATTER')
         assert.equal(await run('show-options', '-v', 'status-left'), '[#S] ')
-        assert.equal(await run('show-options', '-v', 'status-right'), configured)
+        assert.equal(await run('show-options', '-v', option), configured)
         // A later edit gets the same safe fallback before template evaluation.
         await output.detach()
-        await run('set-option', 'status-right', 'PLAIN RIGHT')
+        await run('set-option', '-g', option, 'PLAIN')
         await output.attach(); await output.update('TOP HEADER')
-        await run('set-option', 'status-right', configured)
+        await run('set-option', '-g', option, configured)
         await output.update('HEADER AFTER CONFIGURATION CHANGE')
         assert.equal(await run('show-options', '-v', 'status-left'), '[#S] ')
       }
@@ -197,6 +198,8 @@ test('Windows preserves expanded-empty custom slots and retries a partially assi
         assert.equal(JSON.parse(await run('dump-state')).status_format[1], 'PRESERVED ORIGINAL EXPRESSION')
         assert.equal(await run('show-options', '-v', 'status'), 'on')
       } else {
+        const scalars = ['status-left', 'status-left-length', 'status-right-length', '@vargus_original_left', '@vargus_native_layout']
+        const before = await Promise.all(scalars.map(option => run('show-options', '-v', option)))
         class InterruptedOutput extends TmuxOutput {
           override async command(...args: string[]): Promise<string> {
             if (args[0] === 'set-option' && args[1] === 'status' && args[2] === '2') throw new Error('CONTROLLED SETUP INTERRUPTION')
@@ -205,6 +208,7 @@ test('Windows preserves expanded-empty custom slots and retries a partially assi
         }
         await assert.rejects(new InterruptedOutput(socket, pane, join(dir, 'state')).attach(), /CONTROLLED SETUP INTERRUPTION/)
         assert.equal(await run('show-options', '-v', 'status'), 'on')
+        assert.deepEqual(await Promise.all(scalars.map(option => run('show-options', '-v', option))), before)
         output = new TmuxOutput(socket, pane, join(dir, 'state'))
         await output.attach(); await output.update('RETRIED OWNED ROW'); await output.detach()
         assert.equal(await run('show-options', '-v', 'status'), 'on')
@@ -221,6 +225,45 @@ test('Windows preserves expanded-empty custom slots and retries a partially assi
       await run('kill-server').catch(() => {})
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
+  }
+})
+
+test('Windows window-local bar formats and styles retain native rendering before attachment and after later edits', { skip: !windows, timeout: 20000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-windows-local-test-')), socket = join(dir, 'server')
+  const run = async (...args: string[]) => (await exec('tmux', ['-S', socket, ...args],
+    { windowsHide: true, env: { ...process.env, TMUX: '' } })).stdout.replace(/\r?\n$/, '')
+  let output: TmuxOutput | undefined
+  try {
+    await run('new-session', '-d', '-s', 'test', '-n', 'LOCAL WINDOW')
+    const pane = await run('display-message', '-p', '#{pane_id}')
+    const window = await run('display-message', '-p', '#{window_id}')
+    await run('set-window-option', '-t', window, 'automatic-rename', 'off')
+    const left = await run('show-options', '-v', 'status-left')
+    await run('set-window-option', '-t', window, 'window-status-current-format', 'CUSTOM LOCAL #W')
+    output = new TmuxOutput(socket, pane, join(dir, 'state'))
+    await output.attach(); await output.update('APPENDED HEADER')
+    assert.equal(await run('show-options', '-v', 'status-left'), left)
+    let frame = JSON.parse(await run('dump-state'))
+    assert.match(frame.windows[0].tab_text, /CUSTOM LOCAL LOCAL WINDOW/)
+    assert.match(frame.status_format[1], /APPENDED HEADER/)
+    await output.detach()
+    await run('set-window-option', '-u', '-t', window, 'window-status-current-format')
+    await output.attach(); await output.update('TOP HEADER')
+    assert.equal(await run('show-options', '-v', 'status-left'), '#{@vargus_header}')
+    await run('set-window-option', '-t', window, 'window-status-current-format', 'LATER LOCAL #W')
+    await run('set-window-option', '-t', window, 'window-status-current-style', 'fg=red,bold')
+    await output.update('LATER APPENDED HEADER')
+    assert.equal(await run('show-options', '-v', 'status-left'), left)
+    frame = JSON.parse(await run('dump-state'))
+    assert.match(frame.windows[0].tab_text, /LATER LOCAL LOCAL WINDOW/)
+    assert.equal(frame.windows[0].wsc_style, 'fg=red,bold')
+    assert.match(frame.status_format[1], /LATER APPENDED HEADER/)
+    await output.detach()
+    assert.equal(await run('show-options', '-v', 'status'), 'on')
+  } finally {
+    await output?.detach().catch(() => {})
+    await run('kill-server').catch(() => {})
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
 })
 
