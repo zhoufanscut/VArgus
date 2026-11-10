@@ -26,7 +26,7 @@ export async function withControlLock<T>(lock: string, action: () => Promise<T>)
     await writeFile(join(candidate, owner), '', { mode: 0o600 })
     for (;;) {
       try { await rename(candidate, lock); break } catch (error) {
-        if (!['ENOTEMPTY', 'EEXIST'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
+        if (!['ENOTEMPTY', 'EEXIST', ...(process.platform === 'win32' ? ['EPERM'] : [])].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
       }
       let owners: string[]
       try { owners = await readdir(lock) } catch (error) {

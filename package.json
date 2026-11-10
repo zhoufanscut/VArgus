@@ -10,7 +10,7 @@
     "vargus": "./bin/vargus"
   },
   "scripts": {
-    "test": "tsc -p tsconfig.node.json && node --test --test-concurrency=1 tests/node/*.test.mts",
+    "test": "tsc -p tsconfig.node.json && node tests/node/run.mjs",
     "test:claude": "claude plugin validate . && tsc -p . && claude plugin test . && sh tests/reader.test.sh && sh tests/manifest.test.sh"
   },
   "devDependencies": {

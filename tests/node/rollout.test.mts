@@ -1,10 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, appendFile, rm, mkdir, symlink, readFile, utimes, cp } from 'node:fs/promises'
+import { mkdtemp, writeFile, appendFile, rm, mkdir, symlink, readFile, utimes, cp, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { pathToFileURL } from 'node:url'
 import { RolloutReader, findRollout } from '../../src/hosts/codex/rollout.ts'
 
 const meta = { type: 'session_meta', payload: { id: 'thread-a', cwd: '/repo', timestamp: '2026-11-08T05:41:17Z' } }
@@ -42,7 +43,7 @@ test('rollout polling waits for complete UTF-8 JSONL records and selects the exa
     const file = join(dir, 'sessions', 'rollout-date-thread-a.jsonl')
     await writeFile(file, JSON.stringify(meta) + '\n')
     await writeFile(join(dir, 'sessions', 'rollout-date-thread-b.jsonl'), 'other conversation')
-    assert.equal(await findRollout(dir, 'thread-a'), file)
+    assert.equal(await findRollout(dir, 'thread-a'), await realpath(file))
     const r = new RolloutReader(file, 'thread-a', '/repo', dir)
     await r.poll()
     const text = JSON.stringify({ type: 'turn_context', payload: { model: 'model', cwd: '/repo/中文', effort: 'low' } }) + '\n'
@@ -89,7 +90,7 @@ test('skill loads use marked injections or successful catalogued reads, once per
   message('user', 'user.text', injection.replaceAll('alpha', 'beta'))
   const read = (path: string, id = path, extra: Record<string, unknown> = {}, thread_id = 'thread-a', turn_id = 'one') => r.observe({ type: 'event_msg', payload: {
     type: 'item_completed', thread_id, turn_id, item: { id, type: 'CommandExecution', source: 'unified_exec_startup',
-      cwd: 'file:///repo', parsed_cmd: [{ type: 'read', path }], status: 'completed', exit_code: 0, ...extra },
+      cwd: pathToFileURL(resolve('/repo')).href, parsed_cmd: [{ type: 'read', path }], status: 'completed', exit_code: 0, ...extra },
   } })
   read('.agents/skills/alpha/SKILL.md')
   read('.agents/skills/beta/SKILL.md', 'failed', { exit_code: 1 })
@@ -106,7 +107,7 @@ test('skill loads use marked injections or successful catalogued reads, once per
   assert.equal(r.collector.snapshot()!.session.counts.skills, 3)
 })
 
-test('the Bash entry resolves an external symlink and runs from a different cwd', async () => {
+test('the Bash entry resolves an external symlink and runs from a different cwd', { skip: process.platform === 'win32' }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus entry '))
   try {
     const install = join(dir, 'install')
@@ -198,7 +199,7 @@ test('paginated child history skips the inherited prefix but retains its skill c
 })
 
 
-test('Codex reported path selects the current session-suffixed history, not the newest filename', async () => {
+test('Codex reported path selects the current session-suffixed history, not the newest filename', { skip: process.platform === 'win32' }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-rollout-alias-')), priorPath = process.env.PATH
   try {
     await mkdir(join(dir, 'sessions')); await mkdir(join(dir, 'bin'))

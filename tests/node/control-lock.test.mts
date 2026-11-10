@@ -12,7 +12,7 @@ test('a cancelled control releases admission for later callers while a live call
   const dir = await mkdtemp(join(tmpdir(), 'vargus-control-lock-test-')), lock = join(dir, 'request.lock')
   const script = `import { withControlLock } from ${JSON.stringify(pathToFileURL(resolve('src/cli/lock.ts')).href)};
     await withControlLock(${JSON.stringify(lock)}, async () => { console.log('LOCKED'); await new Promise(() => { setInterval(() => {}, 1000) }); });`
-  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
   try {
     const ready = await Promise.race([
       once(child.stdout, 'data').then(([chunk]) => String(chunk)),

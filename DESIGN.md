@@ -74,10 +74,12 @@ refuses to change the bar. Claude's `tmuxOutput` userConfig
 flag defaults to false; the wrapper enables it through command-line settings. Saved Claude,
 Codex and tmux configuration files are not edited.
 
-The output prepends a row to the session's existing status rows and shifts their effective
+On POSIX tmux the output prepends a row to the session's existing status rows and shifts their effective
 formats down. It stores the original local overrides, so exit restores inheritance as well as
 explicit settings. At tmux's five-row limit it refuses to overwrite a row. The existing
 `status-position` is retained: at the bottom, VArgus is above the original bar.
+Native Windows psmux places VArgus above its built-in bar through the scalar
+layout; existing custom format arrays retain their order. The limits are below.
 
 Each wrapped process owns a pane's `@vargus_line`. The row's `#{@vargus_line}` lookup follows
 that client's active pane. It does not use `E:` or a shell `#()` formatter: repository text
@@ -142,7 +144,7 @@ The feature is off until explicit `on` or the optional startup hook enables
 `tmuxOutput` for its helper. The normal Claude mod graph does not reach this script or Node code.
 
 `outputs/tmux/target.ts` discovers a named foreground application through tmux and
-`ps`. The outermost matching application process identifies the frontend; nested
+`ps` on POSIX, or a pane-rooted Windows CIM process tree on Windows. The outermost matching application process identifies the frontend; nested
 same-command servers are excluded by ancestry, without inspecting positional prompt
 text. Process lookups use unlimited width so `COLUMNS` cannot truncate worker tokens.
 Selection is scoped to the default server, or an explicit `--socket`. One
@@ -155,6 +157,120 @@ record cannot stop an unrelated process after PID reuse. The existing tmux owner
 lock arbitrates concurrent attachment. Each pane gets one owner and existing bar
 options retain the same cleanup/restore rules. The helper watches the resolved TUI
 process, not the persistent app-server daemon; `off` and TUI exit detach the row.
+
+### Native Windows Codex and psmux
+
+`bin/vargus.cmd` runs the same source with Windows Node. A user PATH forwarding
+`.cmd` invokes that checkout entry, so no Bash entry, symlink privileges or build
+is required. Windows hooks use the PowerShell call operator and the Windows
+Codex home. Native background tmux, CIM, Git, metadata and worker processes use
+`windowsHide: true`; the row worker is detached and hidden.
+
+The actual attached-client probe on 2026-11-10 found another psmux 3.4.0
+difference: `list-clients` returned `/dev/pts/7532`, but both
+`refresh-client -S -t /dev/pts/7532` and `refresh-client -t /dev/pts/7532`
+failed with `no server running` while unqualified refresh, with or without
+`-S`, succeeded against the same live socket. This killed the helper on its
+first rendered update and left the native-footer backup pending. psmux's
+`main.rs` treats the tty-valued `-t` as a session route; its server
+`connection.rs` handles unqualified refresh with `CtrlReq::RefreshClient`.
+Windows therefore refreshes the selected server without a client target.
+POSIX keeps its per-client refresh. The regression seeds only client enumeration
+with the measured tty name and sends updates/redraws to real isolated psmux;
+live verification also exercises the actual attached user client.
+Routine Windows updates now publish only changed values in one command batch.
+`SetOption` already marks psmux's state and metadata dirty; the extra forced
+refresh on every poll was redundant. Explicit redraw remains for confirmed
+view transitions. A fifteen-second live content sample retained its header
+through the sampled updates; attached-client verification checks the actual
+terminal stream in addition to stored values.
+
+The Windows probe on 2026-11-10 used Codex 0.167.0, Node 24.21.0 and psmux 3.4.0
+(`20aa1d7`). Unchanged process discovery reported `spawn ps ENOENT`; Git Bash's
+`ps -ww -axo` reported `unknown option -- w`. Windows therefore reads process
+IDs, parents and names through `Win32_Process`, normalizing `.exe` names, and
+reads an individual worker's command line for the existing PID/token check.
+Windows CreateProcess quoting escapes the JSON token's double quotes; the
+worker check removes those escapes before matching the same token field.
+POSIX keeps its original `ps` queries and foreground-command requirement.
+
+In the native TUI rig, psmux's `pane_current_command` returned
+`git-remote-https` while CIM showed `pwsh -> node -> codex` under that pane's PID.
+Windows target selection therefore uses the unique outermost named descendant,
+and snapshots carry that bound application name. Multiple independent matching
+descendants remain ambiguous. Full thread identity and composer checks still
+gate hook admission and key delivery.
+
+psmux 3.4.0's own source
+[`format.rs`](https://github.com/marlocarlo/psmux/blob/20aa1d7254ee93f64dafa059ef89341d9767470a/src/format.rs)
+has `"cursor_flag" => "0".into()`. Its `dump-state` layout instead supplies
+`hide_cursor`, cursor coordinates, copy/scroll mode and styled `rows_v2` cells.
+Windows snapshots read that layout, retain bold/dim/inverse modifiers and remove
+the layout's trailing cell padding. An inactive window returns an unavailable
+snapshot and waits for a visit. Pane-list fields use a pipe delimiter on Windows:
+the native probe returned literal `\t` from the original tab-delimited format.
+
+Native probes set `status-format[0]` to a custom row, but both single-value
+`show-options` forms returned an empty string and the full dump omitted that
+array. The row renderer did retain the custom format. Windows therefore appends
+a new row without shifting or reconstructing existing formats from expanded
+text. For psmux's built-in single row, a layout probe confirmed that its scalar
+`status-left` renders on row zero, and `status-format[1]` renders below it. Windows
+uses a padded `@vargus_header` as the full-width left section, temporarily setting
+`status-left` and its length and hiding the right section on that row. The
+appended owned slot receives the original left expression, live window list
+and current right expression, with window ranges and clock expansion. The
+probe preserved session name, window name and right-hand clock beneath the header.
+No raw row-zero format is assigned. Original left/length/right-length values and
+the private left alias are restored individually only when their applied values
+still match; newer user changes are retained. Padded headers use the window width;
+psmux's `cols: u16` permits a scalar length cap of 65535 without per-window
+changes to shared settings. Custom first-row formats and multi-row layouts keep
+the earlier append behavior because their raw expressions cannot be moved safely.
+The immutable `NativeBase` is captured under the lifecycle lock and cached on
+each output. Rendering never reads the shared state file during another owner's
+truncating write. Session-level original-info and blank-header fallbacks retain
+the original bar when an unwrapped pane becomes active. Style-only ownership
+marks let cleanup restore preexisting global values while preserving newer edits;
+pane-local values inherited from those fallbacks are removed on owner cleanup.
+Original option and per-window format graphs are checked for `#()` commands.
+The graph mirrors psmux's unprefixed-name lookup fallback to `@name` as well.
+These keep the append layout so psmux evaluates commands through its cached async
+render path. A later configuration change to such a formatter safely restores
+the original scalar layout and makes other owners leave the header mode too.
+This avoids one-shot `display-message` evaluation, which a live probe measured
+as synchronous and capable of timing out on a valid slow formatter.
+It reads the status count separately, retains the original count and
+preserves the status position. Removal restores the
+count only while the applied count and owned row still match; newer
+settings are kept. An existing inactive slot blocks attachment even when its
+expanded text is empty. A new raw slot is written only beyond the existing
+array, after publishing its VArgus index marker. The assigned expression includes
+a VArgus probe field. Reuse and removal validate that field with a style-only
+witness in the expanded snapshot; reuse never assigns the existing raw format.
+Shutdown retains the owned raw slot, restoring only the original row count, so
+repeat activation can identify the slot without clearing an unknown expression.
+A partially failed attachment leaves enough ownership information to retry.
+With an originally hidden bar, native activation uses the implicit base row
+plus VArgus (two rows), then restores `off`; index zero is preserved.
+The five-row limit and shared owner lifecycle remain enforced.
+
+Windows directory-rename contention can return `EPERM` instead of POSIX's
+`EEXIST`/`ENOTEMPTY`. Locks inspect the existing owner record before deciding
+whether to reject or reap the contention. Codex metadata reads launch its npm
+shim through `cmd.exe`; stdin EOF and a bounded close wait release its native
+child's SQLite handles. The timeout stops only that owned process tree.
+
+The isolated official-Codex/local-mock Windows rig verifies native lifecycle
+hooks, token display, `on/status/reload/off`, preserving a custom first row and
+sharing the extra row between owners. The ordinary prompt is the positive
+control for model requests; the controls leave that request count unchanged.
+Hook trust bypass is confined to the isolated fixture home and its vetted hooks;
+user setup leaves trust to Codex's UI. The rig uses `--no-daemon`. An independent
+native TUI probe also ran a `!` shell control without adding a model request and
+sent a normal prompt after manual off: that prompt added a request while the row
+remained off. Windows shared-daemon mode, sibling navigation, draft races,
+other psmux versions and non-mock model behavior remain unverified.
 
 `hosts/codex/rollout.ts` resolves the current path through Codex's read-only
 `thread/read` metadata and validates the file's first session metadata and location
@@ -1277,6 +1393,11 @@ the Claude mod. A throwaway mod run in a live session settles each.
   Standalone and sibling-view command helpers require the current shell marker's
   native completion footer and an idle activity indicator before sending another control.
   Daemon-heavy Node cases run serially to bound resource use.
+  On Windows, `tests/node/run.mjs` reports and excludes POSIX executable-shim and
+  Linux engine rigs, runs the shared checks and `windows.test.mts`, and skips
+  the Bash symlink and POSIX metadata-shim cases. The boundary traversal and
+  file URL fixture normalize native paths; saved transcript comparisons use
+  the canonical path, including Windows short-name expansion.
 - `npm run test:claude` runs the existing Claude checks listed below. In this development
   environment the engine test workers require execution outside the restricted sandbox; the
   unchanged baseline failed inside and passed outside.

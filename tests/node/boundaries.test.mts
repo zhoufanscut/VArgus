@@ -5,7 +5,7 @@ import { join, resolve, dirname } from 'node:path'
 
 async function files(dir: string): Promise<string[]> {
   return (await Promise.all((await readdir(dir, { withFileTypes: true })).map(e =>
-    e.isDirectory() ? files(join(dir, e.name)) : /\.[cm]?tsx?$/.test(e.name) ? [join(dir, e.name)] : []))).flat()
+    e.isDirectory() ? files(join(dir, e.name)) : /\.[cm]?tsx?$/.test(e.name) ? [join(dir, e.name).replaceAll('\\', '/')] : []))).flat()
 }
 
 test('shared modules have no host, display, Node or Claude API imports; host collectors are independent', async () => {

@@ -1,9 +1,14 @@
 // Read-only requests: no thread creation, resume, configuration write or model call.
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { once } from 'node:events'
+import { setTimeout as delay } from 'node:timers/promises'
+import { promisify } from 'node:util'
 
 export async function codexRead(method: 'config/read' | 'thread/read', params: unknown, cwd: string, home?: string): Promise<any> {
-  const child = spawn('codex', ['app-server', '--stdio'], { cwd, env: home ? { ...process.env, CODEX_HOME: home } : process.env, stdio: ['pipe', 'pipe', 'pipe'] })
+  const command = process.platform === 'win32' ? process.env.ComSpec ?? 'cmd.exe' : 'codex'
+  const args = process.platform === 'win32' ? ['/d', '/s', '/c', 'codex app-server --stdio'] : ['app-server', '--stdio']
+  const child = spawn(command, args, { cwd, windowsHide: true, env: home ? { ...process.env, CODEX_HOME: home } : process.env, stdio: ['pipe', 'pipe', 'pipe'] })
   const lines = createInterface({ input: child.stdout })
   let errors = ''
   child.stderr.on('data', data => { errors = (errors + String(data)).slice(-1000) })
@@ -28,6 +33,13 @@ export async function codexRead(method: 'config/read' | 'thread/read', params: u
     })
   } finally {
     lines.close()
-    child.kill('SIGTERM')
+    child.stdin.end()
+    if (process.platform === 'win32' && child.pid) {
+      // cmd.exe launches the npm shim and its native child. Let EOF close the
+      // whole chain and its SQLite handles before releasing the read request.
+      await Promise.race([once(child, 'close'), delay(1000)])
+      if (child.exitCode === null && child.signalCode === null) await promisify(execFile)('taskkill.exe',
+        ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }).catch(() => {})
+    } else child.kill('SIGTERM')
   }
 }
