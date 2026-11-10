@@ -6,6 +6,14 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Native Windows attachment rolls back bar settings and owner registration on
+  failure, allowing retry without leaving the original bar hidden.
+- Windows formatter detection reads global window options, preserving asynchronous
+  shell commands in separators and flag styles. Window-local bar formats and
+  styles retain psmux's native rendering, including overrides added while active.
+
 ## [0.4.0] - 2026-11-10
 
 ### Added

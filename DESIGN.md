@@ -233,11 +233,23 @@ truncating write. Session-level original-info and blank-header fallbacks retain
 the original bar when an unwrapped pane becomes active. Style-only ownership
 marks let cleanup restore preexisting global values while preserving newer edits;
 pane-local values inherited from those fallbacks are removed on owner cleanup.
-Original option and per-window format graphs are checked for `#()` commands.
+The session/user-option listing and the explicit global window table
+(`show-options -w -g`) are checked for `#()` commands. The latter includes the
+separator and bell/last styles omitted by psmux 3.4.0's plain session listing.
+Its [`render_window_options_for`](https://github.com/marlocarlo/psmux/blob/20aa1d7254ee93f64dafa059ef89341d9767470a/src/server/options.rs#L622)
+uses `get_option_value(app, name)` for the global table; the local listing skips
+inherited values. Any window-local bar format, separator or style keeps the
+append layout too. From the pinned
+[`lookup_option`](https://github.com/marlocarlo/psmux/blob/20aa1d7254ee93f64dafa059ef89341d9767470a/src/format.rs#L1303),
+`window-status-format` returns `Some(app.window_status_format.clone())`, while
+the built-in renderer in
+[`list_windows_json_with_tabs`](https://github.com/marlocarlo/psmux/blob/20aa1d7254ee93f64dafa059ef89341d9767470a/src/server/helpers.rs#L429)
+reads each window's local override. Rebuilding those windows through `E:` would
+lose their own labels and styles.
 The graph mirrors psmux's unprefixed-name lookup fallback to `@name` as well.
 These keep the append layout so psmux evaluates commands through its cached async
-render path. A later configuration change to such a formatter safely restores
-the original scalar layout and makes other owners leave the header mode too.
+render path. Adding such a formatter or a window-local bar override while active
+restores the original scalar layout and makes other owners leave the header mode too.
 This avoids one-shot `display-message` evaluation, which a live probe measured
 as synchronous and capable of timing out on a valid slow formatter.
 It reads the status count separately, retains the original count and
@@ -250,7 +262,10 @@ a VArgus probe field. Reuse and removal validate that field with a style-only
 witness in the expanded snapshot; reuse never assigns the existing raw format.
 Shutdown retains the owned raw slot, restoring only the original row count, so
 repeat activation can identify the slot without clearing an unknown expression.
-A partially failed attachment leaves enough ownership information to retry.
+An attachment error rolls back scalar changes and row count under the lifecycle
+lock and removes only that attempt's owner. An existing owner's row remains in
+use. The owned hidden raw slot can still be reused on retry; if restoration
+itself fails, the saved ownerless record remains for a later recovery attempt.
 With an originally hidden bar, native activation uses the implicit base row
 plus VArgus (two rows), then restores `off`; index zero is preserved.
 The five-row limit and shared owner lifecycle remain enforced.
@@ -271,6 +286,13 @@ native TUI probe also ran a `!` shell control without adding a model request and
 sent a normal prompt after manual off: that prompt added a request while the row
 remained off. Windows shared-daemon mode, sibling navigation, draft races,
 other psmux versions and non-mock model behavior remain unverified.
+Portable command-contract tests exercise failed writes before and after their
+application, retry, a failed join beside a live owner, inherited shell formatters,
+and window-local overrides added before or during shared ownership. They model
+psmux option listings and do not establish native rendering behavior. Native
+regressions for the global separator, interrupted scalar restoration and local
+formats/styles are included in `windows.test.mts`; the follow-up checks on Linux
+skip those native cases.
 
 `hosts/codex/rollout.ts` resolves the current path through Codex's read-only
 `thread/read` metadata and validates the file's first session metadata and location

@@ -134,7 +134,7 @@ export class TmuxOutput {
     return writeFile(join(this.directory, 'state.json'), JSON.stringify(state), { mode: 0o600 })
   }
 
-  private async nativeBarCommands(left: string): Promise<boolean> {
+  private async nativeAppendRequired(left: string): Promise<boolean> {
     const options = new Map<string, string>()
     const add = (text: string) => {
       for (const line of text.split('\n')) {
@@ -143,6 +143,9 @@ export class TmuxOutput {
       }
     }
     add(await this.command('show-options'))
+    // psmux's session listing omits some global window options, including
+    // the separator and bell/last styles. The global window table is complete.
+    add(await this.command('show-options', '-w', '-g'))
     options.set('status-left', left)
     const roots = ['status-left', 'status-right', 'window-status-format', 'window-status-current-format',
       'window-status-separator', 'status-left-style', 'status-right-style', 'window-status-style',
@@ -151,7 +154,9 @@ export class TmuxOutput {
     const windows = await this.command('list-windows', '-F', '#{window_id}')
     for (const window of windows.split('\n').filter(Boolean)) {
       const local = await this.command('show-options', '-w', '-t', window)
-      for (const line of local.split('\n')) if (roots.some(name => line.startsWith(name + ' '))) pending.push(line)
+      // psmux's E:window-status-* lookup reads global values. Let its native
+      // renderer retain window-local formats/styles instead of rebuilding them.
+      if (local.split('\n').some(line => roots.some(name => line.startsWith(name + ' ')))) return true
     }
     const seen = new Set<string>()
     while (pending.length) {
@@ -248,12 +253,13 @@ export class TmuxOutput {
   private async restore(state: State): Promise<void> {
     if (state.native) {
       const { status, index, base } = state.native
-      if (await this.command('show-options', '-v', 'status') === String(index + 1)
+      const current = await this.command('show-options', '-v', 'status')
+      if (current === String(index + 1)
         && await this.nativeSlotOwned(index)) {
         // Keep the raw owned slot hidden for a later activation. Clearing an
         // expanded-empty slot could erase an unrelated user's expression.
         await this.command('set-option', 'status', status)
-      } else console.error('VArgus: psmux status options no longer match its attachment; kept them.')
+      } else if (current !== status) console.error('VArgus: psmux status options no longer match its attachment; kept them.')
       if (base) await this.restoreNativeBase(base)
       await unlink(join(this.directory, 'state.json'))
       return
@@ -285,80 +291,94 @@ export class TmuxOutput {
         if (!state.owners.length) { await this.restore(state); state = undefined }
       }
       if (state?.owners.some(owner => owner.pane === this.pane)) throw new Error('VArgus is already running in this pane.')
-      if (!state) {
-        const status = await this.command('show-options', '-A', '-v', '-t', this.session, 'status')
-        const rows = status === 'off' ? 0 : status === 'on' ? 1 : Number(status)
-        if (rows >= 5) throw new Error('tmux already uses its maximum status rows; VArgus did not change them.')
-        if (process.platform === 'win32') {
-          // psmux 3.4.0 renders status-format[] but cannot read its raw values
-          // through show-options. Append after the existing rows; do not shift
-          // or reconstruct those formats from expanded display text.
-          const live = JSON.parse(await this.command('dump-state')) as { status_format: string[] }
-          const index = Math.max(1, rows)
-          const existing = live.status_format.length > index
-          if (existing && !await this.nativeSlotOwned(index)) throw new Error('psmux has an existing inactive status slot; VArgus did not overwrite its raw format.')
-          let base: NativeBase | undefined
-          if (rows <= 1 && !live.status_format[0]) {
-            const left = await this.command('show-options', '-v', 'status-left')
-            if (!await this.nativeBarCommands(left)) {
-            const leftLength = await this.command('show-options', '-v', 'status-left-length')
-            const rightLength = await this.command('show-options', '-v', 'status-right-length')
-            const priorLeftAlias = await this.command('show-options', '-v', '@vargus_original_left')
-            const flagStyle = '#[#{?window_bell_flag,#{E:window-status-bell-style},#{?window_activity_flag,#{E:window-status-activity-style},#{?window_last_flag,#{E:window-status-last-style},default}}}]'
-            const inactive = '#[#{E:window-status-style}]' + flagStyle + '#[range=window|#{window_index}]#{E:window-status-format}#[range=none]#{E:window-status-separator}'
-            const active = '#[#{E:window-status-current-style}]#[range=window|#{window_index}]#{E:window-status-current-format}#[range=none]#{E:window-status-separator}'
-            const template = `#[align=left]#[#{E:status-left-style}]#{=${leftLength}:#{E:@vargus_original_left}}#[default]#{W:${inactive},${active}}#[align=right]#[#{E:status-right-style}]#{=${rightLength}:#{T:status-right}}#[default]`
-            const priorSharedLine = await this.command('show-options', '-v', '@vargus_line')
-            const priorSharedHeader = await this.command('show-options', '-v', '@vargus_header')
-            const priorLayout = await this.command('show-options', '-v', '@vargus_native_layout')
-            const sharedMark = `#[fg=#${randomUUID().replaceAll('-', '').slice(0, 6)}]`
-            base = { left, leftLength, rightLength, priorLeftAlias, template, sharedMark, priorSharedLine, priorSharedHeader, priorLayout }
+      try {
+        if (!state) {
+          const status = await this.command('show-options', '-A', '-v', '-t', this.session, 'status')
+          const rows = status === 'off' ? 0 : status === 'on' ? 1 : Number(status)
+          if (rows >= 5) throw new Error('tmux already uses its maximum status rows; VArgus did not change them.')
+          if (process.platform === 'win32') {
+            // psmux 3.4.0 renders status-format[] but cannot read its raw values
+            // through show-options. Append after the existing rows; do not shift
+            // or reconstruct those formats from expanded display text.
+            const live = JSON.parse(await this.command('dump-state')) as { status_format: string[] }
+            const index = Math.max(1, rows)
+            const existing = live.status_format.length > index
+            if (existing && !await this.nativeSlotOwned(index)) throw new Error('psmux has an existing inactive status slot; VArgus did not overwrite its raw format.')
+            let base: NativeBase | undefined
+            if (rows <= 1 && !live.status_format[0]) {
+              const left = await this.command('show-options', '-v', 'status-left')
+              if (!await this.nativeAppendRequired(left)) {
+              const leftLength = await this.command('show-options', '-v', 'status-left-length')
+              const rightLength = await this.command('show-options', '-v', 'status-right-length')
+              const priorLeftAlias = await this.command('show-options', '-v', '@vargus_original_left')
+              const flagStyle = '#[#{?window_bell_flag,#{E:window-status-bell-style},#{?window_activity_flag,#{E:window-status-activity-style},#{?window_last_flag,#{E:window-status-last-style},default}}}]'
+              const inactive = '#[#{E:window-status-style}]' + flagStyle + '#[range=window|#{window_index}]#{E:window-status-format}#[range=none]#{E:window-status-separator}'
+              const active = '#[#{E:window-status-current-style}]#[range=window|#{window_index}]#{E:window-status-current-format}#[range=none]#{E:window-status-separator}'
+              const template = `#[align=left]#[#{E:status-left-style}]#{=${leftLength}:#{E:@vargus_original_left}}#[default]#{W:${inactive},${active}}#[align=right]#[#{E:status-right-style}]#{=${rightLength}:#{T:status-right}}#[default]`
+              const priorSharedLine = await this.command('show-options', '-v', '@vargus_line')
+              const priorSharedHeader = await this.command('show-options', '-v', '@vargus_header')
+              const priorLayout = await this.command('show-options', '-v', '@vargus_native_layout')
+              const sharedMark = `#[fg=#${randomUUID().replaceAll('-', '').slice(0, 6)}]`
+              base = { left, leftLength, rightLength, priorLeftAlias, template, sharedMark, priorSharedLine, priorSharedHeader, priorLayout }
+              }
             }
+            state = { owners: [], backup: '', applied: '', native: { status, index, base } }
+            await this.save(state)
+            if (!existing) {
+              // Publish ownership before the first assignment. A setup failure
+              // can then identify and reuse the reserved slot on its next try.
+              await this.command('set-option', '@vargus_native_row', String(index))
+              await this.command('set-option', `status-format[${index}]`, NATIVE_ROW)
+            }
+            if (base) {
+              await this.command('set-option', '@vargus_original_left', base.left)
+              await this.command('set-option', 'status-left', NATIVE_HEADER)
+              await this.command('set-option', 'status-left-length', NATIVE_LEFT_LENGTH)
+              await this.command('set-option', 'status-right-length', '0')
+              await this.command('set-option', '@vargus_native_layout', base.sharedMark!)
+            }
+            await this.command('set-option', 'status', String(index + 1))
+          } else {
+          const originals: string[] = []
+          for (let i = 0; i < rows; i++) originals.push(await this.command('show-options', '-A', '-v', '-t', this.session, `status-format[${i}]`))
+          const backup = await this.local()
+          state = { owners: [], backup, applied: '' }
+          try {
+            for (let i = 0; i < originals.length; i++) await this.command('set-option', '-t', this.session, `status-format[${i + 1}]`, originals[i]!)
+            await this.command('set-option', '-t', this.session, 'status-format[0]', ROW)
+            await this.command('set-option', '-t', this.session, 'status', rows === 0 ? 'on' : String(rows + 1))
+            state.applied = await this.local()
+            await this.save(state)
+          } catch (error) {
+            state.applied = await this.local()
+            await this.save(state)
+            await this.restore(state)
+            throw error
           }
-          state = { owners: [], backup: '', applied: '', native: { status, index, base } }
-          await this.save(state)
-          if (!existing) {
-            // Publish ownership before the first assignment. A setup failure
-            // can then identify and reuse the reserved slot on its next try.
-            await this.command('set-option', '@vargus_native_row', String(index))
-            await this.command('set-option', `status-format[${index}]`, NATIVE_ROW)
           }
-          if (base) {
-            await this.command('set-option', '@vargus_original_left', base.left)
-            await this.command('set-option', 'status-left', NATIVE_HEADER)
-            await this.command('set-option', 'status-left-length', NATIVE_LEFT_LENGTH)
-            await this.command('set-option', 'status-right-length', '0')
-            await this.command('set-option', '@vargus_native_layout', base.sharedMark!)
-          }
-          await this.command('set-option', 'status', String(index + 1))
-        } else {
-        const originals: string[] = []
-        for (let i = 0; i < rows; i++) originals.push(await this.command('show-options', '-A', '-v', '-t', this.session, `status-format[${i}]`))
-        const backup = await this.local()
-        state = { owners: [], backup, applied: '' }
-        try {
-          for (let i = 0; i < originals.length; i++) await this.command('set-option', '-t', this.session, `status-format[${i + 1}]`, originals[i]!)
-          await this.command('set-option', '-t', this.session, 'status-format[0]', ROW)
-          await this.command('set-option', '-t', this.session, 'status', rows === 0 ? 'on' : String(rows + 1))
-          state.applied = await this.local()
-          await this.save(state)
-        } catch (error) {
-          state.applied = await this.local()
-          await this.save(state)
-          await this.restore(state)
-          throw error
         }
+        try { this.owner.priorLine = await this.command('show-options', '-p', '-v', '-t', this.pane, '@vargus_line') } catch { /* unset */ }
+        if (process.platform === 'win32') try { this.owner.priorHeader = await this.command('show-options', '-p', '-v', '-t', this.pane, '@vargus_header') } catch { /* unset */ }
+        this.owner.inheritedMark = state.native?.base?.sharedMark
+        state.owners.push(this.owner)
+        await this.save(state)
+        this.nativeBase = state.native?.base
+        this.nativePublished.clear()
+        this.attached = true
+        await this.command('set-option', '-p', '-t', this.pane, '@vargus_owner', this.owner.token)
+      } catch (error) {
+        if (process.platform === 'win32' && state?.native) {
+          this.attached = false
+          this.nativeBase = undefined
+          this.nativePublished.clear()
+          await this.clearOwner(this.owner)
+          state.owners = state.owners.filter(owner => owner.token !== this.owner.token)
+          // Retain an ownerless recovery record if restoration itself fails.
+          await this.save(state)
+          if (!state.owners.length) await this.restore(state)
         }
+        throw error
       }
-      try { this.owner.priorLine = await this.command('show-options', '-p', '-v', '-t', this.pane, '@vargus_line') } catch { /* unset */ }
-      if (process.platform === 'win32') try { this.owner.priorHeader = await this.command('show-options', '-p', '-v', '-t', this.pane, '@vargus_header') } catch { /* unset */ }
-      this.owner.inheritedMark = state.native?.base?.sharedMark
-      state.owners.push(this.owner)
-      await this.save(state)
-      this.nativeBase = state.native?.base
-      this.nativePublished.clear()
-      this.attached = true
-      await this.command('set-option', '-p', '-t', this.pane, '@vargus_owner', this.owner.token)
     })
   }
 
@@ -371,7 +391,7 @@ export class TmuxOutput {
     // NativeBase is immutable for an attachment and captured under its lock.
     // A render must not read the shared JSON while another owner saves it.
     if (this.nativeBase?.sharedMark && await this.command('show-options', '-v', '@vargus_native_layout') !== this.nativeBase.sharedMark) this.nativeBase = undefined
-    if (this.nativeBase && await this.nativeBarCommands(this.nativeBase.left)) await this.nativeAppendFallback()
+    if (this.nativeBase && await this.nativeAppendRequired(this.nativeBase.left)) await this.nativeAppendFallback()
     if (this.nativeBase) {
       const base = this.nativeBase
       const width = await this.width() + TMUX_PADDING.length

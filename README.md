@@ -244,8 +244,12 @@ blank. Routine updates publish differences together and use psmux's automatic
 redraw instead of forcing another refresh for unchanged readings.
 psmux 3.4.0 cannot read raw custom `status-format[]` values; an existing custom
 first row or multi-row layout is retained, with VArgus appended after it. Original
-formats that execute `#()` commands also retain that layout to preserve psmux's
-asynchronous command cache. Inactive
+formats that execute `#()` commands, including global window separators and flag
+styles, also retain that layout to preserve psmux's asynchronous command cache.
+Window-local bar formats and styles keep native rendering with VArgus appended;
+adding an override while VArgus runs switches to that layout automatically.
+Failed attachment restores the original scalar settings and row count while
+preserving other active owners. Inactive
 windows wait for a visit before footer automation; an existing inactive custom
 slot blocks activation, even when its text currently expands empty. VArgus
 retains its own hidden format slot for repeat activation without overwriting row zero. An originally hidden
