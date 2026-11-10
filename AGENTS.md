@@ -14,7 +14,7 @@ change what it describes, and update it in place in the same commit when a rule 
 `PLAN.md`, where it exists, is the maintainer's local working notes (status, the gate, open
 questions, the verification log). It is gitignored: never commit it.
 
-**Built on an early-access API.** The bundled `plugin-authoring` types and `reference.md` still
+**Claude mod API is early access.** The bundled `plugin-authoring` types and `reference.md` still
 say "EARLY ACCESS"; the maintainer chose to build anyway and take the churn. Settle an item in
 DESIGN.md "Unsettled" with a throwaway mod before building on it.
 
@@ -28,7 +28,7 @@ DESIGN.md "Unsettled" with a throwaway mod before building on it.
   each other or a display adapter.
 - `src/outputs` owns display encoding and tmux lifecycle; it imports no host code.
   `src/cli.ts` and `src/cli` wire a host to an output. Check these boundaries with `npm test`.
-- For the Node launcher run `npm test`; for Claude run
+- For the Node CLI, hooks and tmux output run `npm test`; for the Claude mod run
   `npm run test:claude`. Codex protocol fixtures complement, rather than establish, live model
   behavior: keep the live verification limits in DESIGN.md current.
 
@@ -54,7 +54,8 @@ DESIGN.md "Unsettled" with a throwaway mod before building on it.
 
 ## Releases
 
-Same steps as VantageHUD: a version bump (`.claude-plugin/plugin.json`) and a dated
+Same steps as VantageHUD: bump `.claude-plugin/plugin.json` and `package.json`,
+keeping the top-level and root-package versions in `package-lock.json` in sync, and add a dated
 `## [x.y.z] - YYYY-MM-DD` section in `CHANGELOG.md` (Keep a Changelog: Added / Changed / Fixed /
 Removed, compare link at the bottom), committed as `chore(release): x.y.z`; an annotated tag
 `vX.Y.Z`; push `main` and the tag; `gh release create vX.Y.Z --title vX.Y.Z --notes-file notes.md

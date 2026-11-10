@@ -8,16 +8,32 @@ Notable changes to this project. The format follows
 
 ### Added
 
-- Standalone `!vargus on|off|status` controls inside official Codex, using a repo-local
+- Standalone `!vargus on|off|status|reload` controls inside official Codex, using a repo-local
   Bash entry, one PATH symlink and a background log reader. Explicit pane/socket
   selection handles multiple panes and custom tmux servers; TUI exit restores the bar.
 - Opt-in tmux output for Claude Code through `bin/vargus claude --tmux`, sharing
   row lifecycle with standalone Codex. The active pane supplies the row; the last
   owner restores the original tmux bar.
 - Claude `tmuxOutput` option (off by default), publishing a launch-local line for the wrapper.
+- Codex automatic startup through trusted `SessionStart` and `UserPromptSubmit`
+  hooks, including shared-daemon resumes. `codexAutoStart` defaults to true;
+  activation waits for the first normal prompt on checked
+  Codex 0.167.0. Manual off suppresses later callbacks for that thread and TUI.
+- Standalone `!vargus reload` replaces the helper from the updated clone without
+  restarting Codex or its daemon. It replays recorded readings and retains options,
+  footer backups and on/off mode; command-line options can override retained values.
+- Codex short model names, subagent-start counts and observed skill-load counts,
+  enabled by default with separate switches. Counts belong to the displayed
+  conversation; supported paginated child logs skip inherited parent activity.
 
 ### Changed
 
+- Present VArgus as a status line for Claude Code and Codex CLI, with separate
+  setup, configuration, update and removal instructions for each host.
+- Standalone Codex keeps the last confirmed readings frozen while typing hides
+  the view label, without an extra row label. `status` reports the pause; the
+  historical snapshot can belong to a previously displayed view.
+- Nonempty tmux rows start with two spaces, reserved from the renderer's width.
 - Run the Node CLI, hooks and background helpers directly from `.ts` source with
   Node.js 24.12 or later. User commands need no npm install, `node_modules` folder
   or build; after updating, use `!vargus reload`. npm dependencies are for
@@ -49,7 +65,7 @@ Notable changes to this project. The format follows
   footer suppression. `off` removes the tmux row immediately and restores affected
   views on their next visit; a helper remains until restoration completes or Codex
   exits. Unknown view identities pause automation instead of selecting by log activity.
-- `ctx:` could keep the pre-compact fill until the next turn ended, which a long turn could
+- Claude `ctx:` could keep the pre-compact fill until the next turn ended, which a long turn could
   stretch for minutes. The collector drops that fill when a compaction stands (`/compact`,
   auto-compact or a plugin's), then reads `$.session.usage()` after every main-loop `turn.step`.
   Every main response now updates `ctx:` while the turn is running; a fresh session, `/clear` or
@@ -160,6 +176,7 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/zhoufanscut/VArgus/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/zhoufanscut/VArgus/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/zhoufanscut/VArgus/compare/v0.1.2...v0.1.3

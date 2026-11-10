@@ -12,7 +12,7 @@ rule changes, in the same commit as the code. It holds no history: what shipped 
 goes in CHANGELOG.md, why one change was made in its commit message.
 
 A point that a live session still has to settle is marked **Unsettled** and listed in
-[Unsettled](#unsettled). The mod API is early access: each fact about it here was read from the
+[Unsettled](#unsettled). The Claude mod API is early access: each fact about it here was read from the
 types and docs, or measured, on the Claude Code version named in [Scope](#scope) or beside the fact,
 and is re-checked on each new release.
 
@@ -45,6 +45,26 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
   install or `node_modules` folder. npm supplies development/test tools only; `ws` is used
   by the hook regression rig to inspect Codex's daemon. `.test.mts` keeps Node tests outside
   the Claude engine's `.test.ts` runner.
+
+### User-facing setup paths
+
+README.md documents each host separately: Claude's inline plugin install and
+`vargus-setup` skill, Codex's clone/PATH entry and optional startup hooks, and the
+Claude tmux launcher. Plugin installation and `/config` belong to Claude. Codex
+reads CLI options resolved against `src/options.ts`; installing the Claude plugin
+does not install Codex hooks. The tmux commands run from the clone, so removal
+finishes footer restoration or exits the TUI before removing shared source.
+For Codex startup hooks, removal edits only VArgus's callback entries, including
+untrusted or modified entries without a trust step, then closes affected TUIs.
+In the isolated 0.167.0 check, reopening `/hooks` after the file edit retained the
+removed callbacks, while closing and reopening the same thread's TUI showed only
+the preserved unrelated hook. The `config.toml` bytes were unchanged by that reopen.
+
+Token totals use uncached input plus output in both collectors, with different
+scope: Claude includes main and subagent requests in its loaded session; each
+Codex reader owns the displayed log's readings. Claude reads git or svn; the
+Codex Node reader reads git. README.md keeps those scopes explicit in the shared
+fragment descriptions instead of applying the Claude-only rules to both hosts.
 
 ### Opt-in tmux row
 
@@ -1234,8 +1254,8 @@ for it, not the code.
 
 ## Unsettled
 
-What the types and docs alone can't settle and no live session has settled yet; none blocks
-0.1.0's line. A throwaway mod run in a live session settles each.
+What the types and docs alone can't settle and no live session has settled yet for
+the Claude mod. A throwaway mod run in a live session settles each.
 
 1. Whether `$.state` survives a lost worker, as it survives a hot reload.
 
@@ -1308,8 +1328,8 @@ Later:
 - Languages other than English (VantageHUD had zh-CN), and per-label overrides (VantageHUD's
   `labels` config).
 
-Not planned: payload-only data in the line; drawing anywhere but the status-line row and the
-`/vargus` pane; seeing
+Not planned for the Claude integration: payload-only data in the line; additional UI
+beyond the inline status line, `/vargus` pane and optional tmux output; seeing
 teammates that run in their own tmux pane; a live-agents row (`agents: reviewer running 1m17s
 8.2k | Explore done 9.2k`), since Claude Code lists each running agent under the prompt with what
 it is doing, its time and its tokens (seen on 2.1.300: `◯ Explore  Grepping labels.test.ts for

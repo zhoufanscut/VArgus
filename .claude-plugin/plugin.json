@@ -1,7 +1,7 @@
 {
   "name": "vargus",
   "version": "0.3.0",
-  "description": "A Claude Code status line fed by a mod: context, limits, tokens, git, written by the mod and printed by a one-line statusLine command",
+  "description": "Claude Code plugin for the VArgus status line: context, limits, tokens and git, collected by a mod and printed by a statusLine command",
   "author": {
     "name": "zhoufanscut"
   },
@@ -151,7 +151,7 @@
     "codexAutoStart": {
       "type": "boolean",
       "title": "Codex: automatic tmux startup",
-      "description": "Allow the optional SessionStart hook to enable VArgus; requires separate Codex hook setup and has no effect in Claude",
+      "description": "Allow installed SessionStart and UserPromptSubmit hooks to enable VArgus; requires separate Codex hook setup and has no effect in Claude",
       "default": true
     }
   }
