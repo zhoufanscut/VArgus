@@ -6,6 +6,8 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-10
+
 ### Added
 
 - Standalone `!vargus on|off|status|reload` controls inside official Codex, using a repo-local
@@ -178,7 +180,8 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
-[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/zhoufanscut/VArgus/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/zhoufanscut/VArgus/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/zhoufanscut/VArgus/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/zhoufanscut/VArgus/compare/v0.1.2...v0.1.3
