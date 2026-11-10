@@ -6,6 +6,8 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-10
+
 ### Added
 
 - Claude Code with Kimi Code shows the rolling five-hour and membership monthly
@@ -218,7 +220,8 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
-[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/zhoufanscut/VArgus/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/zhoufanscut/VArgus/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/zhoufanscut/VArgus/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/zhoufanscut/VArgus/compare/v0.2.0...v0.3.0
