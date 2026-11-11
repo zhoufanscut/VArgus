@@ -6,6 +6,33 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-11
+
+### Fixed
+
+- Codex releases its empty tmux row at an empty composer, including after an
+  identified `/new` transition. The last owner restores the original bar height;
+  readings returning reattach the row. Typing in the new conversation cannot
+  revive the previous snapshot, while transient shell and popup frames preserve
+  existing draft readings.
+- Codex clears stale Git readings when its recorded working directory changes,
+  including the snapshot kept while typing, and discards Git results for the old
+  directory.
+- Claude discards usage responses from before `/clear` or an in-session resume.
+  Worktree changes clear old repository readings and invalidate pending Git walks
+  and their polling hold.
+
+### Changed
+
+- Stop Git collection when its display consumers are disabled. Claude also stops
+  rate-limit API collection when both the inline fragment and detail view are off;
+  the detail view keeps its readings when only inline fragments are hidden.
+- Resolve Codex's reported transcript before falling back to a filename scan, and
+  collect aggregate Git status without parsing unused changed-file details.
+- Simplify Claude's per-agent state by removing unused classification and request
+  counters. Strengthen tests for the main, subagent and total token columns and
+  restored readings after reload.
+
 ## [0.4.2] - 2026-11-10
 
 ### Added
@@ -220,7 +247,8 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
-[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/zhoufanscut/VArgus/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/zhoufanscut/VArgus/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/zhoufanscut/VArgus/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/zhoufanscut/VArgus/compare/v0.3.0...v0.4.0

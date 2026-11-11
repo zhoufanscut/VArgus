@@ -1,6 +1,6 @@
 {
   "name": "vargus",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Claude Code plugin for the VArgus status line: context, limits, tokens and git, collected by a mod and printed by a statusLine command",
   "author": {
     "name": "zhoufanscut"
