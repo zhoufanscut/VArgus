@@ -1,5 +1,5 @@
 import { describe, expect, mock, test, type Engine, type MockClock } from 'claude-code/testing'
-import type { On, TurnStepInput } from 'claude-code'
+import type { On, RenderNode, TurnStepInput } from 'claude-code'
 
 // The detail view's wiring in src/hosts/claude/register.ts (DESIGN, "The detail view"):
 // off by default, nothing registered; on, /vargus toggles the pane, the open
@@ -75,6 +75,13 @@ async function pane($: Engine, bodyColumns = 76): Promise<string> {
     props: { title: 'VArgus', isFocused: false, bodyColumns, placement: 'inline' },
   } as never)
   return JSON.stringify(tree)
+}
+
+function textRows(node: RenderNode): string[] {
+  if (typeof node === 'string') return [node]
+  const children = 'children' in node ? node.children ?? [] : []
+  const rows = children.flatMap(textRows)
+  return node.type === 'Text' ? [rows.join('')] : rows
 }
 
 describe('detail view: off by default', () => {
@@ -163,6 +170,8 @@ describe('detail view: on', () => {
     await clock.advance(1000)
     const drawn = await pane($)
     expect([drawn.includes('main'), drawn.includes('no requests yet')]).toEqual([true, false])
+    const main = textRows(JSON.parse(drawn)).find(row => /^main\s/.test(row))
+    expect(main?.trim().split(/\s+/)).toEqual(['main', '1.2k', '300', '5.0k', '700'])
   })
 
   test('the open pane redraws each second; /vargus again closes it and the redraws stop', ON, async ($, on) => {
@@ -187,12 +196,22 @@ describe('detail view: on', () => {
     await clock.advance(1000)
     await $.agent.spawn({ prompt: 'p', description: 'look around', subagentType: 'Explore', background: false, fork: false } as never)
     await step($)
+    await step($, { index: 1 })
     await step($, { agentId: 'a1' })
     const drawn = await pane($)
     expect(drawn).not.toContain('sentinel')
     for (const word of ['Limits', 'Context', '40.0k', ' / 200.0k tokens', 'Tokens', 'main', 'Explore', 'look around', 'total']) {
       expect([word, drawn.includes(word)]).toEqual([word, true])
     }
+    const tokens = textRows(JSON.parse(drawn))
+      .filter(row => /^(main|Explore|total)\s/.test(row)).map(row => row.trim().split(/\s+/))
+    // Each step contributes 1,200 in, 300 out, 5,000 cache read and 700 cache write.
+    // Two main steps and one agent step must stay separate before the total row.
+    expect(tokens.map(row => [row[0], ...row.slice(-4)])).toEqual([
+      ['main', '2.4k', '600', '10.0k', '1.4k'],
+      ['Explore', '1.2k', '300', '5.0k', '700'],
+      ['total', '3.6k', '900', '15.0k', '2.1k'],
+    ])
     await $.session.end({ reason: 'clear', sessionId: 'S1', resume: { id: 'S2' } } as never)
     expect(await pane($)).toContain('no requests yet')
   })

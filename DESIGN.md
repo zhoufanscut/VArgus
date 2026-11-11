@@ -1065,7 +1065,9 @@ language touches no fragment.
     on mid-session, the list starts then and the total is lower. Names from `agent.spawn`: the
     call's `name`, the teammate's name, else the agent type, with the call's description dimmed;
     an agent started before the mod loaded shows as `?`. Past 64 agents the rest sum into one
-    `others` row, which keeps the last shown place. Kept in `$.state` beside the counts, so a hot
+    `others` row, which keeps the last shown place. The row contract holds its id, name,
+    description and four token totals; the view needs no agent-kind or request-count fields.
+    Kept in `$.state` beside the counts, so a hot
     reload keeps it; `/clear` and a resume start it over. Each save of the list carries the counts'
     token count of that moment, and at `session.start` the list is taken back only when that
     equals the restored count: with the option off the list is neither kept nor cleared, so after
@@ -1470,7 +1472,8 @@ the Claude mod. A throwaway mod run in a live session settles each.
   the header within its box at 20, 40, 71, 76 and 140 columns, long branch, worktree and folder
   included; no colour with `NO_COLOR`; every word from the labels), the changed-path parsers and
   the agents list's restore rule; `tests/view-register.test.ts` drives the wiring (off: no command; on:
-  `/vargus` opens and closes the pane, redraws each second while open, agents' tokens reach it).
+  `/vargus` opens and closes the pane, redraws each second while open, and checks the main,
+  subagent and total token columns, including the main row after a reload).
 - The labels test in [Languages](#languages).
 
 ## Rules for the code

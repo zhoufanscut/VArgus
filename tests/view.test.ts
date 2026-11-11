@@ -21,7 +21,7 @@ const at = (day: number, h: number, m: number) => new Date(2026, 9, day, h, m).g
 const iso = (ms: number) => new Date(ms).toISOString()
 
 function agent(id: string, name: string, input: number, output: number, extra: Partial<VargusAgent> = {}): VargusAgent {
-  return { id, kind: id === MAIN ? 'main' : 'subagent', name, detail: '', input, output, cacheRead: 0, cacheWrite: 0, requests: 1, ...extra }
+  return { id, name, detail: '', input, output, cacheRead: 0, cacheWrite: 0, ...extra }
 }
 
 function input(over: {
@@ -176,7 +176,7 @@ describe('view: tokens by agent', () => {
 
   test('past six rows `+n more`; the others row shown last; none yet says so', () => {
     const many = [agent(MAIN, '', 1, 1), ...Array.from({ length: 8 }, (_, i) => agent(`a${i}`, `t${i}`, 10 + i, 0)),
-      { ...agent(OTHERS, '', 99_999, 1), kind: 'others' as const }]
+      agent(OTHERS, '', 99_999, 1)]
     const rows = card(viewModel(input({ agents: { list: many } })).cards, 'Tokens').rows.map(text)
     // main, four named, others: six rows; four named left out
     expect(rows.slice(1, 7).map(r => r.split(/\s+/)[0])).toEqual(['main', 't7', 't6', 't5', 't4', 'others'])

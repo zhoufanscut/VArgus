@@ -33,8 +33,8 @@ export function initialAgents(): AgentsValues {
   return { list: [] }
 }
 
-function blank(id: string, kind: VargusAgent['kind'], name: string, detail = ''): VargusAgent {
-  return { id, kind, name, detail, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, requests: 0 }
+function blank(id: string, name: string): VargusAgent {
+  return { id, name, detail: '', input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 }
 
 // The agent's row, made if new; past MAX_AGENTS a new agent's tokens go to
@@ -45,11 +45,11 @@ function row(values: AgentsValues, id: string): VargusAgent {
   if (values.list.length >= MAX_AGENTS) {
     const others = values.list.find(a => a.id === OTHERS)
     if (others) return others
-    const made = blank(OTHERS, 'others', '')
+    const made = blank(OTHERS, '')
     values.list.push(made)
     return made
   }
-  const made = id === MAIN ? blank(MAIN, 'main', '') : blank(id, 'subagent', '?')
+  const made = blank(id, id === MAIN ? '' : '?')
   values.list.push(made)
   return made
 }
@@ -87,7 +87,6 @@ export function agentSpawned(
   if (!r.agentId) return
   const a = row(values, r.agentId)
   if (a.id === OTHERS) return
-  a.kind = r.teammateId ? 'teammate' : e.workflow ? 'workflow' : 'subagent'
   a.name = e.name ?? r.teammateId?.split('@')[0] ?? e.subagentType
   a.detail = e.description
   save($, values, tokens)
@@ -102,7 +101,6 @@ export function agentStep($: EngineInterface, values: AgentsValues, e: TurnStepI
   a.output += r.usage.output_tokens
   a.cacheRead += r.usage.cache_read_input_tokens
   a.cacheWrite += r.usage.cache_creation_input_tokens
-  a.requests += 1
   save($, values, tokens)
 }
 
