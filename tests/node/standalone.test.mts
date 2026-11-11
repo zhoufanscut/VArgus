@@ -470,8 +470,23 @@ trust_level = "trusted"
       const original = await readRuntime()
       await submit('/new')
       await wait(footer, footerMatches)
+      if (selection?.length) {
+        // A full native ID identifies the new root as outside this helper's family.
+        await wait(row, /^$/)
+        await wait(() => tmux('show-options', '-A', '-v', '-t', 'test', 'status'), /^on$/)
+        assert.equal(await tmux('show-options', '-t', 'test'), before)
+        await tmux('send-keys', '-l', '-t', pane, 'new conversation draft')
+        await wait(screen, /new conversation draft/)
+        await delay(1400)
+        assert.equal(await row(), '')
+        assert.equal(await tmux('show-options', '-A', '-v', '-t', 'test', 'status'), 'on')
+        assert.equal((await readRuntime()).paused, undefined)
+        await tmux('send-keys', '-t', pane, 'C-e', 'C-u')
+      }
       await submit(command('on', '--socket ' + quote(socket) + ' --pane ' + pane
         + (selection === null ? ' --theme ember --config ' + quote(optionsFile) : '')))
+      await wait(row, /\S/)
+      assert.equal(await tmux('show-options', '-A', '-v', '-t', 'test', 'status'), '2')
       const replacement = await readRuntime()
       assert.notEqual(replacement.thread, original.thread)
       assert.equal(replacement.target.pid, original.target.pid)

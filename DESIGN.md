@@ -82,8 +82,11 @@ Each helper owns a pane's `@vargus_line`. The row's `#{@vargus_line}` lookup fol
 that client's active pane. It does not use `E:` or a shell `#()` formatter: repository text
 cannot become a format command through recursive expansion. The encoder converts VArgus's
 SGR colours and bold to tmux styles and escapes literal hashes. Nonempty rows begin
-with two spaces; the Node renderer's width budget excludes that padding. Empty rows
-stay blank. Tests use a dedicated server, not the person's current tmux server.
+with two spaces; the Node renderer's width budget excludes that padding. At an
+empty composer, a Codex helper with no rendered content releases its row ownership
+and saved draft snapshot; it reattaches on the next nonempty frame. Transient
+shell/popup frames keep ownership and the snapshot, so typing can keep its last
+readings. Tests use a dedicated server, not the person's current tmux server.
 
 A short lock serializes session setup and cleanup across helpers. A prepared nonempty owner
 directory is published atomically; owner filenames are unique, so stale cleanup cannot remove

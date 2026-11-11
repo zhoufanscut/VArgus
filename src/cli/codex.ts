@@ -374,7 +374,14 @@ export async function rowWorker(spec: Spec): Promise<number> {
           paused = { thread: lastReadings!.thread, label: lastReadings!.label }
         }
       }
-      await output.update(line)
+      // Release the row when there are no readings and the composer is empty.
+      // Transient shell/popup frames must not discard a draft's saved readings.
+      if (line) {
+        if (!attached) { await output.attach(); attached = true }
+        await output.update(line)
+      } else if (attached && codexComposer(screen, '')) {
+        await output.detach(); attached = false; lastReadings = undefined
+      } else if (attached) await output.update('')
       // Thread switches rebuild the terminal surface. Redraw once at a confirmed
       // identity transition, rather than repainting the full client every poll.
       if (view && lastConfirmed !== view.thread) {

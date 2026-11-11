@@ -276,7 +276,11 @@ The helper follows the displayed parent or subagent through Alt+Left/Right and
 aggregated. VArgus matches Codex's contextual agent label to saved session metadata.
 If a popup, clipped label or ambiguous agent path prevents identification, the row
 blanks until the view can be identified again, except for the last-confirmed draft
-snapshot described below. `status` reports the current view or pause.
+snapshot described below. At an empty composer, blank content also releases this
+pane's extra tmux row. The last pane to release it restores the original bar height,
+so `/new` can show the native Codex footer without an empty extra row. Content
+returning brings VArgus back; another pane still using VArgus keeps the shared row
+active. `status` reports the current view or pause.
 Without the optional startup hook, after `/new` or `/resume` run `!vargus on` again (with pane selection if needed)
 to bind the new conversation. Its token total covers recorded uncached input and output.
 Tool counts replay completed visible items and exclude `!` controls. `🤖2` counts
@@ -332,8 +336,10 @@ Live readings resume when the view is identified again. This needs a previously
 rendered snapshot in the current helper plus the native `% context left` or matched
 `Shell mode` hint. A native warning notice beside the hint keeps these readings
 visible. Dialogs, explicit foreign/clipped identities and unsupported
-layouts still blank the row. Reloading discards the snapshot until a view is
-recognized again. See [Narrow terminals and SSH](#narrow-terminals-and-ssh) for
+layouts still blank the row. Releasing the extra row at an empty composer also
+discards its snapshot, so typing in a new conversation cannot revive old readings.
+Reloading discards the snapshot until a view is recognized again.
+See [Narrow terminals and SSH](#narrow-terminals-and-ssh) for
 footer clipping and restore commands that would wrap. A visible native statusline error
 makes completion inconclusive, including an error from an earlier attempt: the
 backup remains. Resolve the error and move it out of view before retrying. This is
