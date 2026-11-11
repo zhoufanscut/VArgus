@@ -66,8 +66,11 @@ export const register: Register = (on, given) => {
       writer = await createWriter($)
       // DESIGN, "The reader": the file's age tells the reader the mod stopped
       writer.heartbeatMs = options?.blankStopped ? 30_000 : null
-      startVcs($, values.vcs, e, options?.detachedHead ?? false)
-      startLimits($, values.limits, e)
+      // The detail pane also consumes readings hidden from the inline row.
+      if (options?.repo || options?.branch || options?.status || options?.detailView) {
+        startVcs($, values.vcs, e, options?.detachedHead ?? false)
+      }
+      if (options?.rateLimits || options?.detailView) startLimits($, values.limits, e)
       values.core.home = homeDir(await $.env.get('HOME'), await $.env.get('USERPROFILE'))
       values.core.isWsl = await isWsl($)
       theme = makeTheme(options?.theme ?? 'graphite', !!(await $.env.get('NO_COLOR')))

@@ -346,6 +346,19 @@ describe('limits collector', () => {
     expect(line(w)).toBe('5h:4%')
   })
 
+  for (const detailView of [false, true]) {
+    test(`hidden rate limits: collection ${detailView ? 'continues for the detail view' : 'stops without a consumer'}`,
+      { options: { ...ONLY_LIMITS, rateLimits: false, detailView } }, async ($, on) => {
+        const clock = mock.clock(on, { now: T0 })
+        const w = world(on, clock)
+        await $.session.start(start)
+        await clock.advance(100 * SEC)
+        expect(w.started).toBe(true)
+        expect(w.fetches).toHaveLength(detailView ? 2 : 0)
+        expect(w.authorizations > 0).toBe(detailView)
+      })
+  }
+
   test('nothing is read outside an interactive session', opts, async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const w = world(on, clock)

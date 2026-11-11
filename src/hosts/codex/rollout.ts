@@ -33,15 +33,15 @@ export async function savedTranscript(home: string, thread: string, file: string
 
 export async function findRollout(home: string, thread: string, reported?: string): Promise<string> {
   if (reported) return savedTranscript(home, thread, reported)
-  const directory = join(home, 'sessions'), files = await readdir(directory, { recursive: true })
-  const escaped = thread.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const pattern = new RegExp('-' + escaped + '(?:_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})?\\.jsonl$')
-  const found = files.filter(file => pattern.test(file))
   // Codex's store chooses the current path, including opaque/session-suffixed
   // names. A single filename is a compatibility fallback if that read fails.
   let result: any
   try { result = await codexRead('thread/read', { threadId: thread, includeTurns: false }, process.cwd(), home) }
   catch (error) {
+    const directory = join(home, 'sessions'), files = await readdir(directory, { recursive: true })
+    const escaped = thread.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const pattern = new RegExp('-' + escaped + '(?:_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})?\\.jsonl$')
+    const found = files.filter(file => pattern.test(file))
     if (found.length !== 1) throw error
     return savedTranscript(home, thread, join(directory, found[0]!))
   }

@@ -415,7 +415,8 @@ payload after it. That hook inherited a CODEX_THREAD_ID from another conversatio
 The adapter reads the first record and verifies that its ID matches a saved file
 inside this home. After prompt preflight, it compares that path with the current
 path reported by Codex. Already-on/off prompt fast paths therefore avoid metadata
-RPC as well as config/read. The verified path is passed privately to the normal on
+RPC as well as config/read. Filename discovery runs only if the metadata RPC fails;
+a successful reported path is validated directly. The verified path is passed privately to the normal on
 control, and the worker pins its root catalog entry to that file. Old workers with
 no reported path, or a different path for the same ID, are replaced by explicit on.
 Ambiguous non-root catalog histories remain unknown instead of choosing one.
@@ -742,6 +743,12 @@ The read-only stdio requests for `thread/read` and `config/read` remain under
 VArgus does not launch or proxy the user's Codex TUI. Ordinary Codex and standalone
 controls are the supported Codex path. The live engine and footer limits above apply.
 
+The Codex row polls Git when `repo`, `branch` or `status` is enabled. It reads the
+repository name, branch and aggregate counts; changed-file paths belong to the
+Claude detail pane and are not parsed by this adapter. A recorded cwd change
+clears the previous Git readings before rendering or saving a paused snapshot.
+An asynchronous Git result is applied only while its cwd still matches the view.
+
 ### Codex model names and call counts
 
 The maintainer chose short family names without a full-name display switch, as
@@ -925,6 +932,11 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
 
 ### When the line is written
 
+- Periodic collectors start only when an enabled display needs them. Claude's
+  limits collector needs `rateLimits` or `detailView`; its VCS collector needs
+  `repo`, `branch`, `status` or `detailView`. The detail pane keeps its full readings
+  even when those fragments are hidden from the inline row. These checks sit at
+  collector startup, so disabled collectors add no poll timers or VCS tool refreshes.
 - Collectors update values as events arrive; the mod renders on each `$.clock.every(1000)` tick
   and writes the file only when the text or the session id differs from what it last wrote (the
   id because after a resume the id can change a moment after the text did), and never for a

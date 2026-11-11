@@ -384,6 +384,26 @@ describe('vcs refresh policy', () => {
     expect(gitStatusRuns(w)).toBe(2)
   })
 
+  for (const [name, options, enabled] of [
+    ['disabled', { repo: false, branch: false, status: false }, false],
+    ['repo only', { repo: true, branch: false, status: false }, true],
+    ['branch only', { repo: false, branch: true, status: false }, true],
+    ['status only', { repo: false, branch: false, status: true }, true],
+    ['detail view', { repo: false, branch: false, status: false, detailView: true }, true],
+  ] as const) {
+    test(`collection admission: ${name}`, { options }, async ($, on) => {
+      const clock = mock.clock(on, { now: 0 })
+      const w = world(on, clock)
+      on('tool.call', async () => ({ result: 'ok' }))
+      await $.session.start(start)
+      await clock.advance(6000)
+      await $.tool.call({ tool: 'Edit', file_path: '/x', old_string: 'a', new_string: 'b' })
+      await clock.advance(1000)
+      expect(gitStatusRuns(w) > 0).toBe(enabled)
+      if (!enabled) expect(w.runs).toEqual([])
+    })
+  }
+
   test('outside an interactive session nothing runs, tool calls included', async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)

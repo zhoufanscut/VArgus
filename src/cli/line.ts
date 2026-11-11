@@ -5,8 +5,10 @@ import { render } from '../render/index.ts'
 import { makeTheme } from '../theme/index.ts'
 import { en } from '../i18n/en.ts'
 import type { FragmentInput } from '../core/types.ts'
+import { initialVcs } from '../core/vcs.ts'
 
 export function codexLine(collector: CodexCollector, o: ReturnType<typeof resolveOptions>, t: ReturnType<typeof makeTheme>) {
+  const collectVcs = o.repo || o.branch || o.status
   let confirmed: FragmentInput | undefined
   let line: (width: number) => Promise<string>
       let gitAt = 0
@@ -16,7 +18,9 @@ export function codexLine(collector: CodexCollector, o: ReturnType<typeof resolv
         const v = collector.snapshot()
         if (!v) return ''
         v.core.columns = width
-        if (!gitReading && (v.core.cwd !== gitCwd || Date.now() >= gitAt)) {
+        // A render or paused snapshot must not pair a new folder with old Git data.
+        if (collectVcs && v.core.cwd !== gitCwd) v.vcs = initialVcs()
+        if (collectVcs && !gitReading && (v.core.cwd !== gitCwd || Date.now() >= gitAt)) {
           const cwd = v.core.cwd
           gitCwd = cwd
           const start = Date.now()

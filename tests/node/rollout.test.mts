@@ -6,6 +6,8 @@ import { join, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
+import fs from 'node:fs'
+import { syncBuiltinESMExports } from 'node:module'
 import { RolloutReader, findRollout } from '../../src/hosts/codex/rollout.ts'
 
 const meta = { type: 'session_meta', payload: { id: 'thread-a', cwd: '/repo', timestamp: '2026-11-08T05:41:17Z' } }
@@ -223,8 +225,15 @@ test('paginated child history skips the inherited prefix but retains its skill c
 })
 
 
-test('Codex reported path selects the current session-suffixed history, not the newest filename', { skip: process.platform === 'win32' }, async () => {
+test('Codex reported path selects the current session-suffixed history, not the newest filename', { skip: process.platform === 'win32' }, async t => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-rollout-alias-')), priorPath = process.env.PATH
+  const readDirectory = fs.promises.readdir
+  let scans = 0
+  const scan = t.mock.method(fs.promises, 'readdir', (...args: Parameters<typeof readDirectory>) => {
+    if (args[0] === join(dir, 'sessions')) scans++
+    return Reflect.apply(readDirectory, fs.promises, args)
+  })
+  syncBuiltinESMExports()
   try {
     await mkdir(join(dir, 'sessions')); await mkdir(join(dir, 'bin'))
     const old = join(dir, 'sessions', 'rollout-date-thread-a.jsonl')
@@ -232,10 +241,10 @@ test('Codex reported path selects the current session-suffixed history, not the 
     for (const file of [old, current]) await writeFile(file, JSON.stringify(meta) + '\n')
     await utimes(old, new Date('2030-01-01'), new Date('2030-01-01'))
     await utimes(current, new Date('2020-01-01'), new Date('2020-01-01'))
-    const reported = join(dir, 'reported.json'), requests = join(dir, 'requests.jsonl')
+    const reported = join(dir, 'reported.json'), requests = join(dir, 'requests.jsonl'), unavailable = join(dir, 'unavailable')
     await writeFile(reported, JSON.stringify({ id: 'thread-a', path: current, ephemeral: false }))
     await writeFile(join(dir, 'bin', 'codex'), `#!${process.execPath}
-const fs=require('node:fs'),r=require('node:readline').createInterface({input:process.stdin});r.on('line',l=>{const m=JSON.parse(l);if(m.method==='initialize')console.log(JSON.stringify({id:m.id,result:{}}));else{fs.appendFileSync(${JSON.stringify(requests)},JSON.stringify({method:m.method,params:m.params})+'\\n');console.log(JSON.stringify({id:m.id,result:{thread:JSON.parse(fs.readFileSync(${JSON.stringify(reported)},'utf8'))}}));}});
+const fs=require('node:fs'),r=require('node:readline').createInterface({input:process.stdin});r.on('line',l=>{const m=JSON.parse(l);if(m.method==='initialize')console.log(JSON.stringify({id:m.id,result:{}}));else{fs.appendFileSync(${JSON.stringify(requests)},JSON.stringify({method:m.method,params:m.params})+'\\n');console.log(JSON.stringify({id:m.id,...(fs.existsSync(${JSON.stringify(unavailable)})?{error:{message:'metadata unavailable'}}:{result:{thread:JSON.parse(fs.readFileSync(${JSON.stringify(reported)},'utf8'))}})}));}});
 `, { mode: 0o755 })
     process.env.PATH = join(dir, 'bin') + ':' + priorPath
     assert.equal(await findRollout(dir, 'thread-a'), current)
@@ -244,12 +253,19 @@ const fs=require('node:fs'),r=require('node:readline').createInterface({input:pr
     const calls = (await readFile(requests, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     assert.deepEqual(calls.map(c => c.method), ['thread/read', 'thread/read'])
     assert.ok(calls.every(c => c.params.includeTurns === false))
+    assert.equal(scans, 0, 'successful metadata reads do not enumerate saved sessions')
     await writeFile(reported, JSON.stringify({ id: 'thread-a', path: current, ephemeral: true }))
     await assert.rejects(findRollout(dir, 'thread-a'), /Ephemeral/)
     await writeFile(current, JSON.stringify({ ...meta, payload: { ...meta.payload, id: 'thread-b' } }) + '\n')
     await writeFile(reported, JSON.stringify({ id: 'thread-a', path: current, ephemeral: false }))
     await assert.rejects(findRollout(dir, 'thread-a'), /another Codex thread/)
+    await rm(current)
+    await writeFile(unavailable, '')
+    assert.equal(await findRollout(dir, 'thread-a'), old, 'a failed RPC still uses the single matching filename')
+    assert.equal(scans, 1, 'positive control: RPC failure reaches the recursive fallback scan')
   } finally {
+    scan.mock.restore()
+    syncBuiltinESMExports()
     if (priorPath === undefined) delete process.env.PATH
     else process.env.PATH = priorPath
     await rm(dir, { recursive: true, force: true })
