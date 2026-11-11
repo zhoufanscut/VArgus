@@ -74,7 +74,7 @@ trust_level = "trusted"
   let pane = '', before = ''
   const screen = () => tmux('capture-pane', '-p', '-t', pane)
   const row = async () => {
-    try { return await tmux('show-options', '-p', '-v', '-t', pane, '@vargus_line') } catch { return '' }
+    try { return (await tmux('show-options', '-p', '-v', '-t', pane, '@vargus_line')).replace(/#\[[^\]]*\]/g, '') } catch { return '' }
   }
   let newThreadChoice = false
   const wait = async (read: () => Promise<string>, match: RegExp) => {

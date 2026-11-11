@@ -17,6 +17,9 @@ type World = {
   // usage() refused (a thrown read), and how many times it was asked
   usageRefused: boolean
   usageCalls: number
+  // Hold a usage response after capturing its values, then release it manually.
+  usageHeld: boolean
+  releaseUsage: (() => void) | undefined
   // the usage each turn.step's response reports
   usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number } | null
   // what the mod last saved to $.state, and what a state read answers
@@ -31,7 +34,7 @@ type World = {
 
 function world(on: On, clock: MockClock): World {
   const w: World = {
-    lines: [], model: 'claude-opus-5-5[1m]', startedAt: 0, percent: 20, usageRefused: false, usageCalls: 0, saved: undefined, restore: undefined, compactSkipped: false, id: 'S1',
+    lines: [], model: 'claude-opus-5-5[1m]', startedAt: 0, percent: 20, usageRefused: false, usageCalls: 0, usageHeld: false, releaseUsage: undefined, saved: undefined, restore: undefined, compactSkipped: false, id: 'S1',
     usage: { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 90000, cache_creation_input_tokens: 7000 },
   }
   mock.env(on, { HOME: '/home/u', NO_COLOR: '1' })
@@ -41,8 +44,10 @@ function world(on: On, clock: MockClock): World {
   on('session.model', async () => ({ value: w.model }))
   on('session.usage', async () => {
     w.usageCalls += 1
+    const startedAt = w.startedAt, percent = w.percent
+    if (w.usageHeld) await new Promise<void>(resolve => { w.releaseUsage = resolve })
     if (w.usageRefused) throw new Error('refused')
-    return { value: { startedAt: w.startedAt, context: { window: 200000, percent: w.percent }, rateLimits: [] } }
+    return { value: { startedAt, context: { window: 200000, percent }, rateLimits: [] } }
   })
   on('fs.write', async ($, e) => {
     w.lines.push(e.text)
@@ -82,6 +87,10 @@ async function step($: Engine, e: Partial<TurnStepInput> = {}) {
 async function line(clock: MockClock, w: World): Promise<string | undefined> {
   await clock.advance(1000)
   return w.lines.at(-1)
+}
+
+async function flush(): Promise<void> {
+  for (let i = 0; i < 30; i++) await Promise.resolve()
 }
 
 describe('session collector', () => {
@@ -174,6 +183,27 @@ describe('session collector', () => {
     expect(await line(clock, w)).toBe('opus | ctx:0%')
     await step($)
     expect(await line(clock, w)).toBe('opus | ctx:3% | token:1.5k | session:0m')
+  })
+
+  test('a usage response from before /clear cannot restore the old session start', MINE, async ($, on) => {
+    const clock = mock.clock(on, { now: 10 * 3_600_000 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | session:10h0m')
+    w.usageHeld = true
+    await $.session.measure({ context: { window: 200000, percent: 20 }, rateLimits: [], changed: ['context'] })
+    await flush()
+    expect(w.releaseUsage).toBeDefined()
+    await $.session.end({ reason: 'clear', sessionId: 'S1', resume: { id: 'S1' } })
+    w.id = 'S2'
+    w.usageHeld = false
+    w.startedAt = 7 * 3_600_000
+    w.releaseUsage?.()
+    await flush()
+    expect(await line(clock, w)).toBe('opus | ctx:0%')
+    // A read started after the clear still fills the new session's values.
+    await $.session.measure({ context: { window: 200000, percent: 64 }, rateLimits: [], changed: ['context'] })
+    expect(await line(clock, w)).toBe('opus | ctx:64% | session:3h0m')
   })
 
   test('after a resume the first main response fills context and start; ticks do not poll', MINE, async ($, on) => {

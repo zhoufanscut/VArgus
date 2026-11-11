@@ -937,6 +937,12 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
   `repo`, `branch`, `status` or `detailView`. The detail pane keeps its full readings
   even when those fragments are hidden from the inline row. These checks sit at
   collector startup, so disabled collectors add no poll timers or VCS tool refreshes.
+- `/clear` and an in-session resume advance a session generation. A `session.measure`
+  or session-start usage response from an earlier generation is discarded rather than
+  restoring the old context or session start.
+- `EnterWorktree` and `ExitWorktree` clear the VCS values and advance their generation.
+  A walk from an earlier generation cannot restore the old repository or impose its
+  10× hold; the requested replacement runs without waiting for that hold.
 - Collectors update values as events arrive; the mod renders on each `$.clock.every(1000)` tick
   and writes the file only when the text or the session id differs from what it last wrote (the
   id because after a resume the id can change a moment after the text did), and never for a

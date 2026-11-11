@@ -38,6 +38,7 @@ type Pump = {
   // when the last refresh ended, and how long it took, in $.clock ms
   lastEnd: number
   lastMs: number
+  generation: number
   timer: { cancel: () => void } | null
   // the detachedHead option: name a detached HEAD only when it is on
   detachedHead: boolean
@@ -46,7 +47,7 @@ type Pump = {
 // One per loaded copy of the module; a hot reload starts it over, and runs
 // session.start (so startVcs) again.
 const p: Pump = {
-  started: false, running: false, asked: false, lastEnd: -Infinity, lastMs: 0, timer: null, detachedHead: false,
+  started: false, running: false, asked: false, lastEnd: -Infinity, lastMs: 0, generation: 0, timer: null, detachedHead: false,
 }
 
 // The validator refuses a second hook on one event without a matcher, so
@@ -70,6 +71,12 @@ export function startVcs($: EngineInterface, values: VcsValues, e: SessionStartI
 // work: returns at once.
 export function toolCalledVcs($: EngineInterface, values: VcsValues, e: ToolCallInput): void {
   if (!p.started || !CHANGES_FILES.has(e.tool)) return
+  if (e.tool === 'EnterWorktree' || e.tool === 'ExitWorktree') {
+    Object.assign(values, initialVcs())
+    p.generation += 1
+    p.lastEnd = -Infinity
+    p.lastMs = 0
+  }
   p.asked = true
   pump($, values, p).catch(() => {})
 }
@@ -83,15 +90,20 @@ async function pump($: EngineInterface, values: VcsValues, p: Pump): Promise<voi
     const due = p.asked ? start >= p.lastEnd + hold : start >= p.lastEnd + Math.max(POLL_MS, hold)
     if (!due) return
     p.asked = false
-    try {
-      Object.assign(values, await readVcs($, p.detachedHead))
-    } catch {
-      // A command that can't start or outlives $.process.run's 30 s: keep
-      // what was shown, as VantageHUD kept its last good counts. A command
-      // that exits non-zero is an answer, and blanks what it was asked for.
+    const generation = p.generation
+    // A command that can't start or outlives $.process.run's 30 s keeps the
+    // last good counts. A non-zero exit is an answer and blanks its fields.
+    const next = await readVcs($, p.detachedHead).catch(() => null)
+    const end = await $.clock.now()
+    if (generation !== p.generation) {
+      // The tool hook already cleared the old folder's values and hold. Do
+      // not let this walk restore either; the replacement is due next tick.
+      p.asked = true
+      return
     }
-    p.lastEnd = await $.clock.now()
-    p.lastMs = p.lastEnd - start
+    if (next) Object.assign(values, next)
+    p.lastEnd = end
+    p.lastMs = end - start
   } finally {
     p.running = false
   }

@@ -29,6 +29,7 @@ for (const fixture of [
   const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
     NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', TMUX: '', TMUX_PANE: '' }
   const configReads = join(dir, 'config-reads.log')
+  const gitStatusReads = join(dir, 'git-status-reads.log')
   if (crowded) {
     const shim = join(dir, 'bin'); await mkdir(shim)
     const codex = (await exec('which', ['codex'])).stdout.trim()
@@ -42,7 +43,9 @@ os.execv(${JSON.stringify(codex)}, ['codex']+sys.argv[1:])
 `, { mode: 0o700 })
     await writeFile(join(shim, 'git'), `#!/usr/bin/env python3
 import sys,time,os
-if '--numstat' in sys.argv: time.sleep(0.7)
+with open(${JSON.stringify(gitStatusReads)}, 'a') as f: f.write(' '.join(sys.argv[1:])+'\\n')
+if sys.argv[1:4] == ['-c','core.fsmonitor=false','status']:
+    time.sleep(0.7)
 os.execv(${JSON.stringify(git)}, ['git']+sys.argv[1:])
 `, { mode: 0o700 })
     Object.assign(env, { PATH: shim + ':' + process.env.PATH })
@@ -124,7 +127,7 @@ trust_level = "trusted"
   let client: ReturnType<typeof spawn> | undefined
   const screen = () => tmux('capture-pane', '-p', '-t', pane)
   const row = async () => {
-    try { return await tmux('show-options', '-p', '-v', '-t', pane, '@vargus_line') } catch { return '' }
+    try { return (await tmux('show-options', '-p', '-v', '-t', pane, '@vargus_line')).replace(/#\[[^\]]*\]/g, '') } catch { return '' }
   }
   const wait = async (read: () => Promise<string>, match: RegExp) => {
     let got = '', until = Date.now() + 12000
@@ -169,7 +172,7 @@ trust_level = "trusted"
     await delay(300)
 
     const launch = ['env', `CODEX_HOME=${cfg}`, `TMPDIR=${temporary}`, 'VARGUS_LOCAL_TEST_KEY=local-test-only',
-      'NO_PROXY=127.0.0.1,localhost', 'no_proxy=127.0.0.1,localhost', 'codex', ...(crowded ? [] : ['--no-alt-screen']), '-C', project].map(quote).join(' ')
+      'NO_PROXY=127.0.0.1,localhost', 'no_proxy=127.0.0.1,localhost', `PATH=${env.PATH}`, 'codex', ...(crowded ? [] : ['--no-alt-screen']), '-C', project].map(quote).join(' ')
     await tmux('respawn-pane', '-k', '-t', pane, launch + (initialPrompt ? ' ' + quote(initialPrompt) : ''))
     await wait(screen, /Ask Codex/)
     await delay(1000)
@@ -263,7 +266,10 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
       await tmux('send-keys', '-t', pane, 'M-Left')
       if (crowded && i === 0) {
         await delay(1100)
-        console.log('FIRST_CROWDED_SWITCH', JSON.stringify({ screen: await screen(), record: await records(), configReads: await reads() }))
+        const gitCalls = (await readFile(gitStatusReads, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean)
+        const delayedGitStatuses = gitCalls.filter(line => line.startsWith('-c core.fsmonitor=false status ')).length
+        console.log('FIRST_CROWDED_SWITCH', JSON.stringify({ screen: await screen(), record: await records(), configReads: await reads(), delayedGitStatuses }))
+        assert.ok(delayedGitStatuses > 0, 'the VArgus Git status delay must actually fire')
       }
       const childScreen = await wait(async () => {
         const value = await childFooter()
@@ -324,7 +330,9 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
       assert.equal(posts, afterTurns)
       active = replacement
     }
-    assert.match((await readFile(join(dir, 'physical.log'), 'utf8')).slice(physicalOffset), /session:0m/)
+    const physical = (await readFile(join(dir, 'physical.log'), 'utf8')).slice(physicalOffset)
+      .replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\([0-9A-B])/g, '')
+    assert.match(physical, /session:0m/)
     if (crowded) {
       assert.ok(readsBeforeVisits > 0, 'positive control: config/read helper was observed during activation')
       assert.equal(await reads(), readsBeforeVisits, 'first visits must use the preloaded workspace selection')
@@ -351,7 +359,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     const relative = (await readdir(join(cfg, 'sessions'), { recursive: true })).find(n => n.endsWith('-' + missing.id + '.jsonl'))!
     const transcript = join(cfg, 'sessions', relative), held = join(dir, 'held.jsonl')
     await rename(transcript, held)
-    await wait(async () => (await row()).replace(/#\[[^\]]*\]/g, ''), /^$/)
+    await wait(row, /^$/)
     await wait(async () => (await records())[0]?.error ?? '', /ENOENT/)
     await delay(400)
     assert.match((await records())[0].error, /ENOENT/)
@@ -359,7 +367,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     await wait(row, new RegExp('token:' + expected.get(lastPath)!.tokens.replace('.', '\\.')))
     // A narrow pane that clips the contextual identity must blank rather than guess.
     await tmux('resize-window', '-t', 'test', '-x', '24', '-y', '40')
-    await wait(async () => (await row()).replace(/#\[[^\]]*\]/g, ''), /^$/)
+    await wait(row, /^$/)
     await wait(async () => (await records())[0]?.selected ?? '', /^$/)
     await tmux('resize-window', '-t', 'test', '-x', String(columns), '-y', '53')
     await wait(row, /token:/)

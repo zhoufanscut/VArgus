@@ -37,6 +37,7 @@ const COUNTS = { plugin: 'vargus', key: 'counts' } as const
 // Saves run one after another, each writing the counts as they are when it
 // runs, so the last save holds the latest counts whatever order calls came in.
 let saving: Promise<unknown> = Promise.resolve()
+let sessionGeneration = 0
 
 function save($: EngineInterface, values: SessionValues): void {
   saving = saving.then(() => $.state.set(COUNTS, { ...values.counts })).catch(() => {})
@@ -51,8 +52,11 @@ async function readSession($: EngineInterface, values: SessionValues, withContex
   } catch {
     // keep the last
   }
+  const generation = sessionGeneration
   try {
     const usage = await $.session.usage()
+    // A response requested before /clear or resume belongs to the old session.
+    if (generation !== sessionGeneration) return
     values.startedAt = usage.startedAt
     if (withContext) setContext(values, usage.context)
   } catch {
@@ -133,6 +137,7 @@ export function toolCalled($: EngineInterface, e: ToolCallInput, values: Session
 // start are unknown until the next main-loop step or session.measure.
 export function sessionEnding($: EngineInterface, e: SessionEndInput, values: SessionValues): void {
   if (e.reason !== 'clear' && e.reason !== 'resume') return
+  sessionGeneration += 1
   values.counts = zero()
   values.contextPercent = undefined
   values.contextTokens = undefined
