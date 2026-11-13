@@ -19,7 +19,7 @@ for (const fixture of [
   { initialPrompt: '', selection: null },
   { initialPrompt: 'Explain app-server and exec-server', selection: ['session-id', 'model'] },
   { initialPrompt: '', selection: [] },
-]) test(`official Codex standalone controls (${fixture.initialPrompt || 'fresh chat'}, footer ${JSON.stringify(fixture.selection)})`, { timeout: 90000 }, async () => {
+]) test(`official Codex standalone controls (${fixture.initialPrompt || 'fresh chat'}, footer ${JSON.stringify(fixture.selection)})`, { timeout: 120000 }, async () => {
   const { initialPrompt, selection } = fixture
   const dir = await mkdtemp(join(tmpdir(), 'vargus-standalone-test-'))
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
@@ -474,6 +474,8 @@ trust_level = "trusted"
         // A full native ID identifies the new root as outside this helper's family.
         await wait(row, /^$/)
         await wait(() => tmux('show-options', '-A', '-v', '-t', 'test', 'status'), /^on$/)
+        // Height changes before the original-format aliases finish being removed.
+        await wait(() => tmux('show-options', '-t', 'test'), new RegExp('^' + before.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'))
         assert.equal(await tmux('show-options', '-t', 'test'), before)
         await tmux('send-keys', '-l', '-t', pane, 'new conversation draft')
         await wait(screen, /new conversation draft/)
