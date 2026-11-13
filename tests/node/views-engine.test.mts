@@ -9,6 +9,8 @@ import { join, resolve } from 'node:path'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 import { PaneInput } from '../../src/outputs/tmux/input.ts'
+import { codexComposer } from '../../src/hosts/codex/footer.ts'
+import { selectedView } from '../../src/hosts/codex/views.ts'
 
 const exec = promisify(execFile)
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
@@ -241,6 +243,27 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
       return [path, { id: m.id, tokens: path.endsWith('first') ? '8.8k' : '16.8k' }]
     }))
     const afterTurns = posts
+    // Footer commands temporarily hide the view label. Wait for completion
+    // before navigating again; a fixed delay can cycle past the parent.
+    const returnToParent = async () => {
+      const family = [{ thread: active.thread }, ...children.map(child => ({
+        thread: child.id, path: child.source.subagent.thread_spawn.agent_path,
+      }))]
+      const readyView = async (previous?: string) => {
+        const snapshot = await new PaneInput(active.target).snapshot()
+        const view = selectedView(snapshot, family, active.thread, 'first')
+        const record = (await records())[0]
+        return view && view.thread !== previous && codexComposer(snapshot, '')
+          && record?.selected === view.thread && !record.error ? view.thread : ''
+      }
+      const id = /^[0-9a-f-]{36}$/
+      let current = await wait(() => readyView(), id)
+      for (let i = 0; i < children.length && current !== active.thread; i++) {
+        await tmux('send-keys', '-t', pane, 'M-Right')
+        current = await wait(() => readyView(current), id)
+      }
+      assert.equal(current, active.thread)
+    }
     assert.ok(afterTurns > 0, 'positive control: real turns reached the same mock provider')
     if (quotedTitle) {
       for (let cycle = 0; cycle < 2; cycle++) {
@@ -341,10 +364,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     if (crowded) {
       assert.ok(readsBeforeVisits > 0, 'positive control: config/read helper was observed during activation')
       assert.equal(await reads(), readsBeforeVisits, 'first visits must use the preloaded workspace selection')
-      for (let i = 0; i < 3; i++) {
-        await tmux('send-keys', '-t', pane, 'M-Right'); await delay(500)
-        if ((await screen()).includes('Main [default]')) break
-      }
+      await returnToParent()
       await wait(row, /token:4\.2k/)
       await submit(command('off'))
       await wait(row, /^$/)
@@ -377,11 +397,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     await tmux('resize-window', '-t', 'test', '-x', String(columns), '-y', '53')
     await wait(row, /token:/)
     // Return to the parent; its native override and its own metrics survive both children.
-    for (let i = 0; i < 3; i++) {
-      await tmux('send-keys', '-t', pane, 'M-Right')
-      await delay(500)
-      if ((await screen()).includes('Main [default]')) break
-    }
+    await returnToParent()
     await wait(row, /token:4\.2k/)
     const parentFooter = (await screen()).slice((await screen()).lastIndexOf('Ask Codex'))
     assert.doesNotMatch(parentFooter, new RegExp(active.thread))
