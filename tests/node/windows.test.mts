@@ -16,6 +16,11 @@ import { TmuxOutput } from '../../src/outputs/tmux/client.ts'
 const exec = promisify(execFile)
 const windows = process.platform === 'win32'
 const quote = (text: string) => "'" + text.replaceAll("'", "''") + "'"
+async function waitForStatus(run: (...args: string[]) => Promise<string>, status: string): Promise<void> {
+  const until = Date.now() + 8000
+  while (await run('show-options', '-v', 'status') !== status && Date.now() < until) await delay(50)
+  assert.equal(await run('show-options', '-v', 'status'), status)
+}
 
 test('Windows process queries identify a real Node PID and its JSON worker token', { skip: !windows }, async () => {
   assert.equal((await applicationProcesses()).find(p => p.pid === process.pid)?.command, 'node')
@@ -37,6 +42,7 @@ test('Windows psmux refresh survives tty client names while retaining rendered r
   try {
     await run('new-session', '-d', '-s', 'test')
     const pane = await run('display-message', '-p', '#{pane_id}')
+    const hooksBefore = await run('show-hooks')
     class TtyClientOutput extends TmuxOutput {
       override async command(...args: string[]): Promise<string> {
         // Enumeration alone is seeded from the real attached Windows client
@@ -57,6 +63,7 @@ test('Windows psmux refresh survives tty client names while retaining rendered r
     }
     await output.detach()
     assert.equal(await run('show-options', '-v', 'status'), 'on')
+    assert.equal(await run('show-hooks'), hooksBefore)
   } finally {
     await output?.detach().catch(() => {})
     await run('kill-server').catch(() => {})
@@ -64,7 +71,7 @@ test('Windows psmux refresh survives tty client names while retaining rendered r
   }
 })
 
-test('Windows built-in bar keeps session/window/right information below the VArgus header and restores scalar options', { skip: !windows, timeout: 20000 }, async () => {
+test('Windows built-in bar keeps session/window/right information below the VArgus header and restores scalar options', { skip: !windows, timeout: 40000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-windows-order-test-')), socket = join(dir, 'server')
   const run = async (...args: string[]) => (await exec('tmux', ['-S', socket, ...args],
     { windowsHide: true, env: { ...process.env, TMUX: '' } })).stdout.replace(/\r?\n$/, '')
@@ -72,6 +79,7 @@ test('Windows built-in bar keeps session/window/right information below the VArg
   try {
     await run('new-session', '-d', '-s', 'test', '-n', 'ORIGINAL WINDOW', '-x', '160', '-y', '40')
     const pane = await run('display-message', '-p', '#{pane_id}')
+    const window = await run('display-message', '-p', '#{window_id}')
     await run('set-option', 'status-left', 'LEFT #{session_name} ')
     await run('set-option', 'status-right', 'RIGHT %H:%M')
     await run('set-option', 'status-left-length', '30')
@@ -94,14 +102,18 @@ test('Windows built-in bar keeps session/window/right information below the VArg
     try { await output.update('DURING SECOND OWNER SAVE') } finally { await writeFile(stateFile, savedState) }
     const unwrapped = await run('new-window', '-d', '-P', '-F', '#{pane_id}', '-n', 'UNWRAPPED')
     await run('select-window', '-t', unwrapped)
+    await waitForStatus(run, 'on')
     frame = JSON.parse(await run('dump-state'))
-    assert.ok(!frame.status_left.replace(/#\[[^\]]*\]/g, '').trim(), JSON.stringify({ header: frame.status_left, below: frame.status_format[1] }))
-    assert.ok(frame.status_format[1].includes('LEFT test'))
-    assert.match(frame.status_format[1], /RIGHT \d{2}:\d{2}/)
+    assert.equal(frame.status_lines, 1)
+    assert.equal(frame.status_left, 'LEFT test ')
+    assert.match(frame.status_right, /RIGHT \d{2}:\d{2}/)
     await output.update('WRAPPED HEADER WHILE UNWRAPPED IS ACTIVE')
     frame = JSON.parse(await run('dump-state'))
-    assert.ok(frame.status_format[1].includes('UNWRAPPED'))
-    await run('select-window', '-t', pane)
+    assert.equal(frame.status_lines, 1)
+    assert.equal(frame.status_left, 'LEFT test ')
+    await run('select-window', '-t', window)
+    await waitForStatus(run, '2')
+    assert.equal(JSON.parse(await run('dump-state')).status_lines, 2)
     await output.detach()
     // The same raw scalar expressions and width settings are restored.
     assert.equal(await run('show-options', '-v', 'status-left'), 'LEFT #{session_name} ')
@@ -122,7 +134,130 @@ test('Windows built-in bar keeps session/window/right information below the VArg
   }
 })
 
-test('Windows updates publish only changed cells in one batch without forced refresh and keep shell formatters asynchronous', { skip: !windows, timeout: 60000 }, async () => {
+for (const layout of ['scalar', 'custom', 'multi', 'hidden']) {
+test(`Windows ${layout} window heights follow owners while preserving custom rows, hooks and newer settings`, { skip: !windows, timeout: 45000 }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vargus-windows-switch-test-')), socket = join(dir, 'server')
+    const run = async (...args: string[]) => (await exec('tmux', ['-S', socket, ...args],
+      { windowsHide: true, env: { ...process.env, TMUX: '' } })).stdout.replace(/\r?\n$/, '')
+    const outputs: TmuxOutput[] = []
+    try {
+      await run('new-session', '-d', '-s', 'test', '-n', 'OWNED')
+      const pane = await run('display-message', '-p', '#{pane_id}')
+      const window = await run('display-message', '-p', '#{window_id}')
+      await run('set-option', 'status-position', 'top')
+      const originalLeft = (layout === 'scalar' ? '#[fg=red]' : '') + "LEFT '#S' \\"
+      await run('set-option', 'status-left', originalLeft)
+      if (layout === 'custom' || layout === 'multi') await run('set-option', 'status-format[0]', 'CUSTOM #{window_name} #{@dynamic}')
+      if (layout === 'multi') {
+        await run('set-option', 'status-format[1]', 'SECOND #{@dynamic}')
+        await run('set-option', 'status', '2')
+      }
+      if (layout === 'hidden') await run('set-option', 'status', 'off')
+      const original = await run('show-options', '-v', 'status'), height = layout === 'multi' ? 3 : 2
+      const normal = layout === 'multi' ? 2 : 1
+      await run('set-hook', 'after-select-window', 'set-option @user_hook BEFORE')
+      await run('set-hook', '-a', 'after-select-window', 'set-option @user_second "two words"')
+      const first = new TmuxOutput(socket, pane, join(dir, 'state')); outputs.push(first)
+      await first.attach(); await first.update('FIRST')
+      assert.equal(JSON.parse(await run('dump-state')).status_lines, height)
+      // A newly selected window must shrink before any helper update.
+      const plain = await run('new-window', '-P', '-F', '#{pane_id}', '-n', 'PLAIN')
+      const plainWindow = await run('display-message', '-p', '#{window_id}')
+      await waitForStatus(run, original)
+      let frame = JSON.parse(await run('dump-state'))
+      assert.equal(frame.status_visible, layout !== 'hidden')
+      assert.equal(frame.status_lines, normal)
+      await run('set-option', '@dynamic', 'LIVE')
+      if (layout === 'custom' || layout === 'multi') assert.equal(JSON.parse(await run('dump-state')).status_format[0], 'CUSTOM PLAIN LIVE')
+      if (layout === 'scalar') {
+        assert.equal(frame.status_left, "#[fg=red]LEFT 'test' \\")
+        assert.equal(await run('show-options', '-v', 'status-left'), originalLeft)
+        assert.equal(frame.status_left_length, 10)
+        assert.equal(frame.status_right_length, 40)
+      }
+      await run('select-window', '-t', window)
+      await waitForStatus(run, String(height))
+      assert.equal(await run('show-options', '-v', '@user_hook'), 'BEFORE')
+      assert.equal(await run('show-options', '-v', '@user_second'), 'two words')
+      assert.equal(JSON.parse(await run('dump-state')).status_lines, height)
+      // Ownership anywhere in the window keeps its row, even on another pane.
+      await run('split-window', '-h', '-t', pane)
+      assert.equal(JSON.parse(await run('dump-state')).status_lines, height)
+      const second = new TmuxOutput(socket, plain, join(dir, 'state')); outputs.push(second)
+      await second.attach(); await second.update('SECOND')
+      await run('select-window', '-t', plainWindow)
+      await waitForStatus(run, String(height))
+      await first.detach()
+      assert.equal(JSON.parse(await run('dump-state')).status_lines, height)
+      await run('select-window', '-t', window)
+      await waitForStatus(run, original)
+      assert.equal(await run('show-options', '-v', 'status'), original)
+      await run('set-hook', '-a', 'after-select-window', 'set-option @user_later AFTER')
+      await second.detach()
+      const hooks = await run('show-hooks')
+      assert.ok(!hooks.includes('select-rows.mjs'), hooks)
+      assert.match(hooks, /set-option @user_hook BEFORE/)
+      assert.match(hooks, /set-option @user_second "two words"/)
+      assert.match(hooks, /set-option @user_later AFTER/)
+      assert.equal(await run('show-options', '-v', 'status-position'), 'top')
+      assert.equal(await run('show-options', '-v', 'status-left'), originalLeft)
+      // A different height and scalar values belong to the user thereafter.
+      await first.attach(); await first.update('AGAIN')
+      await run('set-option', 'status', '4')
+      await run('set-option', 'status-left', 'NEW LEFT')
+      await run('set-option', 'status-right', 'NEW RIGHT')
+      await run('select-window', '-t', plainWindow)
+      // Let the callback run before checking that it left this newer height.
+      await delay(700)
+      assert.equal(await run('show-options', '-v', 'status'), '4')
+      await first.detach()
+      assert.equal(await run('show-options', '-v', 'status'), '4')
+      assert.equal(await run('show-options', '-v', 'status-left'), 'NEW LEFT')
+      assert.equal(await run('show-options', '-v', 'status-right'), 'NEW RIGHT')
+    } finally {
+      for (const output of outputs) await output.detach().catch(() => {})
+      await run('kill-server').catch(() => {})
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    }
+})
+}
+
+test('Windows hook restoration preserves literal indexed names beside real command vectors', { skip: !windows, timeout: 40000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-windows-hooks-test-')), socket = join(dir, 'server')
+  const run = async (...args: string[]) => (await exec('tmux', ['-S', socket, ...args],
+    { windowsHide: true, env: { ...process.env, TMUX: '' } })).stdout.replace(/\r?\n$/, '')
+  const normalized = (text: string) => text.split('\n').filter(Boolean).sort()
+  let output: TmuxOutput | undefined
+  try {
+    await run('new-session', '-d', '-s', 'test')
+    const pane = await run('display-message', '-p', '#{pane_id}')
+    await run('set-hook', 'after-select-window', 'set-option @user USER')
+    await run('set-hook', 'after-select-window[0]', 'set-option @literal LITERAL')
+    for (const event of ['after-select-pane', 'after-new-window']) {
+      await run('set-hook', event, 'set-option @one ONE')
+      await run('set-hook', '-a', event, 'set-option @two TWO')
+      await run('set-hook', `${event}[${event === 'after-select-pane' ? 2 : 0}]`, 'set-option @literal LITERAL')
+    }
+    const original = normalized(await run('show-hooks'))
+    output = new TmuxOutput(socket, pane, join(dir, 'state'))
+    await output.attach(); await output.update('HOOK OWNER')
+    assert.match(await run('show-hooks'), /select-rows\.mjs/)
+    await output.detach()
+    assert.deepEqual(normalized(await run('show-hooks')), original)
+    // Switching after detach must not resurrect callbacks.
+    const window = await run('display-message', '-p', '#{window_id}')
+    await run('new-window')
+    await run('select-window', '-t', window)
+    await delay(700)
+    assert.deepEqual(normalized(await run('show-hooks')), original)
+  } finally {
+    await output?.detach().catch(() => {})
+    await run('kill-server').catch(() => {})
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  }
+})
+
+test('Windows updates publish only changed cells in one batch without forced refresh and keep shell formatters asynchronous', { skip: !windows, timeout: 90000 }, async () => {
   for (const scenario of ['steady', 'shell', 'bare-alias', 'separator']) {
     const dir = await mkdtemp(join(tmpdir(), 'vargus-windows-diff-test-')), socket = join(dir, 'server')
     const run = async (...args: string[]) => (await exec('tmux', ['-S', socket, ...args],
@@ -162,6 +297,12 @@ test('Windows updates publish only changed cells in one batch without forced ref
         await output.update('HEADER WITH SLOW ORIGINAL FORMATTER')
         assert.equal(await run('show-options', '-v', 'status-left'), '[#S] ')
         assert.equal(await run('show-options', '-v', option), configured)
+        const ownedWindow = await run('display-message', '-p', '#{window_id}')
+        await run('new-window', '-n', 'ASYNC PLAIN')
+        await waitForStatus(run, 'on')
+        await run('select-window', '-t', ownedWindow)
+        await waitForStatus(run, '2')
+        assert.equal(await run('show-options', '-v', option), configured)
         // A later edit gets the same safe fallback before template evaluation.
         await output.detach()
         await run('set-option', '-g', option, 'PLAIN')
@@ -178,7 +319,7 @@ test('Windows updates publish only changed cells in one batch without forced ref
   }
 })
 
-test('Windows preserves expanded-empty custom slots and retries a partially assigned owned slot', { skip: !windows, timeout: 20000 }, async () => {
+test('Windows preserves expanded-empty custom slots and retries a partially assigned owned slot', { skip: !windows, timeout: 40000 }, async () => {
   for (const scenario of ['custom', 'partial']) {
     const dir = await mkdtemp(join(tmpdir(), 'vargus-windows-slot-test-')), socket = join(dir, 'server')
     const run = async (...args: string[]) => (await exec('tmux', ['-S', socket, ...args],
@@ -198,7 +339,7 @@ test('Windows preserves expanded-empty custom slots and retries a partially assi
         assert.equal(JSON.parse(await run('dump-state')).status_format[1], 'PRESERVED ORIGINAL EXPRESSION')
         assert.equal(await run('show-options', '-v', 'status'), 'on')
       } else {
-        const scalars = ['status-left', 'status-left-length', 'status-right-length', '@vargus_original_left', '@vargus_native_layout']
+        const scalars = ['status-left', 'status-left-length', 'status-right', 'status-right-length', '@vargus_original_left', '@vargus_native_layout']
         const before = await Promise.all(scalars.map(option => run('show-options', '-v', option)))
         class InterruptedOutput extends TmuxOutput {
           override async command(...args: string[]): Promise<string> {
@@ -249,7 +390,7 @@ test('Windows window-local bar formats and styles retain native rendering before
     await output.detach()
     await run('set-window-option', '-u', '-t', window, 'window-status-current-format')
     await output.attach(); await output.update('TOP HEADER')
-    assert.equal(await run('show-options', '-v', 'status-left'), '#{@vargus_header}')
+    assert.match(JSON.parse(await run('dump-state')).status_left, /TOP HEADER/)
     await run('set-window-option', '-t', window, 'window-status-current-format', 'LATER LOCAL #W')
     await run('set-window-option', '-t', window, 'window-status-current-style', 'fg=red,bold')
     await output.update('LATER APPENDED HEADER')
@@ -377,6 +518,10 @@ trust_level = "trusted"
     const other = await run('new-window', '-d', '-P', '-F', '#{pane_id}')
     const second = new TmuxOutput(socket, other, join(dir, 'owners'))
     await first.attach(); await second.attach(); await first.detach()
+    assert.equal(await run('show-options', '-v', 'status'), 'on')
+    const otherWindow = await run('display-message', '-p', '-t', other, '#{window_id}')
+    await run('select-window', '-t', otherWindow)
+    await waitForStatus(run, '2')
     assert.equal(await run('show-options', '-v', 'status'), '2')
     await second.detach()
     assert.equal(await run('show-options', '-v', 'status'), 'on')

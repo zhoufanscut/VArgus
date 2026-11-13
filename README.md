@@ -113,7 +113,7 @@ conversation currently displayed, and sends the rendered line to tmux. It hides
 and restores the native footer through session-only `/statusline` commands.
 Controls such as `!vargus on` run locally through Codex's shell mode.
 
-On Linux/macOS tmux, windows without VArgus keep their original status bar height
+On Linux/macOS tmux and Windows psmux, windows without VArgus keep their original status bar height
 (one line by default); switching to a window running VArgus adds its row automatically.
 The tmux row follows the active pane. Both hosts use shared rendering and themes,
 while their collectors remain separate. [DESIGN.md](DESIGN.md#hosts-and-outputs)
@@ -249,8 +249,11 @@ Windows background child processes use hidden windows. Windows process lookup
 uses CIM rather than Unix `ps`. With psmux's built-in bar, VArgus appears above
 the original session/window/right-side information. The bar stays at its saved
 top/bottom position, and disabling VArgus restores the original scalar settings.
-Unwrapped panes keep the original information while their VArgus header stays
-blank. Routine updates publish differences together and use psmux's automatic
+Windows without VArgus keep their original height (one line by default).
+Selecting or creating a window adjusts the height automatically through a local
+background callback. All panes in the selected window count toward ownership;
+an unwrapped pane beside an owner keeps that window's row with a blank header.
+Routine updates publish differences together and use psmux's automatic
 redraw instead of forcing another refresh for unchanged readings.
 psmux 3.4.0 cannot read raw custom `status-format[]` values; an existing custom
 first row or multi-row layout is retained, with VArgus appended after it. Original
@@ -263,10 +266,15 @@ preserving other active owners. Inactive
 windows wait for a visit before footer automation; an existing inactive custom
 slot blocks activation, even when its text currently expands empty. VArgus
 retains its own hidden format slot for repeat activation without overwriting row zero. An originally hidden
-bar uses two rows while VArgus is active and returns to hidden on shutdown.
+bar uses two rows in VArgus windows and stays hidden in other windows.
+User hooks and later status-height changes are preserved. This behavior is
+enabled by default. After upgrading an already shared attachment, stop every
+VArgus helper in that session and turn it on again, or restart the session.
 Windows verification covers automatic
 startup, token display, `on/status/reload/off`, preserving a custom first row and
-sharing the added row between two owners. Windows subagent navigation and draft
+sharing the added row between two owners. Attached-client checks cover keyboard
+window switching and creating a new window; native regressions cover custom
+heights, hidden bars, user hooks and restoration. Windows subagent navigation and draft
 scenarios and shared-daemon mode need their own live verification. The native
 TUI rig uses `--no-daemon`; an independent real-TUI probe also verified `!` shell
 controls and that a normal prompt after manual off leaves the row off.

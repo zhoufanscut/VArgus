@@ -104,8 +104,8 @@ directory is published atomically; owner filenames are unique, so stale cleanup 
 a replacement owner's record. Disappearing lock paths are retried. The last owner restores the
 bar and removes its indexed hooks and private aliases. If status/status-format changed
 while running, the newer options and aliases needed by retained formats are kept instead.
-This window-dependent height applies to POSIX tmux; Windows psmux retains the
-shared height described below.
+Window-dependent height is enabled by default on both POSIX tmux and native
+Windows psmux; the native mechanism and rendering limits are below.
 SIGTERM and SIGHUP stop the helper through its cleanup path; an uncatchable exit can leave
 the row. A later attachment
 or `bin/vargus tmux-reset` prunes dead owners. Reset refuses while an owner is still running.
@@ -211,7 +211,12 @@ a new row without shifting or reconstructing existing formats from expanded
 text. For psmux's built-in single row, a layout probe confirmed that its scalar
 `status-left` renders on row zero, and `status-format[1]` renders below it. Windows
 uses a padded `@vargus_header` as the full-width left section, temporarily setting
-`status-left` and its length and hiding the right section on that row. The
+`status-left` and its length and hiding the right section on that row. Without
+an owner in the selected window, the callback restores the actual original
+scalar options, including both length limits. This preserves native truncation
+of styled text: the 2026-11-13 probe's original `#[fg=red]LEFT LONG CONTENT`
+became `#[fg=red]L` through `#{=10:...}`, because the pinned format modifier
+counts markup characters. The native scalar renderer trims visible spans. The
 appended owned slot receives the original left expression, live window list
 and current right expression, with window ranges and clock expansion. The
 probe preserved session name, window name and right-hand clock beneath the header.
@@ -261,8 +266,60 @@ lock and removes only that attempt's owner. An existing owner's row remains in
 use. The owned hidden raw slot can still be reused on retry; if restoration
 itself fails, the saved ownerless record remains for a later recovery attempt.
 With an originally hidden bar, native activation uses the implicit base row
-plus VArgus (two rows), then restores `off`; index zero is preserved.
+plus VArgus (two rows) in owned windows, and restores `off` in other windows
+and on shutdown; index zero is preserved.
 The five-row limit and shared owner lifecycle remain enforced.
+
+Native window height uses psmux's own hook API, rather than the POSIX hook arrays.
+On installed 3.4.0 (`20aa1d7`), the 2026-11-13 probes fired
+`after-select-window` and `after-new-window`; `session-window-changed` did not
+fire in those probes, and `[1000]` was stored as a literal hook name. `set-hook -a`
+appends commands, while `show-hooks` prints `name -> command` or a numbered
+command vector. From the pinned
+[`server/mod.rs`](https://github.com/marlocarlo/psmux/blob/20aa1d7254ee93f64dafa059ef89341d9767470a/src/server/mod.rs),
+`AppendHook` pushes a distinct command and `RemoveHook` removes the whole event.
+Cleanup therefore rebuilds affected command vectors without VArgus's exact
+command, retaining existing and later-added user commands. Hook names/scopes
+and serialization are not assumed to match POSIX tmux.
+Hook writes use individual requests: a real 3.4.0 probe stored the remaining
+batch text inside the first hook's command, leaving a callback after shutdown
+that reinstalled the other hooks when a window was selected. Pre-install hook
+entries also identify literal indexed names that collide with serialized vector
+labels. An already unreadable event is left untouched and uses render-tick
+reconciliation instead. If later user edits make cleanup ambiguous, that event
+is kept; its callback becomes a no-op once the state record is removed.
+
+The callback runs Windows Node through background `run-shell`, using a small
+local script in the session's temporary state directory. It joins the lifecycle
+lock, reads the actual numeric `status` option and changes only an original or
+VArgus-owned height. In scalar mode it also switches the left expression and
+length limits, individually checking for an original or VArgus-applied value;
+newer user edits are retained. The pinned `format.rs` returns `on`/`off` for `status`, so a
+format-only guard cannot protect a user's newer numeric height. The callback
+checks ownership across the selected window's panes; a split-pane probe returned
+a space for `#{P:#{@vargus_owner}}` when both values were empty, so the native check
+matches a non-space character instead of comparing that expansion to an empty
+string. Existing layouts remain in psmux, including custom rows and asynchronous
+shell jobs. Selection, creation, pane/layout changes, window removal, pane exit
+and client attachment schedule the callback; it is asynchronous. Attach/detach
+also reconcile height directly under the lock. Queued callbacks become no-ops
+after the state record is removed; the script is retained to allow those exits.
+The normal render tick reconciles height too, using cached attachment constants
+under the same lock without reading the shared JSON. In the native probes,
+pane-targeted `select-window -t %pane` routes could change windows without firing
+the window-selection hook; this tick covers those routes.
+
+An attachment already shared with an older helper keeps that attachment's
+layout. Stop every helper in the session (or restart the session) before
+reactivating to install the new native hooks.
+
+The attached 3.4.0 terminal probe on 2026-11-13 used Ctrl-B 2 to select an
+unowned window, Ctrl-B 1 to return to the VArgus window, and Ctrl-B C to create
+a window. The terminal stream and native snapshots showed the original one-row
+bar, the two-row VArgus bar, then the original one-row bar in the new window.
+Native regression cases also exercise scalar/custom/multi-row/hidden layouts,
+split-pane ownership, multiple owners, existing and later user hooks, newer
+height/scalar settings and asynchronous formatters across switches.
 
 Windows directory-rename contention can return `EPERM` instead of POSIX's
 `EEXIST`/`ENOTEMPTY`. Locks inspect the existing owner record before deciding

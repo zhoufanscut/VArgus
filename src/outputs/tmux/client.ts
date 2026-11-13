@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile, unlink, rmdir, readdir, rename } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { tmuxLine, TMUX_PADDING } from './format.ts'
 import { ansiRuns } from '../ansi.ts'
@@ -13,13 +14,18 @@ const exec = promisify(execFile)
 type Owner = { pid: number; pane: string; token: string; priorLine?: string; priorHeader?: string; inheritedMark?: string }
 type NativeBase = { left: string; leftLength: string; rightLength: string; priorLeftAlias: string; template: string;
   sharedMark?: string; priorSharedLine?: string; priorSharedHeader?: string; priorLayout?: string }
+type NativeRows = { command: string; hooks: [string, string][]; prior: Record<string, [string, string][]> }
 type WindowRows = { emptyHooks: string[]; status: string; active: string; aliases: [string, string][]; hooks: [string, string][]; command: string[] }
-type State = { owners: Owner[]; backup: string; applied: string; windowRows?: WindowRows; native?: { status: string; index: number; base?: NativeBase } }
+type State = { owners: Owner[]; backup: string; applied: string; windowRows?: WindowRows; native?: { status: string; index: number; base?: NativeBase; rows?: NativeRows } }
 const ROW = '#{@vargus_line}'
 const NATIVE_ROW = ROW + '#{@vargus_row_probe}'
 const NATIVE_HEADER = '#{@vargus_header}'
 // psmux's terminal columns are u16; this lets the padded header fill a row.
 const NATIVE_LEFT_LENGTH = '65535'
+// psmux joins P: results with spaces, even when every pane value is empty.
+const NATIVE_PRESENT = '#{m/r:[^ ],#{P:#{@vargus_owner}}}'
+const nativeQuote = (value: string) => '"' + value.replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"'
+const powershellQuote = (value: string) => "'" + value.replaceAll("'", "''") + "'"
 
 function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true } catch { return false }
@@ -33,6 +39,7 @@ export class TmuxOutput {
   private owner: Owner
   private attached = false
   private nativeBase: NativeBase | undefined
+  private nativeRows: State['native']
   private nativePublished = new Map<string, string>()
 
   private socket: string
@@ -251,16 +258,130 @@ export class TmuxOutput {
     state.owners = state.owners.filter(owner => alive(owner.pid))
   }
 
-  // Only the height changes at window switches. Conditional formats retain the
-  // original bar at row zero when the selected window has no VArgus owner.
+  // Reconcile the selected window without shifting raw native custom formats.
   private async selectRows(state: State): Promise<void> {
+    if (state.native?.rows) await this.selectNativeHeight(state.native)
     if (state.windowRows) await this.command('if-shell', '-F', '-t', this.session,
       ...state.windowRows.command)
+  }
+
+  private async selectNativeHeight(native: NonNullable<State['native']>): Promise<void> {
+    // psmux's #{status} loses the numeric height. Read the option itself so
+    // a user's later height is respected, including custom multi-row bars.
+    const current = await this.command('show-options', '-v', 'status')
+    const active = String(native.index + 1)
+    const present = await this.command('display-message', '-p', NATIVE_PRESENT) === '1'
+    const args: string[] = []
+    const set = (option: string, value: string) => {
+      if (args.length) args.push(';')
+      args.push('set-option', option, value)
+    }
+    if (current === native.status || current === active) {
+      const desired = present ? active : native.status
+      if (current !== desired) set('status', desired)
+    }
+    const base = native.base
+    if (base && await this.command('show-options', '-v', '@vargus_native_layout') === base.sharedMark) {
+      // Restore the actual native scalar bar in plain windows. Rebuilding it
+      // with format trimming would count style markup as visible characters.
+      for (const [option, original, applied] of [
+        ['status-left', base.left, NATIVE_HEADER],
+        ['status-left-length', base.leftLength, NATIVE_LEFT_LENGTH],
+        ['status-right-length', base.rightLength, '0'],
+      ]) {
+        const value = await this.command('show-options', '-v', option!)
+        const desired = present ? applied! : original!
+        if ((value === original || value === applied) && value !== desired) set(option!, desired)
+      }
+    }
+    if (args.length) await this.command(...args)
+  }
+
+  // A native hook callback joins the same lock as helper attachment/cleanup.
+  // It needs no surviving owner pane and becomes a no-op after restoration.
+  static async selectNativeRows(socket: string, session: string, directory: string): Promise<void> {
+    const output = new TmuxOutput(socket, '%0')
+    output.session = session; output.directory = directory
+    await output.locked(async () => {
+      const state = await output.state()
+      if (state?.native?.rows) await output.selectRows(state)
+    })
+  }
+
+  private nativeHookEntries(text: string, event: string): [string, string][] {
+    return text.split('\n').flatMap(line => {
+      const at = line.indexOf(' -> '), name = line.slice(0, at)
+      return at >= 0 && (name === event || new RegExp(`^${event}\\[\\d+\\]$`).test(name))
+        ? [[name, line.slice(at + 4)] as [string, string]] : []
+    })
+  }
+
+  private nativeHooks(text: string, event: string, owned: string, prior: [string, string][]): string[] | undefined {
+    const entries = this.nativeHookEntries(text, event)
+    const witnesses = entries.filter(([, command]) => command === owned)
+    if (witnesses.length !== 1) return undefined
+    const name = witnesses[0]![0]
+    const index = name === event ? 0 : Number(name.slice(event.length + 1, -1))
+    // A pre-install singleton names the real hook directly. Otherwise our
+    // appended index bounds the old real vector; higher old labels are literals.
+    const singleton = prior.some(([name]) => name === event)
+    for (const [name, command] of prior.filter(([name]) => name !== event
+      && (singleton || Number(name.slice(event.length + 1, -1)) >= index))) {
+      const at = entries.findIndex(entry => entry[0] === name && entry[1] === command)
+      if (at >= 0) entries.splice(at, 1)
+    }
+    const single = entries.find(([name]) => name === event)
+    if (single) return [single[1]]
+    // Later user edits can introduce another collision. Keep that event intact
+    // instead of guessing; its callback becomes inert after the state is removed.
+    if (new Set(entries.map(([name]) => name)).size !== entries.length) return undefined
+    const commands: string[] = []
+    for (let i = 0; ; i++) {
+      const entry = entries.find(([name]) => name === `${event}[${i}]`)
+      if (!entry) return commands
+      commands.push(entry[1])
+    }
+  }
+
+  private async installNativeRows(state: State): Promise<void> {
+    const native = state.native!
+    const file = join(this.directory, 'select-rows.mjs')
+    await writeFile(file, `import { TmuxOutput } from ${JSON.stringify(pathToFileURL(import.meta.filename).href)}\n`
+      + `await TmuxOutput.selectNativeRows(${[this.socket, this.session, this.directory].map(value => JSON.stringify(value)).join(', ')})\n`, { mode: 0o600 })
+    native.rows = { command: `run-shell -b ${nativeQuote(`& ${powershellQuote(process.execPath)} ${powershellQuote(file)}`)}`, hooks: [], prior: {} }
+    // psmux has one hook table per server/session. Indexed names are literal;
+    // append to its command vector instead, and remove only our exact command.
+    const before = await this.command('show-hooks')
+    for (const event of ['after-select-window', 'after-new-window', 'after-select-pane', 'after-kill-pane',
+      'after-split-window', 'after-break-pane', 'after-join-pane', 'after-swap-pane', 'after-rotate-window',
+      'window-unlinked', 'pane-exited', 'client-attached']) {
+      const entries = this.nativeHookEntries(before, event)
+      // A vector already mixed with colliding literal names is unreadable.
+      // Leave it alone; normal rendering still reconciles window height.
+      if (new Set(entries.map(([name]) => name)).size !== entries.length) continue
+      native.rows.prior[event] = entries
+      native.rows.hooks.push([event, native.rows.command])
+    }
+    await this.save(state)
+    // psmux takes a hook's command from the entire raw request line. Batching
+    // set-hook would store the remaining batch inside the first hook.
+    for (const [event, command] of native.rows.hooks) await this.command('set-hook', '-a', event, command)
+  }
+
+  private async restoreNativeHooks(rows: NativeRows): Promise<void> {
+    const text = await this.command('show-hooks')
+    for (const [event, owned] of rows.hooks) {
+      const current = this.nativeHooks(text, event, owned, rows.prior[event] ?? [])
+      if (!current?.includes(owned)) continue
+      await this.command('set-hook', '-u', event)
+      for (const command of current.filter(command => command !== owned)) await this.command('set-hook', '-a', event, command)
+    }
   }
 
   private async restore(state: State): Promise<void> {
     if (state.native) {
       const { status, index, base } = state.native
+      if (state.native.rows) await this.restoreNativeHooks(state.native.rows)
       const current = await this.command('show-options', '-v', 'status')
       if (current === String(index + 1)
         && await this.nativeSlotOwned(index)) {
@@ -367,6 +488,7 @@ export class TmuxOutput {
               await this.command('set-option', '@vargus_native_layout', base.sharedMark!)
             }
             await this.command('set-option', 'status', String(index + 1))
+            await this.installNativeRows(state)
           } else {
           const originals: string[] = []
           for (let i = 0; i < rows; i++) originals.push(await this.command('show-options', '-A', '-v', '-t', this.session, `status-format[${i}]`))
@@ -429,6 +551,7 @@ export class TmuxOutput {
         state.owners.push(this.owner)
         await this.save(state)
         this.nativeBase = state.native?.base
+        this.nativeRows = state.native?.rows ? state.native : undefined
         this.nativePublished.clear()
         this.attached = true
         await this.command('set-option', '-p', '-t', this.pane, '@vargus_owner', this.owner.token)
@@ -437,6 +560,7 @@ export class TmuxOutput {
         if (process.platform === 'win32' && state?.native) {
           this.attached = false
           this.nativeBase = undefined
+          this.nativeRows = undefined
           this.nativePublished.clear()
           await this.clearOwner(this.owner)
           state.owners = state.owners.filter(owner => owner.token !== this.owner.token)
@@ -475,6 +599,9 @@ export class TmuxOutput {
     } else changes.push({ pane: this.pane, option: '@vargus_line', value: tmuxLine(ansi) })
     if (process.platform === 'win32') {
       await this.nativePublish(changes)
+      // Some psmux pane-targeted window routes omit the selection hook.
+      // The normal render tick also reconciles height without reading JSON.
+      if (this.nativeRows) await this.locked(() => this.selectNativeHeight(this.nativeRows!))
       return
     }
     await this.command('set-option', '-p', '-t', this.pane, '@vargus_line', tmuxLine(ansi))
@@ -494,6 +621,7 @@ export class TmuxOutput {
       else await this.restore(state)
     })
     this.attached = false
+    this.nativeRows = undefined
   }
 
   async cleanupAbandoned(): Promise<void> {
