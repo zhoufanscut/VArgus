@@ -6,6 +6,29 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-11-13
+
+### Fixed
+
+- Scope Codex's extra status row to windows with a VArgus owner on POSIX tmux
+  and native Windows psmux. Windows without VArgus use their original height
+  and bar formats; with the default bar, this means one row in a plain window
+  and two in a VArgus window. The behavior is enabled by default.
+- Preserve user hooks, custom and hidden bars, window-local formats and styles,
+  asynchronous shell formatters, and later user settings across window switches
+  and cleanup. Native hook writes use separate requests, and callbacks retained
+  after ambiguous user edits become inert when their attachment ends.
+
+### Changed
+
+- Synchronize live Codex navigation tests with the confirmed visible view and
+  completed footer work instead of fixed delays, including crowded footers.
+- Wait for complete tmux option restoration after Codex `/new` before checking
+  cleanup in the live regression. Give standalone integration fixtures a
+  120-second overall deadline while keeping their existing per-step waits.
+- Existing shared attachments need every VArgus helper in the session stopped
+  once, or a tmux/psmux session restart, before activation installs the new layout.
+
 ## [0.4.3] - 2026-11-11
 
 ### Fixed
@@ -247,7 +270,8 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
-[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/zhoufanscut/VArgus/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/zhoufanscut/VArgus/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/zhoufanscut/VArgus/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/zhoufanscut/VArgus/compare/v0.4.0...v0.4.1
