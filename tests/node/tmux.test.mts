@@ -33,8 +33,8 @@ test('real tmux: preserve existing rows, select active-pane content, restore onl
     const before = await r.run('show-options', '-t', 'test')
     await first.attach()
     assert.equal(await r.run('show-options', '-v', '-t', 'test', 'status'), '3')
-    assert.equal(await r.run('show-options', '-v', '-t', 'test', 'status-format[1]'), 'original #{session_name}')
-    assert.equal(await r.run('show-options', '-v', '-t', 'test', 'status-format[2]'), 'second original row')
+    assert.equal(await r.run('display-message', '-p', '-t', r.pane, '#{E:status-format[1]}'), 'original test')
+    assert.equal(await r.run('display-message', '-p', '-t', r.pane, '#{E:status-format[2]}'), 'second original row')
     const other = await r.run('split-window', '-h', '-P', '-F', '#{pane_id}', '-t', r.pane, 'sleep 120')
     second = new TmuxOutput(r.socket, other, r.root)
     await second.attach()
@@ -125,4 +125,91 @@ test('real concurrent processes can start and exit without losing the session lo
       assert.equal(await r.run('show-options', '-t', 'test'), before)
     }
   } finally { await r.close() }
+})
+
+
+test('real tmux: switching windows restores normal height and original bar while other owners remain', { timeout: 15000 }, async () => {
+  const r = await rig()
+  const first = new TmuxOutput(r.socket, r.pane, r.root)
+  let second: TmuxOutput | undefined
+  try {
+    await r.run('set-option', '-g', 'status-format[0]', 'ORIGINAL #{session_name}, #{window_name}')
+    const before = await r.run('show-options', '-t', 'test')
+    const hooks = await r.run('show-hooks', '-t', 'test')
+    const other = await r.run('new-window', '-d', '-n', 'plain', '-P', '-F', '#{pane_id}', '-t', 'test', 'sleep 120')
+    const height = () => r.run('show-options', '-A', '-v', '-t', 'test', 'status')
+    const row = () => r.run('display-message', '-p', '-t', 'test', '#{E:status-format[0]}')
+    await first.attach(); await first.update('FIRST')
+    assert.equal(await height(), '2')
+    assert.match(await row(), /FIRST/)
+    await r.run('select-window', '-t', other)
+    assert.equal(await height(), 'on')
+    assert.equal(await row(), 'ORIGINAL test, plain')
+    second = new TmuxOutput(r.socket, other, r.root)
+    await second.attach(); await second.update('SECOND')
+    assert.equal(await height(), '2')
+    await second.detach()
+    assert.equal(await height(), 'on')
+    assert.equal(await row(), 'ORIGINAL test, plain')
+    await r.run('select-window', '-t', r.pane)
+    assert.equal(await height(), '2')
+    assert.match(await row(), /FIRST/)
+    await r.run('select-window', '-t', other)
+    await first.detach()
+    assert.equal(await r.run('show-options', '-t', 'test'), before)
+    assert.equal(await r.run('show-hooks', '-t', 'test'), hooks)
+  } finally { await first.detach(); await second?.detach(); await r.close() }
+})
+
+
+test('real tmux: preserve user hooks and custom heights across window switches', { timeout: 15000 }, async () => {
+  for (const local of [false, true]) for (const status of ['off', '2']) {
+    const r = await rig()
+    const output = new TmuxOutput(r.socket, r.pane, r.root)
+    try {
+      const scope = local ? ['-t', 'test'] : ['-g']
+      await r.run('set-hook', ...scope, 'session-window-changed[42]', 'set-option -t test @visited YES ; set-option -t test @second "two words"')
+      await r.run('set-option', '-t', 'test', 'status', status)
+      await r.run('set-option', '-t', 'test', 'status-format[0]', 'FIRST, #{session_name}')
+      await r.run('set-option', '-t', 'test', 'status-format[1]', 'SECOND')
+      const hooks = await r.run('show-hooks', ...scope)
+      const before = await r.run('show-options', '-t', 'test', 'status-format')
+      const other = await r.run('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'test', 'sleep 120')
+      await output.attach(); await output.update('VARGUS')
+      await r.run('select-window', '-t', other)
+      assert.equal(await r.run('show-options', '-v', '-t', 'test', 'status'), status)
+      assert.equal(await r.run('show-options', '-v', '-t', 'test', '@visited'), 'YES')
+      assert.equal(await r.run('show-options', '-v', '-t', 'test', '@second'), 'two words')
+      if (status !== 'off') assert.equal(await r.run('display-message', '-p', '-t', 'test', '#{E:status-format[0]}'), 'FIRST, test')
+      await r.run('select-window', '-t', r.pane)
+      assert.equal(await r.run('show-options', '-v', '-t', 'test', 'status'), status === 'off' ? 'on' : '3')
+      await output.detach()
+      assert.equal(await r.run('show-options', '-t', 'test', 'status-format'), before)
+      assert.equal(await r.run('show-hooks', ...scope), hooks)
+    } finally { await output.detach(); await r.close() }
+  }
+})
+
+
+test('real tmux: an explicitly empty local hook stays disabled during attachment and after cleanup', { timeout: 15000 }, async () => {
+  const r = await rig()
+  const output = new TmuxOutput(r.socket, r.pane, r.root)
+  try {
+    const events = ['session-window-changed']
+    for (const event of events) {
+      await r.run('set-option', '-t', 'test', '@' + event, 'not-run')
+      await r.run('set-hook', '-g', event, `set-option -t test @${event} ran`)
+      await r.run('set-hook', '-t', 'test', event, '')
+    }
+    const before = await r.run('show-hooks', '-t', 'test')
+    const other = await r.run('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'test', 'sleep 120')
+    await output.attach(); await output.update('FIRST')
+    await r.run('select-window', '-t', other)
+    for (const event of events) assert.equal(await r.run('show-options', '-v', '-t', 'test', '@' + event), 'not-run', event)
+    await output.detach()
+    assert.equal(await r.run('show-hooks', '-t', 'test'), before)
+    for (const event of events) await r.run('set-hook', '-u', '-t', 'test', event)
+    await r.run('select-window', '-t', r.pane)
+    for (const event of events) assert.equal(await r.run('show-options', '-v', '-t', 'test', '@' + event), 'ran')
+  } finally { await output.detach(); await r.close() }
 })

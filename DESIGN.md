@@ -72,7 +72,18 @@ Codex uses the standalone `on`/`off` controls inside ordinary Codex. Saved Codex
 and tmux configuration files are not edited.
 
 On POSIX tmux the output prepends a row to the session's existing status rows and shifts their effective
-formats down. It stores the original local overrides, so exit restores inheritance as well as
+formats down. Windows without a VArgus owner use the original row count and formats;
+with the default bar this means one row there and two in a VArgus window. Conditional
+formats select the original rows through private user-option aliases. Indexed
+`session-window-changed` and `window-pane-changed` hooks change the height, checking
+that it still matches an owned height before writing. These are notification hooks
+listed by the installed tmux 3.5a manual under HOOKS/CONTROL MODE. Hooks join the
+local array, copying inherited global entries first when needed; unchanged copies
+are removed on shutdown to restore inheritance. Global hook changes during an
+attachment take effect after that attachment ends. Each command explicitly targets
+the owning session. All panes in the selected
+window count toward ownership; content still follows its active pane.
+It stores the original local overrides, so exit restores inheritance as well as
 explicit settings. At tmux's five-row limit it refuses to overwrite a row. The existing
 `status-position` is retained: at the bottom, VArgus is above the original bar.
 Native Windows psmux places VArgus above its built-in bar through the scalar
@@ -91,7 +102,10 @@ readings. Tests use a dedicated server, not the person's current tmux server.
 A short lock serializes session setup and cleanup across helpers. A prepared nonempty owner
 directory is published atomically; owner filenames are unique, so stale cleanup cannot remove
 a replacement owner's record. Disappearing lock paths are retried. The last owner restores the
-bar. If status/status-format changed while running, the newer options are kept instead.
+bar and removes its indexed hooks and private aliases. If status/status-format changed
+while running, the newer options and aliases needed by retained formats are kept instead.
+This window-dependent height applies to POSIX tmux; Windows psmux retains the
+shared height described below.
 SIGTERM and SIGHUP stop the helper through its cleanup path; an uncatchable exit can leave
 the row. A later attachment
 or `bin/vargus tmux-reset` prunes dead owners. Reset refuses while an owner is still running.

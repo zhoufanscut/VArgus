@@ -13,7 +13,8 @@ const exec = promisify(execFile)
 type Owner = { pid: number; pane: string; token: string; priorLine?: string; priorHeader?: string; inheritedMark?: string }
 type NativeBase = { left: string; leftLength: string; rightLength: string; priorLeftAlias: string; template: string;
   sharedMark?: string; priorSharedLine?: string; priorSharedHeader?: string; priorLayout?: string }
-type State = { owners: Owner[]; backup: string; applied: string; native?: { status: string; index: number; base?: NativeBase } }
+type WindowRows = { emptyHooks: string[]; status: string; active: string; aliases: [string, string][]; hooks: [string, string][]; command: string[] }
+type State = { owners: Owner[]; backup: string; applied: string; windowRows?: WindowRows; native?: { status: string; index: number; base?: NativeBase } }
 const ROW = '#{@vargus_line}'
 const NATIVE_ROW = ROW + '#{@vargus_row_probe}'
 const NATIVE_HEADER = '#{@vargus_header}'
@@ -250,6 +251,13 @@ export class TmuxOutput {
     state.owners = state.owners.filter(owner => alive(owner.pid))
   }
 
+  // Only the height changes at window switches. Conditional formats retain the
+  // original bar at row zero when the selected window has no VArgus owner.
+  private async selectRows(state: State): Promise<void> {
+    if (state.windowRows) await this.command('if-shell', '-F', '-t', this.session,
+      ...state.windowRows.command)
+  }
+
   private async restore(state: State): Promise<void> {
     if (state.native) {
       const { status, index, base } = state.native
@@ -264,7 +272,23 @@ export class TmuxOutput {
       await unlink(join(this.directory, 'state.json'))
       return
     }
-    if (await this.local() === state.applied) {
+    if (state.windowRows) {
+      for (const [name, applied] of state.windowRows.hooks) {
+        if (await this.command('show-hooks', '-t', this.session, name) === applied)
+          await this.command('set-hook', '-u', '-t', this.session, name)
+        const event = name.split('[')[0]!
+        if (!(await this.command('show-hooks', '-t', this.session, event)).includes('[')) {
+          if (state.windowRows.emptyHooks.includes(event)) await this.command('set-hook', '-t', this.session, event, '')
+          else await this.command('set-hook', '-u', '-t', this.session, event)
+        }
+      }
+    }
+    const local = await this.local()
+    const comparable = state.windowRows
+      ? local.replace(/^status (?:on|off|[0-5])$/m, line =>
+        line === `status ${state.windowRows!.status}` ? `status ${state.windowRows!.active}` : line)
+      : local
+    if (comparable === state.applied) {
       // source-file reads the server's own quoted option values. It never gets
       // line content, paths from the repository, or shell-expanded strings.
       const script = [
@@ -278,6 +302,11 @@ export class TmuxOutput {
       await unlink(file)
     } else {
       console.error('VArgus: tmux status options changed while running; kept your newer settings.')
+    }
+    // A retained conditional format still needs its original-format aliases.
+    for (const [name, value] of comparable === state.applied ? state.windowRows?.aliases ?? [] : []) {
+      if (await this.command('show-options', '-v', '-t', this.session, name) === value)
+        await this.command('set-option', '-u', '-t', this.session, name)
     }
     await unlink(join(this.directory, 'state.json'))
   }
@@ -344,9 +373,46 @@ export class TmuxOutput {
           const backup = await this.local()
           state = { owners: [], backup, applied: '' }
           try {
-            for (let i = 0; i < originals.length; i++) await this.command('set-option', '-t', this.session, `status-format[${i + 1}]`, originals[i]!)
-            await this.command('set-option', '-t', this.session, 'status-format[0]', ROW)
-            await this.command('set-option', '-t', this.session, 'status', rows === 0 ? 'on' : String(rows + 1))
+            const active = rows === 0 ? 'on' : String(rows + 1)
+            const present = '#{!=:#{P:#{@vargus_owner}},}'
+            const prefix = '@vargus_original_' + randomUUID().replaceAll('-', '')
+            const aliases: [string, string][] = originals.map((value, i) => [`${prefix}_${i}`, value])
+            // Keep a custom bar's format expansion (including shell jobs) in
+            // tmux; VArgus never evaluates or reconstructs its rendered text.
+            state.windowRows = { emptyHooks: [], status, active, aliases, hooks: [], command: [] }
+            for (const [name, value] of aliases) await this.command('set-option', '-t', this.session, name, value)
+            const original = (i: number) => aliases[i] ? `#{E:${aliases[i]![0]}}` : ''
+            for (let i = 0; i <= rows; i++) await this.command('set-option', '-t', this.session,
+              `status-format[${i}]`, `#{?${present},${i === 0 ? ROW : original(i - 1)},${original(i)}}`)
+            await this.command('set-option', '-t', this.session, 'status', active)
+            const allowed = `#{||:#{==:#{status},${status}},#{==:#{status},${active}}}`
+            const choose = `if-shell -F -t '${this.session}' '${present}' "set-option -t '${this.session}' status ${active}" "set-option -t '${this.session}' status ${status}"`
+            state.windowRows.command = [allowed, choose]
+            // Appended hook entries preserve existing user hooks. Record the
+            // server's serialized value so cleanup also respects later edits.
+            for (const event of ['session-window-changed', 'window-pane-changed']) {
+              let existing = await this.command('show-hooks', '-t', this.session, event)
+              if (existing === event) state.windowRows.emptyHooks.push(event)
+              if (!existing) {
+                // A local hook array shadows the global array. Copy inherited
+                // entries first, then remove unchanged copies on shutdown.
+                existing = await this.command('show-hooks', '-g', event)
+                const file = join(this.directory, 'hooks.tmux')
+                for (const line of existing.split('\n').filter(line => line.startsWith(event + '['))) {
+                  const name = line.slice(0, line.indexOf(' '))
+                  const command = line.slice(name.length + 1).replaceAll("'", "'\\''")
+                  await writeFile(file, `set-hook -t '${this.session}' ${name} '${command}'\n`, { mode: 0o600 })
+                  await this.command('source-file', file)
+                  state.windowRows.hooks.push([name, await this.command('show-hooks', '-t', this.session, name)])
+                }
+                await unlink(file).catch(error => { if (error.code !== 'ENOENT') throw error })
+              }
+              let index = 1000
+              while (existing.includes(`${event}[${index}]`)) index++
+              const name = `${event}[${index}]`
+              await this.command('set-hook', '-t', this.session, name, `if-shell -F -t '${this.session}' '${allowed}' '${choose.replaceAll("'", "'\\''")}'`)
+              state.windowRows.hooks.push([name, await this.command('show-hooks', '-t', this.session, name)])
+            }
             state.applied = await this.local()
             await this.save(state)
           } catch (error) {
@@ -366,6 +432,7 @@ export class TmuxOutput {
         this.nativePublished.clear()
         this.attached = true
         await this.command('set-option', '-p', '-t', this.pane, '@vargus_owner', this.owner.token)
+        await this.selectRows(state)
       } catch (error) {
         if (process.platform === 'win32' && state?.native) {
           this.attached = false
@@ -423,7 +490,7 @@ export class TmuxOutput {
       await this.clearOwner(this.owner)
       state.owners = state.owners.filter(owner => owner.token !== this.owner.token)
       await this.prune(state)
-      if (state.owners.length) await this.save(state)
+      if (state.owners.length) { await this.save(state); await this.selectRows(state) }
       else await this.restore(state)
     })
     this.attached = false
@@ -434,7 +501,7 @@ export class TmuxOutput {
       const state = await this.state()
       if (!state) return
       await this.prune(state)
-      if (state.owners.length) await this.save(state)
+      if (state.owners.length) { await this.save(state); await this.selectRows(state) }
       else await this.restore(state)
     })
   }

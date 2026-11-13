@@ -205,8 +205,13 @@ trust_level = "trusted"
       await writeFile(join(fake, 'ps'), `#!/usr/bin/env python3
 import sys,time,os,pathlib,json
 if '-p' in sys.argv:
-    time.sleep(0.8)
     p=pathlib.Path(${JSON.stringify(controlRoot)})
+    # Hold the request-loop liveness read until cleanup finishes. Startup
+    # liveness reads have no request lock and must continue immediately.
+    gated=bool(list(p.glob('*.request.lock')))
+    until=time.monotonic()+5
+    while gated and list(p.glob('*.json')) and time.monotonic()<until:
+        time.sleep(0.02)
     with open(${JSON.stringify(trace)},'a') as f:
         f.write(json.dumps({'replies':[x.name for x in p.glob('*.reply')],'records':[x.name for x in p.glob('*.json')]})+'\\n')
 os.execv('/usr/bin/ps',['ps']+sys.argv[1:])

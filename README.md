@@ -113,6 +113,8 @@ conversation currently displayed, and sends the rendered line to tmux. It hides
 and restores the native footer through session-only `/statusline` commands.
 Controls such as `!vargus on` run locally through Codex's shell mode.
 
+On Linux/macOS tmux, windows without VArgus keep their original status bar height
+(one line by default); switching to a window running VArgus adds its row automatically.
 The tmux row follows the active pane. Both hosts use shared rendering and themes,
 while their collectors remain separate. [DESIGN.md](DESIGN.md#hosts-and-outputs)
 contains the architecture, restoration rules and live verification limits.
@@ -279,8 +281,8 @@ blanks until the view can be identified again, except for the last-confirmed dra
 snapshot described below. At an empty composer, blank content also releases this
 pane's extra tmux row. The last pane to release it restores the original bar height,
 so `/new` can show the native Codex footer without an empty extra row. Content
-returning brings VArgus back; another pane still using VArgus keeps the shared row
-active. `status` reports the current view or pause.
+returning brings VArgus back. On Linux/macOS, another pane using VArgus keeps the
+extra row in its window; windows without VArgus keep the original height. `status` reports the current view or pause.
 Without the optional startup hook, after `/new` or `/resume` run `!vargus on` again (with pane selection if needed)
 to bind the new conversation. Its token total covers recorded uncached input and output.
 Tool counts replay completed visible items and exclude `!` controls. `🤖2` counts
