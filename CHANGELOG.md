@@ -6,6 +6,37 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-14
+
+### Added
+
+- Native OmO TUI support through a widget below the editor, enabled by default.
+  `vargus omo install|remove` manages the checkout loader without an npm install,
+  SDK package or build. `/vargus on|off|status|config JSON` saves controls and
+  configuration in the current session across reload and resume.
+- OmO context, session age, persisted main-session input plus output tokens,
+  outer tool calls, accepted task IDs and optional persisted workflow notices.
+  Cache and child usage are excluded; observed native assistant edits carry
+  receipts so copied usage does not increase the token total. Skill counts
+  remain unavailable and are omitted.
+- OmO Claude and ChatGPT subscription windows filtered by the selected provider,
+  with window labels, percentages and reset countdowns but no account names.
+  Kimi Coding collects five-hour and monthly plan limits through its regional
+  usage endpoint using credentials resolved by OmO.
+- OmO versionless model families and speed labels after effort, including
+  `sol:high(fast)`, `sol:high(ultrafast)` and Kimi highspeed as `(fast)`.
+- Cached OmO Git collection with 5-second polling and a ten-times-duration
+  hold-off, directory-change invalidation and optional detached-HEAD display.
+
+### Changed
+
+- While enabled, OmO replaces the entire native footer, including lifecycle and
+  extension statuses. Disabling VArgus restores the built-in footer; separate
+  task/todo widgets, questions and the working indicator remain owned by OmO.
+- Share the Node Git reader between Antigravity and OmO, and share the Kimi usage
+  parser between Claude and OmO without importing one host collector into another.
+- Ignore local agent configuration and evidence directories.
+
 ## [0.5.0] - 2026-11-14
 
 ### Added
@@ -304,7 +335,8 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
-[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/zhoufanscut/VArgus/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zhoufanscut/VArgus/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/zhoufanscut/VArgus/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/zhoufanscut/VArgus/compare/v0.4.2...v0.4.3
