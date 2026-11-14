@@ -55,3 +55,71 @@ test('Fast mode stays beside the model when effort is hidden or unavailable', ()
   v.session.model = undefined
   assert.equal(model(input), null)
 })
+
+test('OmO model IDs display named families or provider stems without versions', () => {
+  const collector = new CodexCollector('/repo', '/home/u')
+  collector.start('/repo', 0)
+  const v = collector.snapshot()!
+  v.core.host = 'omo'
+  v.session.effort = 'high'
+  const input = { v, o: DEFAULTS, l: en, t: makeTheme('graphite', true), now: 0 }
+  for (const [id, name] of [
+    ['claude-fable-5', 'fable'], ['claude-opus-5-5', 'opus'],
+    ['claude-3-7-sonnet', 'sonnet'], ['claude-haiku-4-5', 'haiku'],
+    ['gpt-6.1-sol', 'sol'], ['gpt-6-terra', 'terra'], ['gpt-6-luna', 'luna'],
+    ['gpt-6-astra', 'astra'], ['gemini-4-argon', 'argon'],
+    ['sol-6.1', 'sol'], ['GLM-5.1', 'glm'], ['k3', 'kimi'],
+    ['k3.1-pro', 'kimi'], ['kimi-for-coding', 'kimi'], ['kimi-k3', 'kimi'],
+    ['grok-4.1', 'grok'], ['qwen3.5-coder', 'qwen'], ['deepseek-v4', 'deepseek'],
+    ['gemini-4-pro', 'gemini'], ['MiniMax-M3', 'minimax'],
+    ['vendor/glm-5', 'glm'], ['custom-model-v2', 'custom'],
+  ] as const) {
+    v.session.model = id
+    assert.equal(model(input), `${name}:high`, id)
+    assert.equal(v.session.model, id)
+  }
+  v.session.model = undefined
+  assert.equal(model(input), null)
+})
+
+test('OmO speed suffixes follow effort and stay visible when effort is hidden', () => {
+  const collector = new CodexCollector('/repo', '/home/u')
+  collector.start('/repo', 0)
+  const v = collector.snapshot()!
+  v.core.host = 'omo'
+  const input = { v, o: DEFAULTS, l: en, t: makeTheme('graphite', true), now: 0 }
+  for (const [id, name, speed] of [
+    ['gpt-6.1-sol-fast', 'sol', 'fast'],
+    ['claude-fable-5-ultrafast', 'fable', 'ultrafast'],
+    ['k3.1-pro-highspeed', 'kimi', 'fast'],
+    ['GLM-5-FAST', 'glm', 'fast'],
+  ]) {
+    v.session.model = id
+    v.session.effort = 'high'
+    assert.equal(model(input), `${name}:high(${speed})`)
+    assert.equal(model({ ...input, o: { ...DEFAULTS, effort: false } }), `${name}(${speed})`)
+    v.session.effort = 'off'
+    assert.equal(model(input), `${name}:off(${speed})`)
+    v.session.effort = undefined
+    assert.equal(model(input), `${name}(${speed})`)
+  }
+  v.session.model = 'gpt-6.1-sol-ultrafast'
+  v.session.effort = 'high'
+  v.session.fast = true
+  const t = makeTheme('graphite', false)
+  assert.equal(model({ ...input, t }),
+    t.paint('label', 'sol:') + t.paint(t.rgb.gradMid, 'high') + t.paint('faint', '(ultrafast)'))
+  v.session.fast = false
+  for (const [host, id, name] of [
+    ['codex', 'gpt-6.1-sol-fast', 'gpt-6.1-sol-fast'],
+    ['claude', 'claude-opus-5-5-fast', 'opus'],
+    ['antigravity', 'gemini-4-pro-fast', 'pro-fast'],
+  ] as const) {
+    v.core.host = host
+    v.session.model = id
+    assert.equal(model(input), `${name}:high`)
+    v.session.fast = true
+    assert.equal(model(input), `${name}:high(fast)`)
+    v.session.fast = false
+  }
+})

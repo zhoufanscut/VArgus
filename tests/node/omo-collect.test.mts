@@ -170,7 +170,7 @@ test('quotas show window labels without account names and preserve readings and 
 })
 
 test('expired, invalid and unsupported quota values never become zero readings', () => {
-  const fresh = { provider: 'p', account: 'a', reportedAt: new Date(now).toISOString() }
+  const fresh = { provider: 'chatgpt-subscription', account: 'a', reportedAt: new Date(now).toISOString() }
   const windows = [{ id: 'x', label: 'x', usedPercent: 10 }]
   const limits = collectOmo(host().ctx, [
     { ...fresh, windows, reportedAt: new Date(now - MAX_STALE_MS - 1).toISOString() },
@@ -183,6 +183,23 @@ test('expired, invalid and unsupported quota values never become zero readings',
   ], undefined, now).limits
   assert.deepEqual(limits.engine, [])
   assert.equal(limits.api, null)
+})
+
+test('quota windows follow the selected provider across subscription and API model switches', () => {
+  const ctx = host().ctx
+  const accounts: AccountLimits[] = [
+    { provider: 'chatgpt-subscription', account: 'chatgpt', reportedAt: new Date(now).toISOString(),
+      windows: [{ id: '5h', label: '5h', usedPercent: 37 }] },
+    { provider: 'kimi-coding', account: 'kimi', reportedAt: new Date(now).toISOString(),
+      windows: [{ id: 'monthly', label: '1m', usedPercent: 62 }] },
+  ]
+  for (const [provider, expected] of [
+    ['chatgpt-subscription', [37]], ['kimi-coding', [62]], ['deepseek', []],
+  ] as const) {
+    const selected = { ...ctx, model: { id: 'model', provider } }
+    assert.deepEqual(collectOmo(selected, accounts, undefined, now).limits.engine.map(w => w.percentUsed), expected)
+  }
+  assert.deepEqual(collectOmo({ ...ctx, model: undefined }, accounts, undefined, now).limits.engine, [])
 })
 
 test('malformed persisted message data is ignored at the host boundary', () => {

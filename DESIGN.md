@@ -955,20 +955,44 @@ Reducer state belongs to the session manager; entry IDs prevent replay duplicati
 
 Model, effective effort and context come from `ctx.model`, `ctx.thinkingLevel`
 and `ctx.getContextUsage()`. Missing/null context stays unknown and is omitted.
-Known GPT family names use the shared Codex naming rule, Claude families use the
-shared Claude rule, and unfamiliar identifiers remain intact.
+OmO names omit versions. The named families fable, opus, sonnet, haiku, sol, terra,
+luna, astra and argon retain their names; other model IDs use their family stem
+(glm, kimi, grok, qwen, deepseek, etc.). Bare Kimi coding IDs such as `k3.1-pro`
+map to kimi. Native catalog IDs end in `-fast`, `-ultrafast` or `-highspeed` for
+speed variants: these render `(fast)`, `(ultrafast)` and `(fast)` respectively,
+after effort (`sol:high(fast)`), including when effort is hidden. The maintainer
+selected these rules on 2026-11-14; other hosts retain their naming rules.
 
-Quotas use only `getSubscriptionLimits()` and `onSubscriptionLimits()`. Bundled
+Claude and ChatGPT quotas use `getSubscriptionLimits()` and `onSubscriptionLimits()`. Bundled
 `docs/extensions.md:2559-2569` establishes these APIs; `docs/rpc.md:4214-4238`
 describes reported account windows. The getter does not establish the active account:
 the maintainer requested window-only labels on 2026-11-14, hiding provider/account
-names. Windows remain separate without claiming any account is active. Known
+names. Reports are filtered by `ctx.model.provider` on every collection, including
+`model_select`, so API models and Kimi never inherit another provider's windows.
+Windows remain separate without claiming any account is active. Known
 300-minute and 10080-minute windows map to `five_hour` and `seven_day`; other
 durations retain their labels. All labeled engine windows render, including repeated
 kinds from different accounts. Controls in external labels are sanitized.
 Error reports show `*`, readings older than `MAX_STALE_MS` disappear, and the
 shared renderer suppresses expired resets. Missing reports never become zero usage.
-There is no credential reader or extra quota poller.
+Kimi Coding has a separate usage collector, enabled with the shared rate-limits
+switch. The installed `~/.omo/agent/extensions/kimi-coding-status.js` establishes
+the `mainland-cn` / `global` regions, pinned HTTPS endpoints
+`api.kimi.com/coding/v1/usages` / `api.kimi.ai/coding/v1/usages`, five-hour/monthly
+ratios, 300-minute count fallback, 90-second polling, 30-second timeout and
+120-second failure wait. The existing Claude Kimi parser is now shared in
+`src/core/kimi.ts`; host collectors do not import each other.
+Bundled `docs/extensions.md` under `ctx.modelRegistry / ctx.model` says
+`getProviderAuth(id)` resolves the current API key and provider-scoped environment.
+A throwaway native 5.1.61 extension confirmed a resolved key and `mainland-cn`
+region on this machine without exposing the key. VArgus uses that resolver,
+never a hard-coded credential-file path. Only `kimi-coding` triggers requests;
+an API-key credential alone does not establish whether usage is subscription-billed.
+Only the pinned regional endpoints receive the key; redirects and custom gateway
+overrides are rejected. HTTP 429 uses exponential waits capped at five minutes
+and honors numeric Retry-After up to one hour. Missing/invalid usage remains
+unknown. Last good readings use the shared 15-minute stale limit. Provider switches,
+disable, reload and shutdown abort pending requests and discard Kimi readings.
 
 The entry refreshes context and the incremental history snapshot on native events
 and each second for age/countdowns; rendering itself only consumes the snapshot.
@@ -1011,6 +1035,15 @@ The installed supplemental SDK (`@code-yeongyu/senpi` 2026.10.25-2) accepted the
 as `ExtensionFactory` under strict TypeScript with module `preserve`, resolution
 `bundler`, JSON-module resolution and no library-check suppression. It is not
 claimed to be the binary's exact SDK.
+
+The Kimi/model follow-up on the same date used an ephemeral native 5.1.61 TUI
+without a model turn. Its resolved mainland Kimi credential returned five-hour
+and monthly usage successfully. The real row displayed `kimi:high(fast)` and both
+windows at 120 columns; at 60 columns it retained the model and omitted the whole
+quota fragment under the existing width policy. Switching to ChatGPT showed
+`sol:medium(fast)` and `sol:xhigh(ultrafast)` with ChatGPT windows, then switching
+to OpenCode's Gemini 4 Argon showed `argon:medium` without those windows.
+These are live provider-selection and naming checks, not account-failover proof.
 
 Focused collector, output, lifecycle and real-Git tests cover replay,
 compaction-shaped history, account changes, staleness, narrow/wide text, session

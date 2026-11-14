@@ -16,6 +16,7 @@ function host(mode = 'tui') {
   let row: { render(width: number): string[]; invalidate(): void } | undefined
   let listeners = 0
   const ctx: Context = {
+    modelRegistry: { getProviderAuth: async () => undefined },
     mode, cwd: '/repo', model: { id: 'gpt-6.1-sol', provider: 'test' }, thinkingLevel: 'high',
     getContextUsage: () => ({ tokens: 250, contextWindow: 1000, percent: 25 }),
     sessionManager: {

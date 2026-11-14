@@ -32,6 +32,17 @@ export function shortCodexModelName(model: string): string {
   return /^gpt-\d+(?:\.\d+)*-(astra|sol|terra|luna)$/i.exec(model.trim())?.[1]?.toLowerCase() ?? model
 }
 
+// OmO supplies model IDs: named families omit versions, other IDs use their
+// model stem. Kimi's coding catalog also uses the bare `k3` family.
+function shortOmoModelName(model: string): string | null {
+  const id = model.trim().toLowerCase().split('/').pop() ?? ''
+  if (!id) return null
+  const family = /(?:^|[-_\s])(fable|opus|sonnet|haiku|sol|terra|luna|astra|argon)(?=$|[-_\s.\d])/.exec(id)?.[1]
+  if (family) return family
+  if (/^k\d+(?:[.-]|$)/.test(id)) return 'kimi'
+  return /^[a-z]+/.exec(id)?.[0] ?? shortModelName(id)
+}
+
 const EFFORT_TAIL = /\s*\((?:low|medium|high|xhigh|max)\)\s*$/i
 const KNOWN_EFFORT_SLUG = /^(?:gemini|claude|gpt-oss)-[a-z0-9.-]+-(low|medium|high|xhigh|max)$/i
 const GEMINI_FAMILY = /^gemini[\s-]+(?:\d+(?:\.\d+)*[\s-]+)?([a-z][a-z0-9]*(?:[\s-][a-z0-9]+)*)$/
@@ -71,11 +82,13 @@ export function effortColor(t: Theme, effort: string | number | undefined): Rgb 
 export const model: Fragment = ({ v, o, t }) => {
   const id = v.session.model === undefined ? '' : cleanText(v.session.model)
   const name = v.core.host === 'codex' ? shortCodexModelName(id)
-    : v.core.host === 'omo' ? (id.toLowerCase().includes('claude') ? shortModelName(id) : shortCodexModelName(id))
+    : v.core.host === 'omo' ? shortOmoModelName(id)
     : v.core.host === 'antigravity' ? shortAntigravityModelName(id)
     : shortModelName(id)
   if (!name) return null
-  const fast = v.session.fast ? t.paint('faint', '(fast)') : ''
+  const speed = v.core.host === 'omo' ? /-(ultrafast|fast|highspeed)$/i.exec(id.trim())?.[1]?.toLowerCase() : undefined
+  const fast = speed ? t.paint('faint', speed === 'ultrafast' ? '(ultrafast)' : '(fast)')
+    : v.session.fast ? t.paint('faint', '(fast)') : ''
   const effort = o.effort ? v.session.effort : undefined
   if (effort === undefined || effort === '') return t.paint(effortColor(t, undefined), name) + fast
   const level = cleanText(String(effort)).toLowerCase()

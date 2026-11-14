@@ -69,7 +69,7 @@ test('OmO row hides the footer, redraws and restores only its own widget on disp
   assert.deepEqual(row?.render(100), [])
 })
 
-test('OmO preserves unknown context and model identity until readings arrive', () => {
+test('OmO preserves unknown context and renders short model families', () => {
   const f = input()
   assert.equal(context(f), null)
   f.v.session.contextPercent = 0
@@ -78,7 +78,7 @@ test('OmO preserves unknown context and model identity until readings arrive', (
   for (const [id, expected] of [
     ['gpt-6.1-sol', 'sol:high'],
     ['claude-fable-5', 'fable:high'],
-    ['custom/provider-model', 'custom/provider-model:high'],
+    ['custom/provider-model', 'provider:high'],
   ]) {
     f.v.session.model = id
     assert.equal(model(f), expected)

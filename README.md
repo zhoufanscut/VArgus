@@ -203,12 +203,25 @@ count distinct persisted DAG notices; a running workflow without a notice is not
 yet counted. Skill counts are unavailable and omitted: reading `SKILL.md` does not
 prove a skill was loaded.
 
-Context stays absent until OmO supplies a reading. Quotas come exclusively from
-OmO's subscription-limit service. Only window labels, percentages and reset
+OmO uses short model families such as `opus`, `fable`, `sol`, `terra`, `luna`
+and `argon`, without versions. Other models use their family stem, such as
+`glm`, `kimi`, `grok` or `qwen`. Fast and ultrafast variants appear after effort:
+`sol:high(fast)` or `sol:high(ultrafast)`. Kimi's highspeed variants use `(fast)`.
+
+Context stays absent until OmO supplies a reading. Quotas follow the selected
+provider: Claude and ChatGPT subscription windows come from OmO's subscription-limit
+service. Kimi Coding uses its regional usage endpoint for five-hour and monthly
+windows, enabled by default. OmO resolves its existing Kimi credential and region;
+VArgus does not read credential files. Usage refreshes every 90 seconds while Kimi
+is selected, with a 30-second request timeout and longer waits after errors.
+Switching to another provider clears Kimi readings and cancels pending requests.
+Other API providers do not inherit unrelated subscription windows.
+Only window labels, percentages and reset
 countdowns are shown; provider/account names are hidden. Multiple accounts' windows
 remain separate, without implying which account is active. Unknown durations keep their host labels.
 Errored reports retain a stale `*` for at most 15 minutes; older readings and expired
-windows disappear. No credentials are read and no extra usage requests are made.
+windows disappear. An existing `kimi-coding-status.js` extension remains independent
+and may also poll Kimi; VArgus does not consume its hidden footer status.
 
 After updating this checkout, run `/reload` in OmO. If the checkout moved or your
 loader still points to the former top-level extension entry, rerun

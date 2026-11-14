@@ -2,6 +2,7 @@ import { homedir, release } from 'node:os'
 import { collectOmo, omoSettingsReducer, OMO_EDIT_ENTRY } from './collect.ts'
 import type { AccountLimits, NativeContext, SessionEntry } from './contracts.ts'
 import { OmoVcs } from './vcs.ts'
+import { OmoKimi, type ProviderAuth } from './kimi.ts'
 import { mountOmo, type OmoUi } from '../../outputs/omo.ts'
 import { resolveOptions } from '../../options.ts'
 import { resolveLabels } from '../../i18n/index.ts'
@@ -9,6 +10,7 @@ import { makeTheme } from '../../theme/index.ts'
 import { render } from '../../render/index.ts'
 
 type Context = NativeContext & {
+  readonly modelRegistry: { getProviderAuth(provider: string): Promise<ProviderAuth | undefined> }
   readonly sessionManager: NativeContext['sessionManager'] & { getEntry(id: string): SessionEntry | undefined }
   readonly ui: OmoUi & { notify(message: string, type?: 'info' | 'warning' | 'error'): void }
 }
@@ -51,6 +53,7 @@ export default function vargus(pi: OmoApi): void {
     if (!settings.enabled) return
     const options = resolveOptions(settings.options)
     const vcs = new OmoVcs()
+    const kimi = new OmoKimi(() => instance.ctx.modelRegistry.getProviderAuth('kimi-coding'))
     const theme = makeTheme(options.theme, process.env.NO_COLOR !== undefined)
     const labels = resolveLabels('en')
     const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
@@ -66,6 +69,14 @@ export default function vargus(pi: OmoApi): void {
         if (disposed) return
         const current = instance.ctx
         values = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
+        if (options.rateLimits) {
+          void kimi.refresh(current.model?.provider).then(() => {
+            if (disposed || instance.ctx.model?.provider !== 'kimi-coding') return
+            values.limits = kimi.values
+            output.refresh()
+          })
+          if (current.model?.provider === 'kimi-coding') values.limits = kimi.values
+        }
         values.vcs = vcs.values
         output.refresh()
         if (options.repo || options.branch || options.status) {
@@ -81,6 +92,7 @@ export default function vargus(pi: OmoApi): void {
         clearInterval(timer)
         unsubscribe()
         vcs.dispose()
+        kimi.dispose()
         output.dispose()
       },
     }

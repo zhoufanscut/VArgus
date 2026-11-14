@@ -138,6 +138,7 @@ export function collectOmo(
   }
   const limits = initialLimits()
   for (const account of accounts) {
+    if (account.provider !== ctx.model?.provider) continue
     const reportedAt = Date.parse(account.reportedAt)
     if (!Number.isFinite(reportedAt) || now - reportedAt > MAX_STALE_MS) continue
     for (const window of account.windows) {
