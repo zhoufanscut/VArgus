@@ -6,6 +6,40 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-14
+
+### Added
+
+- Native inline `statusLine` support for Antigravity CLI (`agy`) through
+  `vargus statusline [--theme NAME] [--config FILE]`, running TypeScript source
+  directly with Node.js 24.12 or later and no tmux, npm install or build step.
+  Nonempty rows include a two-space left indent and reserve 2 columns from
+  `terminal_width` so narrow terminals drop trailing fragments without wrapping.
+- Antigravity model-category quota selection (`gemini-5h` and `gemini-weekly`
+  for Gemini and Orchestrator models, `3p-5h` and `3p-weekly` for Claude and
+  GPT models), with the non-active group's weekly bucket (`3p` or `gm`) shown
+  from 80% when `otherModelWeekly` is on.
+- Antigravity short model names (`Gemini 4 Carbon (High)` → `carbon:high`,
+  `Orchestrator (Carbon)` → `orchestrator(carbon)`, `Claude Opus 5.5 (High)` →
+  `opus:high`, gateway IDs preserved whole) and startup effort inference before
+  `model.effort` is populated.
+- Incremental Antigravity `transcript.jsonl` replay (cached by byte offset plus
+  first-line and trailing SHA-256 digests across `/rewind`) for session age,
+  uncached input plus output tokens, and tool, subagent (`invoke_subagent`,
+  `swarm` `add`), workflow (`run_workflow`) and Antigravity skill (`SKILL.md`
+  reads) counts, including resolution of `agy` 1.5.8's `.gemini/antigravity` vs
+  `.gemini/antigravity-cli` transcript path mismatch under `/brain/<id>/`
+  containment.
+- Cached Antigravity Git collection with VArgus's 5-second and `10×` slow-walk
+  poll hold-off, immediate refresh after mutating tools, linked-worktree and
+  opt-in `detachedHead` support, and a 4-second Git timeout under `agy`'s
+  5-second `statusLine` limit.
+
+### Changed
+
+- Load CLI subcommands lazily in `src/cli.ts` so `vargus statusline` never
+  imports the Codex or tmux module graph.
+
 ## [0.4.4] - 2026-11-13
 
 ### Fixed
@@ -270,7 +304,8 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
-[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/zhoufanscut/VArgus/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/zhoufanscut/VArgus/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/zhoufanscut/VArgus/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/zhoufanscut/VArgus/compare/v0.4.1...v0.4.2
