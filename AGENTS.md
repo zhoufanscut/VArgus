@@ -58,6 +58,28 @@ DESIGN.md "Unsettled" with a throwaway mod before building on it.
 - **Commit only when asked.** Commits are small and specific, with full messages: the measured
   numbers, how a bug was reproduced, how the change was verified (as in VantageHUD's history).
 
+## Test process cleanup
+
+These rules apply to every agent and subagent, test suite and throwaway probe, regardless of host CLI.
+
+- Before launching a test, inspect its harness for these safeguards. If it lacks them, fix it or
+  use an invocation-scoped runner that supplies them before running it.
+- Use isolated test homes and tmux sockets. Record temporary paths and process handles, PIDs and
+  start times; keep long commands in managed tool sessions and collect their exit status.
+- In disposable Codex homes, use direct stdio app-server or `--no-daemon` unless managed-daemon
+  behaviour is under test. Before starting a required daemon, set
+  `app-server-daemon/settings.json` to `{"updater":{"autoUpdateEnabled":false}}`, merging into
+  existing settings. Leave updates enabled only for updater tests;
+  `check_for_update_on_startup = false` does not disable the daemon updater.
+- Clean up in `finally`, including after failures: stop test-owned TUIs, tmux servers, daemons,
+  helpers and providers. A successful daemon stop is not proof that `pid-update-loop` exited.
+  Revalidate executable path, arguments, PID and start time against the recorded test home
+  before signalling a remaining process. Never use broad `pkill -f` or stop normal user sessions.
+- Verify exit in a process namespace that can see the spawned processes, with a positive control.
+  Wait for confirmed exit before deleting any test home; deleted executables can remain in use.
+  If an owned process survives a bounded wait or visibility is insufficient, fail the cleanup check,
+  retain its home and report the remaining process or verification gap before handing off.
+
 ## Releases
 
 Same steps as VantageHUD: bump `.claude-plugin/plugin.json` and `package.json`,
