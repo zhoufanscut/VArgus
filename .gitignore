@@ -1,6 +1,10 @@
 tmp/
 PLAN.md
-.claude/settings.local.json
+.aws/
+.codex/
+.agents/
+.claude/
+.omo/
 
 node_modules/
 dist/
