@@ -1,5 +1,5 @@
 // Shared rate-limit readings; each host supplies its own collection policy.
-export type RateLimit = { kind: string; percentUsed: number; resetsAt?: string; label?: string }
+export type RateLimit = { kind: string; percentUsed: number; resetsAt?: string; label?: string; stale?: boolean }
 
 
 export type Bucket = { percent: number; resetsAt: number | null }

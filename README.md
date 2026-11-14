@@ -1,11 +1,12 @@
 # VArgus
 
-A status line for **Claude Code, Antigravity CLI (`agy`) and Codex CLI**: context,
+A status line for **Claude Code, OmO Native, Antigravity CLI (`agy`) and Codex CLI**: context,
 rate limits with reset countdowns, token and call counts, and repository status.
 
 Claude Code shows it under the prompt through a plugin. Antigravity CLI runs
 `vargus statusline` natively under the prompt with no tmux. Codex CLI
-uses a tmux row inside ordinary, unmodified Codex. All three hosts share the renderer,
+uses a tmux row inside ordinary, unmodified Codex. OmO Native uses an extension widget
+under the editor, replacing the native footer. All four hosts share the renderer,
 fragment switches and colour themes; each collects its own readings.
 
 VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
@@ -16,6 +17,7 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
 
 - [Choose your setup](#choose-your-setup), [Requirements](#requirements)
 - [What it shows](#what-it-shows), [How it works](#how-it-works)
+- [OmO Native](#omo-native): setup, controls, update and removal
 - [Antigravity CLI](#antigravity-cli): [agent setup](#set-up-antigravity-cli-with-an-agent),
   [manual setup](#set-up-antigravity-cli), [Windows setup](#windows-setup-for-antigravity-cli),
   [configure](#configure-antigravity-cli), [update](#update-antigravity-cli), [uninstall](#uninstall-antigravity-cli)
@@ -31,6 +33,7 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
 | Host | Display | Start here |
 |---|---|---|
 | Claude Code | Inline row under the prompt | [Install the Claude plugin](#set-up-claude) |
+| OmO Native | Native widget under the editor | [Install the native extension](#omo-native) |
 | Antigravity CLI (`agy`) | Native inline `statusLine` under the prompt | [Ask an agent to set it up](#set-up-antigravity-cli-with-an-agent), or [set it up by hand](#set-up-antigravity-cli) |
 | Codex CLI | tmux row | [Ask an agent to set it up](#set-up-codex-with-an-agent), or [set it up by hand](#set-up-codex) |
 
@@ -43,13 +46,14 @@ CLI entry and do not need the Claude plugin. Automatic startup in Codex requires
 | Display | Requirements |
 |---|---|
 | Claude inline | Claude Code 2.1.299 or later in a terminal; POSIX `sh` on Linux/macOS, or Git for Windows on Windows |
+| OmO Native | OmO 5.1.61 native TUI; Node.js 24.12 or later for the setup command; no npm install or build |
 | Antigravity CLI inline | Antigravity CLI (`agy`) in a terminal and Node.js 24.12 or later (no tmux, npm install or build) |
 | Codex through tmux | Codex CLI, Bash, Node.js 24.12 or later, tmux on Linux or macOS, and saved session logs |
 | Codex through native Windows psmux | Codex CLI, PowerShell, Node.js 24.12 or later, psmux, and saved session logs |
 
 The Claude inline plugin needs no Node install. The Antigravity CLI and tmux commands run TypeScript
 source directly and need no npm install or build. Git supplies repository readings;
-Claude's collector also supports svn working copies. Antigravity CLI and Codex currently read git only.
+Claude's collector also supports svn working copies. OmO, Antigravity CLI and Codex currently read git only.
 
 Live Antigravity CLI checks cover Linux with `agy` 1.5.8, Node.js 24.14.1 and git 2.47.3;
 macOS and native Windows `agy` sessions need their own live verification.
@@ -88,7 +92,7 @@ Codex CLI:
 | `token:` | uncached input plus output tokens; the collection scope differs by host, as described below |
 | `session:` | age from the host-reported start time; Antigravity CLI and Codex use the active conversation log's start time |
 | `🔧` `🤖` `⚡` | tool, agent and skill counts, with host-specific rules below |
-| `repo:` `branch:` | repository and branch; Claude supports git and svn, Antigravity CLI and Codex support git |
+| `repo:` `branch:` | repository and branch; Claude supports git and svn, OmO, Antigravity CLI and Codex support git |
 | `?4` | working-tree status: staged `+`, modified `!`, untracked `?`, conflicts `✗`, ahead `⇡`, behind `⇣` |
 
 With Claude Code on Kimi Code, an exact match for
@@ -145,9 +149,81 @@ Controls such as `!vargus on` run locally through Codex's shell mode.
 
 On Linux/macOS tmux and Windows psmux, windows without VArgus keep their original status bar height
 (one line by default); switching to a window running VArgus adds its row automatically.
-The tmux row follows the active pane. All three hosts use shared rendering and themes,
+The tmux row follows the active pane. All four hosts use shared rendering and themes,
 while their collectors remain separate. [DESIGN.md](DESIGN.md#hosts-and-outputs)
 contains the architecture, restoration rules and live verification limits.
+
+## OmO Native
+
+From the checkout, install the loader:
+
+```sh
+./bin/vargus omo install
+```
+
+On Windows use `bin\vargus.cmd omo install`. The command asks
+`omo config agent-dir --json` for the active agent directory and creates only
+`extensions/vargus.ts` there. Use `--dir EXTENSIONS_DIRECTORY` to choose an explicit
+extension directory. It refuses to overwrite an unrelated or modified loader.
+The loader imports `src/hosts/omo/register.ts` in this checkout; do not move or
+delete the checkout while installed.
+No Claude plugin, tmux, SDK package, npm install or build is needed.
+
+Run `/reload` in OmO, or start a new native session. VArgus is enabled by default.
+The row starts with two spaces, included in its terminal width budget.
+It hides the **entire native footer, including lifecycle and extension statuses**,
+as requested for this initial integration. Separate task/todo widgets, question
+dialogs and the working indicator remain owned by OmO. Other footer-replacing
+extensions can compete with VArgus; disabling VArgus restores OmO's built-in footer,
+not an earlier custom footer.
+
+```text
+/vargus off
+/vargus on
+/vargus status
+/vargus config {"theme":"graphite","folder":true,"rateLimits":true}
+```
+
+Controls and configuration are saved in the current session's custom entries.
+An explicit `off` survives reload and resume; new sessions default on.
+Configuration accepts the shared fragment switches and themes, merges supplied
+options, and does not re-enable a disabled session.
+
+Tokens count persisted main-session assistant input plus output across the whole
+session history, including earlier branches and compaction history. Cache reads,
+cache writes and child/tool-result usage are excluded. Native assistant edits made
+while this extension is loaded are recorded as non-billable copies, so editing a
+response does not increase its token total. OmO does not persist edit provenance
+itself: copies made before installation or through another client without VArgus
+cannot be distinguished reliably and remain in the recorded total.
+Tools count persisted outer
+assistant tool calls; calls hidden inside `eval` are not added. Agents count distinct
+task IDs from accepted spawn results. Workflow counts, when `workflowRuns` is enabled,
+count distinct persisted DAG notices; a running workflow without a notice is not
+yet counted. Skill counts are unavailable and omitted: reading `SKILL.md` does not
+prove a skill was loaded.
+
+Context stays absent until OmO supplies a reading. Quotas come exclusively from
+OmO's subscription-limit service. Only window labels, percentages and reset
+countdowns are shown; provider/account names are hidden. Multiple accounts' windows
+remain separate, without implying which account is active. Unknown durations keep their host labels.
+Errored reports retain a stale `*` for at most 15 minutes; older readings and expired
+windows disappear. No credentials are read and no extra usage requests are made.
+
+After updating this checkout, run `/reload` in OmO. If the checkout moved or your
+loader still points to the former top-level extension entry, rerun
+`./bin/vargus omo install` first to refresh its target. To remove:
+
+```sh
+./bin/vargus omo remove
+```
+
+Then `/reload` or quit each affected OmO session before deleting the checkout.
+Removal touches only the owned loader. The separate experimental
+`vargus-preview.ts`, if installed, is left untouched.
+
+Support targets the native TUI. RPC, JSON and print modes are not modified.
+See [DESIGN.md](DESIGN.md#omo-native) for counting contracts and verification limits.
 
 ## Antigravity CLI
 

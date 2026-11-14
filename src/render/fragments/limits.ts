@@ -1,6 +1,7 @@
 import type { Fragment, Theme } from '../../core/types.ts'
 import { MAX_STALE_MS } from '../../core/limits.ts'
 import { formatDuration } from '../format.ts'
+import { cleanText } from '../text.ts'
 
 // The rate limits (DESIGN, "Fragments" row 3; "Rules carried over from
 // VantageHUD": Limits display, Usage cache and staleness):
@@ -48,12 +49,20 @@ export const limits: Fragment = ({ v, o, l, t, now }) => {
   const api = L.api && L.lastSuccessAt !== null && now - L.lastSuccessAt <= MAX_STALE_MS ? L.api : null
   const stale = L.error !== null
 
-  // The engine's windows are live: never stale-marked. A direct provider's
-  // 5h reading is a fallback only, so an engine reading never appears twice.
+  // Host windows are live unless the collector explicitly marks a retained
+  // failed report stale. A direct provider's 5h reading is a fallback only.
   for (const [kind, label] of [['five_hour', l.fiveHour], ['seven_day', l.sevenDay]] as const) {
-    const r = engine(kind)
-    if (r) parts.push(drawWindow(t, now, { label: r.label ?? label, percent: r.percentUsed, resetsAt: engineTime(r.resetsAt) }))
+    const readings = L.engine.filter(r => r.kind === kind)
+    if (readings.length) for (const r of readings) parts.push(drawWindow(t, now, {
+      label: cleanText(r.label ?? label), percent: r.percentUsed, resetsAt: engineTime(r.resetsAt), stale: r.stale,
+    }))
     else if (kind === 'five_hour' && api?.fiveHour) parts.push(drawWindow(t, now, { label, ...api.fiveHour, stale }))
+  }
+  for (const r of L.engine) {
+    if (r.kind === 'five_hour' || r.kind === 'seven_day' || r.kind === 'spend_limit' || !r.label) continue
+    parts.push(drawWindow(t, now, {
+      label: cleanText(r.label), percent: r.percentUsed, resetsAt: engineTime(r.resetsAt), stale: r.stale,
+    }))
   }
   if (api?.monthly) parts.push(drawWindow(t, now, { label: l.monthly, ...api.monthly, stale }))
 

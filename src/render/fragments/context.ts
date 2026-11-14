@@ -12,7 +12,7 @@ export const CRITICAL = 85
 // Before the first reading the percent is unknown and shows as 0 %, as
 // VantageHUD's did (its getContextPercent fell back to 0).
 export const context: Fragment = ({ v, l, t }) => {
-  if (v.core.host === 'codex' && v.session.contextPercent === undefined) return null
+  if ((v.core.host === 'codex' || v.core.host === 'omo') && v.session.contextPercent === undefined) return null
   const percent = Math.min(100, Math.max(0, Math.round(v.session.contextPercent ?? 0)))
   const suffix = percent >= CRITICAL ? ` ${l.critical}` : percent >= COMPACT ? ` ${l.compress}` : ''
   return t.paint('label', `${l.context}:`) + t.paint(t.gradient(percent, [WARNING, CRITICAL]), `${percent}%${suffix}`)

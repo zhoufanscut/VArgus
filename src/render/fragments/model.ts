@@ -71,6 +71,7 @@ export function effortColor(t: Theme, effort: string | number | undefined): Rgb 
 export const model: Fragment = ({ v, o, t }) => {
   const id = v.session.model === undefined ? '' : cleanText(v.session.model)
   const name = v.core.host === 'codex' ? shortCodexModelName(id)
+    : v.core.host === 'omo' ? (id.toLowerCase().includes('claude') ? shortModelName(id) : shortCodexModelName(id))
     : v.core.host === 'antigravity' ? shortAntigravityModelName(id)
     : shortModelName(id)
   if (!name) return null

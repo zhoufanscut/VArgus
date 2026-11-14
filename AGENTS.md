@@ -2,8 +2,8 @@
 
 Guidance for coding agents (Claude Code reads it through `CLAUDE.md`) working on VArgus.
 
-VArgus supports Claude Code's inline status line, Antigravity CLI's native `statusLine`, and an
-opt-in tmux output for Codex CLI.
+VArgus supports Claude Code's inline status line, OmO Native's below-editor widget,
+Antigravity CLI's native `statusLine`, and an opt-in tmux output for Codex CLI.
 The existing Claude inline status line has two parts: a mod (a plugin hooks module) that collects the
 numbers and writes the finished line to a file, and a `statusLine` command that prints it. It
 replaces VantageHUD (github.com/zhoufanscut/VantageHUD, last release 0.6.0) and shares no code
@@ -27,9 +27,13 @@ DESIGN.md "Unsettled" with a throwaway mod before building on it.
   The mod imports no Node code.
 - `src/hosts/codex` owns Codex saved-session collection and metadata reads; `src/hosts/antigravity`
   owns Antigravity CLI `statusLine` payload collection, incremental transcript reads and cached Git
-  reads. Host adapters do not import each other or a display adapter.
+  reads; `src/hosts/omo` owns native registration, session-history and subscription-limit collection.
+  Host collectors do not import each other or a display adapter. `src/node/git.ts` is the
+  host-neutral Node Git reader.
 - `src/outputs` owns display encoding and tmux lifecycle; it imports no host code.
-  `src/cli.ts` and `src/cli` wire a host to an output. Check these boundaries with `npm test`.
+  `src/cli.ts`, `src/cli` and `src/hosts/omo/register.ts` wire a host to an output.
+  Only OmO's registration entry may import its native output adapter from within that host.
+  Check these boundaries and native-entry typing with `npm test`.
 - For the Node CLI, hooks and tmux output run `npm test`; for the Claude mod run
   `npm run test:claude`. Codex protocol fixtures complement, rather than establish, live model
   behavior: keep the live verification limits in DESIGN.md current.

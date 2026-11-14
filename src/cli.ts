@@ -1,4 +1,5 @@
 const HELP = `Usage:
+  vargus omo install|remove [--dir EXTENSIONS_DIRECTORY]
   vargus statusline [--theme NAME] [--config FILE]
   vargus on|off|status|reload [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
   vargus hook session-start|prompt [--config FILE] [--pane %ID] [--socket PATH]
@@ -22,6 +23,7 @@ cleans up an abandoned row when no VArgus helper is still running.
 export async function main(argv: string[]): Promise<number> {
   if (argv[0] === '--help' || !argv.length) { console.log(HELP); return 0 }
   if (argv[0] === 'statusline') return (await import('./cli/antigravity.ts')).statusline(argv.slice(1))
+  if (argv[0] === 'omo') return (await import('./cli/omo.ts')).omo(argv.slice(1))
   if (['on', 'off', 'status', 'reload'].includes(argv[0]!)) return (await import('./cli/codex.ts')).standalone(argv)
   if (argv[0] === '__hook-on') return (await import('./cli/codex.ts')).standalone(['on', ...argv.slice(1)], true)
   if (argv[0] === 'hook') return (await import('./cli/hooks.ts')).hook(argv.slice(1))

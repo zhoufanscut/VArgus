@@ -1,6 +1,7 @@
 # VArgus — design
 
-VArgus supports Claude Code through its mod, Antigravity CLI (`agy`) through its native
+VArgus supports Claude Code through its mod, OmO Native through an extension widget,
+Antigravity CLI (`agy`) through its native
 `statusLine` command, and Codex CLI through a standalone saved-log reader.
 Codex uses a tmux row; Antigravity CLI runs `vargus statusline` inline with no tmux.
 The existing Claude inline status line has two parts. A mod (a plugin hooks module that stays
@@ -39,8 +40,10 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
 
 - `core`, `render`, `theme`, `i18n` and `options` import no host API or output adapter.
   Shared readings use VArgus types, including `RateLimit`, rather than Claude's engine types.
-- Claude, Codex and Antigravity collectors do not import each other or an output adapter.
-- Output adapters import no host code. `src/cli.ts` and `src/cli` wire collection to display.
+- Claude, OmO, Codex and Antigravity collectors do not import each other or an output adapter.
+- Output adapters import no host code. `src/cli.ts`, `src/cli` and
+  `src/hosts/omo/register.ts` wire collection to display. The OmO registration entry
+  alone may import `src/outputs/omo.ts` from within its host directory.
 - The Claude mod imports no Node code. The manifest points directly to its register module:
   Claude Code 2.1.319 validation rejects a re-exported `register` entry point.
 - The Claude plugin, Antigravity CLI `statusLine` command and standalone Codex helper need no npm
@@ -63,11 +66,12 @@ In the isolated 0.167.0 check, reopening `/hooks` after the file edit retained t
 removed callbacks, while closing and reopening the same thread's TUI showed only
 the preserved unrelated hook. The `config.toml` bytes were unchanged by that reopen.
 
-Token totals use uncached input plus output across all three hosts, with different
+Token totals use uncached input plus output across hosts, with different
 scope: Claude includes main and subagent requests in its loaded session; Antigravity CLI
 sums the active conversation's `transcript.jsonl` steps; each
-Codex reader owns the displayed log's readings. Claude reads git or svn; the
-Antigravity and Codex Node collectors read git. README.md keeps those scopes explicit in the shared
+Codex reader owns the displayed log's readings. OmO folds persisted main-session
+assistant readings across the session history. Claude reads git or svn; the
+OmO, Antigravity and Codex Node collectors read git. README.md keeps those scopes explicit in the shared
 fragment descriptions instead of applying the Claude-only rules to all hosts.
 
 ### Opt-in tmux row
@@ -897,6 +901,124 @@ child whose inherited prefix includes those loads. The child performs a beta ski
 read: its tool and skill totals reflect that local read, while the parent retains
 its own skill total and records the spawn. These are engine-record checks with
 deliberately supplied local tool calls, not proof of a model choosing skills.
+
+### OmO Native
+
+Layout: one shared-renderer row below the editor, with two leading spaces deducted
+from the renderer's width budget; OmO owns transcript scrolling,
+the editor, task/todo widgets, questions and the working indicator. VArgus replaces
+the whole native footer with an empty component. The maintainer explicitly chose
+on 2026-11-14 to hide all native statuses for now, including `session-lifecycle`;
+later notice presentation inside VArgus is separate work.
+
+The checked runtime is OmO 5.1.61. Its bundled `docs/tui.md` describes
+`setWidget(..., { placement: "belowEditor" })` and `setFooter(undefined)` restoration.
+The real native preview and the production extension both rendered through these
+surfaces. RPC does not implement custom footer factories, so `ctx.mode === "tui"`
+is the admission gate. `src/hosts/omo/register.ts` composes the host collector and
+`src/outputs/omo.ts`; the output imports no host code. Structural SDK subsets keep
+runtime dependencies out of user installations. `tsconfig.node.json` includes the
+entry through `src/hosts/omo`. A separate assignment to the installed SDK's `ExtensionFactory`
+checks compatibility without adding that SDK as a runtime dependency.
+
+`src/hosts/omo/collect.ts` uses stable `reduceHistory` reducers. Bundled
+`docs/extensions.md:1406` says the session "reads the history once and folds only
+the entries appended since." This establishes whole-session rather than active-branch
+scope, including history before compaction. Main assistant `usage.input + usage.output`
+is the token total: `docs/models.md:239` defines total input as
+`input + cacheRead + cacheWrite`; `docs/session-format.md:124` calls tool-result usage
+"Nested LLM work performed by the tool." Cache fields are therefore not subtracted
+again, and tool-result/child usage is excluded. Session age comes from the session
+header timestamp, never the extension load time.
+
+Assistant editing needs a separate receipt. Bundled `docs/rpc.md:5043-5045` says
+editing appends a new assistant entry and preserves usage without a model turn.
+The installed `core/agent-session.js` implementation emits `session_before_tree`
+with the target, then `session_tree` with the new leaf; ordinary assistant navigation
+selects the existing target, whereas an edit appends a new assistant leaf.
+The extension records that new entry ID as `vargus-assistant-edit` before refreshing.
+The reducer excludes its usage once, including on fresh reload. It records this
+metadata even when the row is off. Equal usage amounts alone never deduplicate
+requests. Older edits made before installation, or through clients without this
+observer, have no durable provenance and cannot safely be distinguished from real
+responses; their copied usage remains in the historical total.
+
+Outer assistant tool calls count once per persisted entry/runtime item key.
+Internal eval executions are not added to that count. Accepted `task` results
+contribute distinct `task_id` values, including batch `items`, rather than requested
+batch sizes. Bundled `plugin/extensions/omo-task.js` builds `mode:"spawn"` result
+details and `omo-senpi.dag-run` notices with `runId`. Distinct persisted DAG notices
+count workflows; a running workflow before its first notice is not observed.
+No established canonical skill-load receipt exists in this contract, so skills are
+omitted. Available skill lists and arbitrary `SKILL.md` reads are not substitutes.
+Reducer state belongs to the session manager; entry IDs prevent replay duplication.
+
+Model, effective effort and context come from `ctx.model`, `ctx.thinkingLevel`
+and `ctx.getContextUsage()`. Missing/null context stays unknown and is omitted.
+Known GPT family names use the shared Codex naming rule, Claude families use the
+shared Claude rule, and unfamiliar identifiers remain intact.
+
+Quotas use only `getSubscriptionLimits()` and `onSubscriptionLimits()`. Bundled
+`docs/extensions.md:2559-2569` establishes these APIs; `docs/rpc.md:4214-4238`
+describes reported account windows. The getter does not establish the active account:
+the maintainer requested window-only labels on 2026-11-14, hiding provider/account
+names. Windows remain separate without claiming any account is active. Known
+300-minute and 10080-minute windows map to `five_hour` and `seven_day`; other
+durations retain their labels. All labeled engine windows render, including repeated
+kinds from different accounts. Controls in external labels are sanitized.
+Error reports show `*`, readings older than `MAX_STALE_MS` disappear, and the
+shared renderer suppresses expired resets. Missing reports never become zero usage.
+There is no credential reader or extra quota poller.
+
+The entry refreshes context and the incremental history snapshot on native events
+and each second for age/countdowns; rendering itself only consumes the snapshot.
+Git is collected only when a Git fragment is enabled. The host-neutral
+`src/node/git.ts` retains the Antigravity reader's parsing, worktree and detached-HEAD
+rules; `OmoVcs` applies 5-second polling and a 10-times-duration hold, including after
+tool completion. Directory changes and disposal invalidate pending readings.
+The native output clips the final fragment at grapheme boundaries, reconstructing
+only the renderer's SGR vocabulary, so even a one-column viewport cannot split a
+wide glyph or leak a partial ANSI escape.
+
+`/vargus on|off|status|config JSON` persists enabled/options in `vargus-settings`
+custom entries. Bundled `docs/extensions.md:2319-2341` establishes that these entries
+survive reload without participating in model context. Off stops the timer,
+unsubscribes quota updates, removes only the `vargus` widget and restores the built-in
+footer. Shutdown does the same; separate instances own separate state. There is no
+API for retrieving a previous custom footer, so another footer extension can compete.
+
+`vargus omo install|remove` queries `omo config agent-dir --json` (bundled
+`docs/agent-directory-selection.md`, version 1 contract), or accepts an explicit
+extension directory. The generated loader imports the checkout entry by file URL.
+No machine-specific path is shipped in source. Only the owned loader is replaced
+or removed; other extensions, settings and the UUID-scoped preview remain untouched.
+Removal requires reload/quit before deleting the source checkout.
+
+Verification on 2026-11-14: the entry loaded in an isolated OmO 5.1.61 Linux TUI.
+Real PTY output was replayed through xterm.js and inspected as Chromium screenshots
+at 120 and 60 columns. Checks covered startup, off/restoration, off across reload,
+on, model selection, effort changes, token preservation across reload and resume, a new session,
+another extension's widget and a native confirmation dialog. A local
+OpenAI-compatible streaming provider supplied 100 prompt tokens including 40 cached,
+plus 20 output tokens; the native adapter exposed 60 input plus 20 output and VArgus
+displayed `token:80`. This checks normalization through the real adapter, not provider
+billing accuracy. The native working indicator remained visible during the turn.
+Calling the real command-context `editAssistantMessage` created a second assistant
+entry with the same usage: the session file then held 160 raw tokens and one
+`vargus-assistant-edit` receipt. VArgus stayed at 80 both immediately and after
+`/reload`; the regression also keeps separate real responses with equal usage distinct.
+The installed supplemental SDK (`@code-yeongyu/senpi` 2026.10.25-2) accepted the entry
+as `ExtensionFactory` under strict TypeScript with module `preserve`, resolution
+`bundler`, JSON-module resolution and no library-check suppression. It is not
+claimed to be the binary's exact SDK.
+
+Focused collector, output, lifecycle and real-Git tests cover replay,
+compaction-shaped history, account changes, staleness, narrow/wide text, session
+isolation and restoration. Live compaction was attempted but the short QA session
+had nothing old enough to compact; compaction replay remains fixture-tested.
+Live subscription refresh/account failover, child/workflow completion, monitor wakes,
+two simultaneous native TUIs, macOS and Windows require their own runs. These limits
+are not established by the local provider or component fixtures.
 
 ### Antigravity CLI native statusLine
 

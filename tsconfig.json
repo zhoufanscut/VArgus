@@ -28,6 +28,8 @@
     "src/cli",
     "src/hosts/antigravity",
     "src/hosts/codex",
+    "src/hosts/omo",
+    "src/node",
     "src/outputs/tmux",
     "tests/node"
   ]
