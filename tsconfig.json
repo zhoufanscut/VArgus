@@ -26,6 +26,7 @@
   "exclude": [
     "src/cli.ts",
     "src/cli",
+    "src/hosts/antigravity",
     "src/hosts/codex",
     "src/outputs/tmux",
     "tests/node"

@@ -1,10 +1,11 @@
 # VArgus
 
-A status line for **Claude Code and Codex CLI**: context, rate limits with reset
-countdowns, token and call counts, and repository status.
+A status line for **Claude Code, Antigravity CLI (`agy`) and Codex CLI**: context,
+rate limits with reset countdowns, token and call counts, and repository status.
 
-Claude Code shows it under the prompt through a plugin. Codex CLI
-uses a tmux row inside ordinary, unmodified Codex. Both hosts share the renderer,
+Claude Code shows it under the prompt through a plugin. Antigravity CLI runs
+`vargus statusline` natively under the prompt with no tmux. Codex CLI
+uses a tmux row inside ordinary, unmodified Codex. All three hosts share the renderer,
 fragment switches and colour themes; each collects its own readings.
 
 VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
@@ -15,6 +16,9 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
 
 - [Choose your setup](#choose-your-setup), [Requirements](#requirements)
 - [What it shows](#what-it-shows), [How it works](#how-it-works)
+- [Antigravity CLI](#antigravity-cli): [agent setup](#set-up-antigravity-cli-with-an-agent),
+  [manual setup](#set-up-antigravity-cli), [Windows setup](#windows-setup-for-antigravity-cli),
+  [configure](#configure-antigravity-cli), [update](#update-antigravity-cli), [uninstall](#uninstall-antigravity-cli)
 - [Codex CLI](#codex-cli): [agent setup](#set-up-codex-with-an-agent), [manual setup](#set-up-codex),
   [automatic startup](#automatic-startup-in-codex),
   [configure](#configure-codex), [update](#update-codex), [uninstall](#uninstall-codex)
@@ -27,10 +31,11 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
 | Host | Display | Start here |
 |---|---|---|
 | Claude Code | Inline row under the prompt | [Install the Claude plugin](#set-up-claude) |
+| Antigravity CLI (`agy`) | Native inline `statusLine` under the prompt | [Ask an agent to set it up](#set-up-antigravity-cli-with-an-agent), or [set it up by hand](#set-up-antigravity-cli) |
 | Codex CLI | tmux row | [Ask an agent to set it up](#set-up-codex-with-an-agent), or [set it up by hand](#set-up-codex) |
 
-The Claude plugin installation is only for Claude Code. Codex uses this clone's
-CLI entry and does not need the Claude plugin. Automatic startup in Codex requires
+The Claude plugin installation is only for Claude Code. Antigravity CLI and Codex use this clone's
+CLI entry and do not need the Claude plugin. Automatic startup in Codex requires
 [hook setup and trust](#automatic-startup-in-codex); manual controls work without it.
 
 ## Requirements
@@ -38,13 +43,16 @@ CLI entry and does not need the Claude plugin. Automatic startup in Codex requir
 | Display | Requirements |
 |---|---|
 | Claude inline | Claude Code 2.1.299 or later in a terminal; POSIX `sh` on Linux/macOS, or Git for Windows on Windows |
+| Antigravity CLI inline | Antigravity CLI (`agy`) in a terminal and Node.js 24.12 or later (no tmux, npm install or build) |
 | Codex through tmux | Codex CLI, Bash, Node.js 24.12 or later, tmux on Linux or macOS, and saved session logs |
 | Codex through native Windows psmux | Codex CLI, PowerShell, Node.js 24.12 or later, psmux, and saved session logs |
 
-The Claude inline plugin needs no Node install. The tmux commands run TypeScript
+The Claude inline plugin needs no Node install. The Antigravity CLI and tmux commands run TypeScript
 source directly and need no npm install or build. Git supplies repository readings;
-Claude's collector also supports svn working copies. Codex currently reads git only.
+Claude's collector also supports svn working copies. Antigravity CLI and Codex currently read git only.
 
+Live Antigravity CLI checks cover Linux with `agy` 1.5.8, Node.js 24.14.1 and git 2.47.3;
+macOS and native Windows `agy` sessions need their own live verification.
 Live tmux checks cover Linux with Node.js 24.14.1, tmux 3.5a and Codex 0.167.0.
 Other host versions and macOS need their own live verification.
 Claude inline Windows checks and limitations are described [below](#claude-code).
@@ -59,6 +67,12 @@ Examples rendered with illustrative values. Claude Code:
 ~/proj/VArgus | opus:high | 5h:4%(4h37m) 7d:39%(5d6h) | ctx:20% | token:69.5k | session:24m | 🔧73 🤖2 ⚡1 | repo:VArgus | branch:main | ?4
 ```
 
+Antigravity CLI:
+
+```
+~/proj/VArgus | carbon:high | 5h:4%(4h37m) 7d:39%(5d6h) | ctx:20% | token:69.5k | session:24m | 🔧73 🤖2 ⚡1 | repo:VArgus | branch:main | ?4
+```
+
 Codex CLI:
 
 ```
@@ -68,13 +82,13 @@ Codex CLI:
 | Fragment | What it is |
 |---|---|
 | `~/proj/VArgus` | the working folder |
-| `opus:high` / `sol:xhigh` | the model and effort level |
-| `5h:` `7d:` `1m:` | reported rate-limit windows, used percent and time until reset; `1m` is Kimi Code's membership monthly total; Codex uses the recorded window duration |
+| `opus:high` / `carbon:high` / `sol:xhigh` | the model and effort level |
+| `5h:` `7d:` `1m:` | reported rate-limit windows, used percent and time until reset; `1m` is Kimi Code's membership monthly total; Antigravity CLI selects the active model group's `5h` and `weekly` quota buckets; Codex uses the recorded window duration |
 | `ctx:` | how full the context window is |
 | `token:` | uncached input plus output tokens; the collection scope differs by host, as described below |
-| `session:` | age from the host-reported start time; Codex uses the displayed saved log's creation time |
+| `session:` | age from the host-reported start time; Antigravity CLI and Codex use the active conversation log's start time |
 | `🔧` `🤖` `⚡` | tool, agent and skill counts, with host-specific rules below |
-| `repo:` `branch:` | repository and branch; Claude supports git and svn, Codex supports git |
+| `repo:` `branch:` | repository and branch; Claude supports git and svn, Antigravity CLI and Codex support git |
 | `?4` | working-tree status: staged `+`, modified `!`, untracked `?`, conflicts `✗`, ahead `⇡`, behind `⇣` |
 
 With Claude Code on Kimi Code, an exact match for
@@ -97,16 +111,32 @@ summed into the parent. Tools count completed visible items, agents count record
 starts, and skills count observed loads. See [Readings and view changes](#readings-and-view-changes)
 for the saved-log boundaries and missing readings.
 
-Each fragment has a switch: [Claude's `/config`](#configure-claude) or
+Antigravity CLI reads live model, context and quota fields from `agy`'s `statusLine`
+JSON input and incrementally replays the active conversation's `transcript.jsonl`
+for session age, uncached input plus output tokens, and tool, subagent (`invoke_subagent`,
+`swarm` `add`), workflow (`run_workflow`) and skill (`SKILL.md` reads) counts. Subagent
+conversations have separate transcripts and are not summed into the parent's `token:`.
+
+Each fragment has a switch: [Claude's `/config`](#configure-claude),
+[Antigravity CLI's `--config`](#configure-antigravity-cli), or
 [Codex's CLI options](#configure-codex). Claude can also show per-model weekly
-limits and a gateway spend limit; Codex uses its recorded quota windows. The
-Claude detail pane and workflow count are not available in Codex.
+limits and a gateway spend limit; Antigravity CLI shows the active model group's
+`5h:` and `7d:` windows (plus the other quota group's weekly bucket from 80% when
+`otherModelWeekly` is on); Codex uses its recorded quota windows. The
+Claude detail pane belongs to Claude; workflow counts (`🔀`) are available in Claude
+and Antigravity CLI when `workflowRuns` is on.
 
 ## How it works
 
 Claude Code's plugin keeps a mod loaded in the session. The mod observes usage,
 tools, agents and repository changes, renders the line, and writes it to a file.
 The inline `statusLine` command prints that file.
+
+Antigravity CLI invokes `vargus statusline` natively on state, resize and quota
+updates, passing session JSON on `stdin` and drawing the 24-bit ANSI line beneath
+the prompt border. Small cache files under the OS temporary directory keep
+`transcript.jsonl` reads incremental by byte offset and enforce VArgus's 5-second
+and `10×` slow-walk Git poll hold-off across 300 ms streaming bursts.
 
 Codex uses a background helper that reads saved session logs, identifies the
 conversation currently displayed, and sends the rendered line to tmux. It hides
@@ -115,9 +145,165 @@ Controls such as `!vargus on` run locally through Codex's shell mode.
 
 On Linux/macOS tmux and Windows psmux, windows without VArgus keep their original status bar height
 (one line by default); switching to a window running VArgus adds its row automatically.
-The tmux row follows the active pane. Both hosts use shared rendering and themes,
+The tmux row follows the active pane. All three hosts use shared rendering and themes,
 while their collectors remain separate. [DESIGN.md](DESIGN.md#hosts-and-outputs)
 contains the architecture, restoration rules and live verification limits.
+
+## Antigravity CLI
+
+### Set up Antigravity CLI with an agent
+
+From a VArgus checkout, ask your agent in `agy`:
+
+> Read this repository's README.md and set up VArgus for Antigravity CLI.
+
+Search phrases for this workflow: `set up VArgus for Antigravity`, `VArgus agy setup`,
+`VArgus Antigravity statusLine`.
+
+When the user requests this setup, the agent should:
+
+1. Check the [requirements](#requirements) (`agy` and Node.js 24.12 or later). Reuse
+   the current VArgus checkout or an existing installation.
+2. Create or verify `~/.local/bin/vargus` pointing to the checkout's absolute `bin/vargus`
+   path (or on Windows a forwarding `vargus.cmd` pointing to `bin\vargus.cmd`; see
+   [Windows setup for Antigravity CLI](#windows-setup-for-antigravity-cli)). Inside `agy`'s
+   default terminal sandbox on Linux/macOS, `~/.local/bin` mounts only `agy` read-only, so
+   inspecting (`readlink -f`) or creating (`ln -s`) `~/.local/bin/vargus` requires user
+   approval outside the sandbox. Inspect any existing `vargus` entry before changing it;
+   preserve an unrelated command.
+3. Verify that piping `{}` to `"$HOME/.local/bin/vargus" statusline` (or the checkout's
+   `bin/vargus` inside `agy`'s sandbox, or `vargus statusline` on Windows) exits 0. No npm
+   install or build step is needed.
+4. Configure `statusLine`:
+   - **When running inside `agy`**: `agy` protects `~/.gemini/antigravity-cli/settings.json`
+     behind a hardcoded system protection boundary, so an `agy` agent cannot read or edit
+     `settings.json` directly. Report the verified checkout and PATH entry, and hand back the
+     slash command for the user to run in `agy`:
+     - Linux / macOS: `/statusline "$HOME/.local/bin/vargus" statusline`
+     - Windows: `/statusline vargus statusline`
+     Running `/statusline <command>` in `agy` saves `statusLine` to `settings.json` and
+     activates VArgus immediately in the open TUI with no restart.
+   - **When running from another coding agent outside `agy`**: read
+     `~/.gemini/antigravity-cli/settings.json` (or
+     `%USERPROFILE%\.gemini\antigravity-cli\settings.json` on Windows) before editing; if an
+     unrelated `statusLine` command is already configured, show it and ask before replacing
+     it; then merge the `statusLine` object from [manual setup](#set-up-antigravity-cli) (or
+     [Windows setup](#windows-setup-for-antigravity-cli) on Windows), preserving every other
+     setting.
+
+### Set up Antigravity CLI
+
+Clone VArgus and create the `vargus` symlink if you haven't already:
+
+```sh
+mkdir -p "$HOME/.local/share" "$HOME/.local/bin"
+git clone https://github.com/zhoufanscut/VArgus "$HOME/.local/share/VArgus"
+ln -s "$HOME/.local/share/VArgus/bin/vargus" "$HOME/.local/bin/vargus"
+```
+
+Then activate VArgus right inside `agy` (this saves `statusLine` to
+`~/.gemini/antigravity-cli/settings.json` and enables it immediately):
+
+```text
+/statusline "$HOME/.local/bin/vargus" statusline
+```
+
+Or merge the equivalent `statusLine` entry into `~/.gemini/antigravity-cli/settings.json` by
+hand, preserving your other settings:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "\"$HOME/.local/bin/vargus\" statusline",
+    "enabled": true,
+    "padding": 0,
+    "stack_with_default": false
+  }
+}
+```
+
+Inside `agy`, `/statusline` (no arguments) or `/statusline off` and `/statusline on` toggle
+the custom row without removing the command, and `/statusline delete` (or `/statusline reset`)
+reverts to the built-in row. Nonempty rows include a two-space left indent to align with the
+prompt text; keep `"padding": 0` unless you want blank vertical lines above the row, and set
+`"stack_with_default": true` in `settings.json` if you want VArgus placed below Antigravity's
+built-in status line instead of replacing it.
+
+### Windows setup for Antigravity CLI
+
+Put a forwarding `vargus.cmd` in a directory on your **user** PATH (such as
+`%USERPROFILE%\.local\bin`, as shown under [Codex Windows setup](#native-windows-setup)),
+reopen the terminal so `vargus --help` resolves, and run inside `agy`:
+
+```text
+/statusline vargus statusline
+```
+
+Or merge this entry into `%USERPROFILE%\.gemini\antigravity-cli\settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "vargus statusline",
+    "enabled": true,
+    "padding": 0,
+    "stack_with_default": false
+  }
+}
+```
+
+Invoking `vargus` from PATH avoids shell-specific `%USERPROFILE%` expansion and
+`cmd.exe /c` outer-quote stripping when `--config "C:\\path\\to\\vargus.json"` is appended.
+Windows `bin\vargus.cmd` execution is covered by CLI tests; live Windows `agy` rendering
+has not yet been verified on a Windows machine.
+
+### Configure Antigravity CLI
+
+Defaults work with no extra flags or files. Pass `--theme NAME` or
+`--config /absolute/path/to/vargus.json` in `statusLine.command`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "\"$HOME/.local/bin/vargus\" statusline --theme ember --config \"$HOME/.config/vargus.json\"",
+    "enabled": true
+  }
+}
+```
+
+The JSON file uses the same keys and defaults as [`src/options.ts`](src/options.ts):
+
+- **Model names**: Gemini and Claude display labels shorten to their family with effort
+  (`Gemini 4 Carbon (High)` → `carbon:high`, `Gemini 4 Hydrogen (XHigh)` → `hydrogen:xhigh`,
+  `Gemini 3.8 Flash (Low)` → `flash:low`, `Claude Opus 5.5 (High)` → `opus:high`);
+  Orchestrator models keep their variant (`orchestrator(carbon)`, `orchestrator(argon)`);
+  other provider names stay whole (`GPT-OSS 120B (Medium)` → `gpt-oss-120b:medium`).
+- **Quota groups**: Gemini and Orchestrator models show the `"Gemini Models"` `5h:` and `7d:`
+  buckets; Claude and GPT models show the `"Claude and GPT models"` `5h:` and `7d:` buckets.
+  Setting `"otherModelWeekly": true` also shows the non-active group's weekly bucket (`3p:`
+  or `gm:`) once it reaches 80% used.
+- **Call counts**: `🔧` counts `tool_calls`, `🤖` counts `invoke_subagent` and `swarm` `add`
+  spawns, `⚡` counts Antigravity `SKILL.md` reads once per skill path per user turn, and
+  `"workflowRuns": true` adds `🔀` for `run_workflow` calls.
+- **Git & colours**: `"detachedHead": true` names detached tags/commits and rebase/merge
+  operations; setting `repo`, `branch` and `status` all to `false` disables Git checks;
+  setting `NO_COLOR` in the shell environment disables ANSI colours.
+
+### Update Antigravity CLI
+
+Update your clone with `git -C "$HOME/.local/share/VArgus" pull` (or fetch tags and check
+out a release tag). Because `agy` runs `vargus statusline` on each refresh, updated code
+takes effect immediately on the next status-line update with no restart.
+
+### Uninstall Antigravity CLI
+
+1. Run `/statusline delete` inside `agy`, or remove the `"statusLine"` object from
+   `~/.gemini/antigravity-cli/settings.json` (preserving your other settings).
+2. Remove `~/.local/bin/vargus` (or `%USERPROFILE%\.local\bin\vargus.cmd`) and the VArgus
+   clone only if neither Codex nor Claude Code still uses them.
 
 ## Codex CLI
 

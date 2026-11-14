@@ -11,3 +11,7 @@ test('removed Claude launcher directs users to the inline plugin and ignores its
   await assert.rejects(main(['claude', '--tmux']), /Start Claude normally and use the VArgus inline plugin/)
   assert.deepEqual(resolveOptions({ tmuxOutput: true }), DEFAULTS)
 })
+
+test('antigravity verb directs users to native statusLine configuration', async () => {
+  await assert.rejects(main(['antigravity']), /Start Antigravity CLI normally and set statusLine\.command to "vargus statusline"/)
+})

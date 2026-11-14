@@ -12,6 +12,7 @@ test('shared modules have no host, display, Node or Claude API imports; host col
   const checked = await files('src')
   assert.ok(checked.includes('src/hosts/claude/register.ts'))
   assert.ok(checked.includes('src/hosts/codex/collect.ts'))
+  assert.ok(checked.includes('src/hosts/antigravity/collect.ts'))
   assert.ok(checked.includes('src/cli.ts'))
   for (const file of checked) {
     const text = await readFile(file, 'utf8')
@@ -20,8 +21,9 @@ test('shared modules have no host, display, Node or Claude API imports; host col
     if (/^src\/(core|render|theme|i18n)\//.test(file) || file === 'src/options.ts') {
       for (const spec of imports) assert.ok(!/hosts|outputs|claude-code|^node:/.test(spec), `${file} imports ${spec}`)
     }
-    if (file.startsWith('src/hosts/codex/')) for (const spec of imports) assert.ok(!/claude|claude-code|outputs/.test(spec), `${file} imports ${spec}`)
-    if (file.startsWith('src/hosts/claude/')) for (const spec of imports) assert.ok(!/codex|outputs/.test(spec), `${file} imports ${spec}`)
+    if (file.startsWith('src/hosts/codex/')) for (const spec of imports) assert.ok(!/claude|antigravity|claude-code|outputs/.test(spec), `${file} imports ${spec}`)
+    if (file.startsWith('src/hosts/claude/')) for (const spec of imports) assert.ok(!/codex|antigravity|outputs/.test(spec), `${file} imports ${spec}`)
+    if (file.startsWith('src/hosts/antigravity/')) for (const spec of imports) assert.ok(!/claude|codex|claude-code|outputs/.test(spec), `${file} imports ${spec}`)
     if (file.startsWith('src/outputs/')) for (const spec of imports) assert.ok(!/hosts|claude-code/.test(spec), `${file} imports ${spec}`)
   }
 })

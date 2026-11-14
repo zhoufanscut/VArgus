@@ -9,7 +9,7 @@ import { DEFAULTS, type Options } from '../src/options'
 import { calls } from '../src/render/fragments/calls'
 import { context } from '../src/render/fragments/context'
 import { folder } from '../src/render/fragments/folder'
-import { effortColor, model, shortModelName } from '../src/render/fragments/model'
+import { effortColor, model, shortAntigravityModelName, shortModelName } from '../src/render/fragments/model'
 import { session } from '../src/render/fragments/session'
 import { formatDuration } from '../src/render/format'
 import { formatTokenCount, tokens } from '../src/render/fragments/tokens'
@@ -48,6 +48,23 @@ describe('model', () => {
     expect(shortModelName('gpt-4o')).toBe('gpt')
     expect(shortModelName('deepseek-chat')).toBe('deepseek')
     expect(shortModelName('  ')).toBe(null)
+  })
+
+  test('antigravity short name: gemini and claude families, orchestrator variant, other ids whole', async () => {
+    expect(shortAntigravityModelName('Gemini 4 Carbon (High)')).toBe('carbon')
+    expect(shortAntigravityModelName('Gemini 4 Hydrogen (XHigh)')).toBe('hydrogen')
+    expect(shortAntigravityModelName('Gemini 3.8 Flash (Low)')).toBe('flash')
+    expect(shortAntigravityModelName('Gemini 2.5 Flash Lite (Low)')).toBe('flash-lite')
+    expect(shortAntigravityModelName('Orchestrator (Carbon)')).toBe('orchestrator(carbon)')
+    expect(shortAntigravityModelName('Orchestrator (Argon)')).toBe('orchestrator(argon)')
+    expect(shortAntigravityModelName('Claude Opus 5.5 (High)')).toBe('opus')
+    expect(shortAntigravityModelName('GPT-OSS 120B (Medium)')).toBe('gpt-oss-120b')
+    expect(shortAntigravityModelName('qwen-vl-max')).toBe('qwen-vl-max')
+    expect(shortAntigravityModelName('alibaba/qwen-3-max')).toBe('alibaba/qwen-3-max')
+    expect(shortAntigravityModelName('  ')).toBe(null)
+    const f = input({ model: 'Gemini 4 Carbon (High)', effort: 'high' })
+    f.v.core.host = 'antigravity'
+    expect(model(f)).toBe('carbon:high')
   })
 
   test('effort colours inverted: max calm ... low alert; unknown or a number calm', async () => {

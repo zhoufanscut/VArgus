@@ -1,7 +1,9 @@
 # VArgus — design
 
-VArgus supports Claude Code through its mod and Codex CLI through a standalone saved-log reader.
-Codex uses a tmux row. The existing Claude inline status line has two parts. A mod (a plugin hooks module that stays
+VArgus supports Claude Code through its mod, Antigravity CLI (`agy`) through its native
+`statusLine` command, and Codex CLI through a standalone saved-log reader.
+Codex uses a tmux row; Antigravity CLI runs `vargus statusline` inline with no tmux.
+The existing Claude inline status line has two parts. A mod (a plugin hooks module that stays
 loaded for the whole session) hears the engine's events, keeps the numbers in memory, renders the
 line and writes it to a file. The `statusLine` command is a shell one-liner that prints that file.
 The line stays where VantageHUD's was, under the prompt. VArgus replaces VantageHUD and shares no
@@ -37,11 +39,11 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
 
 - `core`, `render`, `theme`, `i18n` and `options` import no host API or output adapter.
   Shared readings use VArgus types, including `RateLimit`, rather than Claude's engine types.
-- Claude and Codex collectors do not import each other or an output adapter.
+- Claude, Codex and Antigravity collectors do not import each other or an output adapter.
 - Output adapters import no host code. `src/cli.ts` and `src/cli` wire collection to display.
 - The Claude mod imports no Node code. The manifest points directly to its register module:
   Claude Code 2.1.319 validation rejects a re-exported `register` entry point.
-- The Claude plugin and standalone Codex helper need no npm
+- The Claude plugin, Antigravity CLI `statusLine` command and standalone Codex helper need no npm
   install or `node_modules` folder. npm supplies development/test tools only; `ws` is used
   by the hook regression rig to inspect Codex's daemon. `.test.mts` keeps Node tests outside
   the Claude engine's `.test.ts` runner.
@@ -49,10 +51,11 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
 ### User-facing setup paths
 
 README.md documents each host separately: Claude's inline plugin install and
-`vargus-setup` skill, and Codex's clone/PATH entry and optional startup hooks.
-Plugin installation and `/config` belong to Claude. Codex
-reads CLI options resolved against `src/options.ts`; installing the Claude plugin
-does not install Codex hooks. The tmux commands run from the clone, so removal
+`vargus-setup` skill, Antigravity CLI's clone/PATH entry and `statusLine` setting in
+`~/.gemini/antigravity-cli/settings.json`, and Codex's clone/PATH entry and optional startup hooks.
+Plugin installation and `/config` belong to Claude. Antigravity CLI and Codex
+read CLI options resolved against `src/options.ts`; installing the Claude plugin
+neither sets Antigravity's `statusLine` nor installs Codex hooks. The tmux commands run from the clone, so removal
 finishes footer restoration or exits the TUI before removing shared source.
 For Codex startup hooks, removal edits only VArgus's callback entries, including
 untrusted or modified entries without a trust step, then closes affected TUIs.
@@ -60,11 +63,12 @@ In the isolated 0.167.0 check, reopening `/hooks` after the file edit retained t
 removed callbacks, while closing and reopening the same thread's TUI showed only
 the preserved unrelated hook. The `config.toml` bytes were unchanged by that reopen.
 
-Token totals use uncached input plus output in both collectors, with different
-scope: Claude includes main and subagent requests in its loaded session; each
+Token totals use uncached input plus output across all three hosts, with different
+scope: Claude includes main and subagent requests in its loaded session; Antigravity CLI
+sums the active conversation's `transcript.jsonl` steps; each
 Codex reader owns the displayed log's readings. Claude reads git or svn; the
-Codex Node reader reads git. README.md keeps those scopes explicit in the shared
-fragment descriptions instead of applying the Claude-only rules to both hosts.
+Antigravity and Codex Node collectors read git. README.md keeps those scopes explicit in the shared
+fragment descriptions instead of applying the Claude-only rules to all hosts.
 
 ### Opt-in tmux row
 
@@ -894,9 +898,123 @@ read: its tool and skill totals reflect that local read, while the parent retain
 its own skill total and records the spawn. These are engine-record checks with
 deliberately supplied local tool calls, not proof of a model choosing skills.
 
+### Antigravity CLI native statusLine
+
+Antigravity CLI (`agy`, checked on 1.5.8, 2026-11-14, Linux, Node.js 24.14.1, git 2.47.3)
+provides a native inline `statusLine` in `~/.gemini/antigravity-cli/settings.json`
+(`type: "command"`, `command`, `enabled`, `padding`, `stack_with_default`; `agy changelog`
+1.0.2, 1.0.6, 1.0.8) and `/statusline` TUI controls. `agy` has no in-process JS mod
+runtime: `agy plugin validate . --json` reports `"no plugin.json found at the plugin root
+or in .antigravity-plugin or .gemini-plugin. This looks like a Claude Code plugin: plugin
+install converts it, but it doesn't load as is"`, and `agy` `hooks.json` (`agy-customizations`
+`docs/hooks.md`) supports only synchronous command hooks on `SessionStart`,
+`PreInvocation`, `PostInvocation`, `PreToolUse`, `PostToolUse` and `Stop`. Hooks block the
+agent loop and do not fire on `/model`, `/effort`, terminal resize or quota refreshes.
+These facts rule out an in-memory mod, a hook-written line file, and a tmux wrapper,
+selecting `vargus statusline` as `statusLine.command`.
+
+`agy` executes `statusLine.command` with session JSON on `stdin`, strips the trailing
+newline from `stdout`, and renders 24-bit ANSI SGR output directly beneath the prompt
+border (`padding: 0` by default). In `agy` 1.5.8, `statusLine` starts at column 0 while
+`statusLine.padding` in `settings.json` inserts blank vertical rows above the line
+(verified live: `padding: 2` added two blank lines, whereas two leading spaces on `stdout`
+aligned the row with the prompt text after `> `); matching the tmux output (`TMUX_PADDING`),
+nonempty `vargus statusline` rows begin with two spaces and subtract 2 columns from
+`terminal_width` before fitting fragments. Headless `-p` runs do not start custom status-line
+commands (`agy changelog` 1.4.7: `"no longer start your custom status line and window
+title commands, none of which print mode shows"`). Across a 17-sample two-turn isolated
+TUI probe (`gemini-3.8-flash-low`), updates were throttled to ~300 ms during active turns
+(measured inter-call gaps 295–303 ms), `terminal_width` tracked live terminal resizes
+(`120` → `92`), and `refreshInterval: 1` did not produce idle 1 s runs on 1.5.8.
+`src/cli.ts` uses lazy subcommand `import()` so `vargus statusline` never loads the Codex
+or tmux module graph: measured on this 194-tool session transcript, `./bin/vargus statusline`
+took 183.1 ms median (p95 193.4 ms, cold 209.1 ms), within `agy`'s 300 ms debounce and
+5 s timeout. Empty `stdin` returns exit code 0 so TUI shutdown does not count toward
+`agy`'s 30-failure session disable threshold.
+
+Data sources and caching in `src/hosts/antigravity/`:
+
+- **Payload readings (`collect.ts`)**: `workspace.current_dir` (else `cwd`) sets the folder;
+  `terminal_width` sets `columns`; `context_window` (`context_window_size: 1048576`,
+  `used_percentage`) sets `ctx:`. Before `context_window_size` arrives on initial
+  `authenticating` frames, `ctx:0%` renders without layout shift. In the two-turn 1.5.8
+  probe, `context_window.total_input_tokens` was `15,229` after turn 1 and `15,295` after
+  turn 2 (`15,295 / 1,048,576 = 1.4586% = used_percentage`), while per-call uncached
+  `input_tokens` in `transcript.jsonl` were `10,703` and `2,669` (`cache_read_tokens: 8,113`
+  on turn 2). That rules out `context_window.total_input_tokens` for `token:`: it is the
+  current context fill numerator, not cumulative uncached session tokens.
+- **Model names and startup effort (`model.ts`, `collect.ts`)**: `agy` sends display labels
+  in both `model.id` and `model.display_name`. Checked `agy models` on 1.5.8 lists 22
+  entries: `Gemini 4 Carbon|Argon (Low|Medium|High)`, `Gemini 4 Hydrogen (Low|Medium|High|XHigh)`,
+  `Orchestrator (Carbon|Argon)`, `Gemini 3.8 Flash (Low|Medium|High)`,
+  `Claude Opus|Sonnet 5.5 (Low|Medium|High)`, and `GPT-OSS 120B (Medium)`. Splitting on
+  whitespace (`shortModelName`) turned every Gemini family into `gemini`, losing Carbon,
+  Argon, Hydrogen and Flash. `shortAntigravityModelName` strips trailing effort suffixes,
+  shortens Gemini and Claude to their family (`carbon`, `argon`, `hydrogen`, `flash`,
+  `flash-lite`, `pro`, `opus`, `sonnet`), keeps `orchestrator(carbon)` and
+  `orchestrator(argon)`, and preserves other provider names (`gpt-oss-120b`). On initial
+  `authenticating` frames `agy` 1.5.8 omits `model.effort` while `display_name` already has
+  `(High)`; inferring only `(low|medium|high|xhigh|max)` prevents startup flicker without
+  mistaking `(Carbon)` or `(Argon)` for effort.
+- **Quota buckets (`collect.ts`)**: `agy --output-format json -p /usage` and live
+  `statusLine` payloads on 1.5.8 expose two shared groups: `"Gemini Models"` (`gemini-5h`,
+  `gemini-weekly`) and `"Claude and GPT models"` (`3p-5h`, `3p-weekly`), each with
+  `remaining_fraction` in `[0, 1]` and `reset_time` (`disabled: true` skipped per
+  `agy changelog` 1.0.8). Gemini and Orchestrator models select `gemini-*`; Claude and GPT
+  models select `3p-*`; an unfamiliar gateway model falls back only when a single
+  unambiguous `*-5h` or `*-weekly` bucket exists. `percentUsed` is
+  `(1 - remaining_fraction) * 100`. The non-active group's weekly bucket (`3p` or `gm`) is
+  exposed through `limits.api.others` so `otherModelWeekly` shows it from 80%.
+- **Transcript path and incremental replay (`transcript.ts`)**: with `ANTIGRAVITY_*`
+  environment variables stripped, `agy` 1.5.8 sets none in `statusLine.command`'s
+  environment and emits `transcript_path` as
+  `~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript.jsonl` (missing on
+  CLI-only machines) while writing
+  `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`.
+  `resolveTranscriptPath` requires a safe `conversation_id` (`SAFE_ID`; empty pre-turn IDs
+  read nothing), requires a supplied `transcript_path` to contain `/brain/<id>/`, checks
+  the path as given, then its `.gemini/antigravity-cli` sibling, then
+  `ANTIGRAVITY_APP_DATA_DIR` and `~/.gemini/antigravity-cli` after collapsing `.` and
+  `..` segments so `transcript_path` cannot escape `/brain/<id>/`. `readTranscriptState` caches
+  the processed byte offset (up to the last `\n` so a mid-append line waits for its newline),
+  first-line SHA-256 and trailing 256-byte SHA-256 (so mid-transcript `/rewind` rewrites
+  replay from zero) under `/tmp/vargus-antigravity-<uid>`. It records `startedAt` from
+  the earliest step `created_at`, sums uncached `input_tokens + output_tokens` across model
+  steps (`PLANNER_RESPONSE` and compaction `CHECKPOINT`, excluding `cache_read_tokens`),
+  and parses JSON-encoded `tool_calls[].args` strings for `tools`, `agents`
+  (`invoke_subagent` and `swarm` `add`), `workflows` (`run_workflow`), and `skills`
+  (`read_file` of `SKILL.md` under `/.gemini/antigravity(-cli)?/builtin/skills`,
+  `~/.gemini/config/(plugins/*/)?skills`, `(.agents?|_agents?)/(plugins/*/)?skills`, or
+  directories declared in `skills.json`, deduplicated once per path per `USER_INPUT` turn).
+  Bare `SKILL.md` basename matching was ruled out because reading this repo's Claude
+  `skills/vargus-setup/SKILL.md` during inspection matched by basename without loading an
+  Antigravity skill. Subagent conversations are separate trajectories and are not summed
+  into the displayed conversation's `token:`.
+- **Cached Git collector (`vcs.ts`)**: `readCachedGit` persists VArgus's 5 s poll and
+  `10 × lastMs` slow-walk hold-off per `(cwd, detachedHead)` under
+  `/tmp/vargus-antigravity-<uid>`, so 300 ms streaming bursts spawn zero `git` processes
+  between polls, while advancing a file-changing tool count (`run_command`, `write_file`,
+  `edit_file`, `multi_edit`, `delete_file`) in the same transcript refreshes as soon as the
+  `10 × lastMs` hold expires. Each `git` command uses a 4 s timeout (under `agy`'s 5 s
+  `statusLine` limit) so a stalled mount still exits 0 and records its hold-off. Linked
+  worktrees (`commondir`) and `detachedHead` ref/operation reads follow the shared Git rules.
+- **Setup boundary**: in live `agy` 1.5.8, `~/.gemini/antigravity-cli/settings.json` is gated
+  by a hardcoded system protection boundary (`Permission denied for read_file(.../settings.json).
+  Matches hardcoded system protection boundary rule`), and the default Linux terminal sandbox
+  mounts `~/.local/bin` as a synthetic read-only directory containing only `agy`. Agent-assisted
+  setup inside `agy` therefore verifies or creates `~/.local/bin/vargus` with user approval
+  outside the sandbox, checks `printf '{}' | "$HOME/.local/bin/vargus" statusline`, and hands
+  back `/statusline "$HOME/.local/bin/vargus" statusline` (or `/statusline vargus statusline`
+  on Windows) so `agy`'s own TUI command writes `settings.json` and activates the row
+  immediately.
+- **Verification limits**: live TUI verification covers Linux with `agy` 1.5.8, Node.js
+  24.14.1 and git 2.47.3. macOS, native Windows `cmd /c` execution of `bin\vargus.cmd`
+  under live `agy`, and custom enterprise quota bucket IDs are covered by unit/CLI tests
+  and remain unverified against live `agy` on those platforms.
+
 ## Scope
 
-The existing inline/mod rules below describe Claude Code. Codex and the optional tmux
+The existing inline/mod rules below describe Claude Code. Antigravity CLI, Codex and the optional tmux
 output are specified in [Hosts and outputs](#hosts-and-outputs).
 
 - Claude Code 2.1.299 or later: mods are on by default from 2.1.287, and the facts below were
@@ -970,8 +1088,9 @@ src/hosts/claude/collect/         Claude collectors, authentication and polling
 src/hosts/claude/write.ts         Claude native line file
 src/hosts/claude/paths.ts         pure Claude config/data path rules
 src/hosts/claude/view/            existing /vargus pane
+src/hosts/antigravity/            Antigravity CLI payload, incremental transcript and Git cache
 src/hosts/codex/                 Codex saved-log collection, view recognition, footer policy
-src/cli/                        Node-side host/output wiring and standalone controller
+src/cli/                        Node-side host/output wiring, statusline CLI and standalone controller
 src/core/                       shared readings, defaults and pure git parsers
 src/options.ts                  shared options (defaults match userConfig)
 src/render/                     shared fragment composition, text and width
@@ -981,9 +1100,10 @@ src/outputs/ansi.ts             decode the renderer's SGR vocabulary
 src/outputs/tmux/                tmux encoding, pane ownership and row lifecycle
 src/cli.ts                      CLI dispatch
 bin/vargus                      Bash symlink entry for the TypeScript CLI
+bin/vargus.cmd                  Windows batch entry for the TypeScript CLI
 types/index.d.ts                self-contained Claude $.state contract
 tests/*.test.ts                 Claude engine and shared rendering tests
-tests/node/*.test.mts            Node boundaries, Codex and tmux integration
+tests/node/*.test.mts            Node boundaries, Antigravity, Codex and tmux integration
 skills/vargus-setup/SKILL.md     existing Claude inline setup
 ```
 

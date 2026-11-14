@@ -34,7 +34,7 @@ export type CoreValues = {
   // WSL: call counts as text (DESIGN, "Config")
   isWsl: boolean
   // Host-specific naming and missing-value rules; absent preserves the Claude line.
-  host?: 'claude' | 'codex'
+  host?: 'claude' | 'codex' | 'antigravity'
 }
 
 export type Values = {
