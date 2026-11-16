@@ -179,7 +179,7 @@ test('native warning notices retain draft readings without admitting footer comm
   const captured: ViewScreen = JSON.parse(await readFile(new URL('./fixtures/codex-warning-draft.json', import.meta.url), 'utf8'))
   const parent = 'parent', foreign = '01a10000-0000-0000-0000-000000000000'
   for (const notice of ['', '⚠ 1 warning · \x1b[1mf2\x1b[0m to view', '⚠ 2 warnings · /warnings to view',
-    '⚠ 3 · ctrl+w', '⚠ 4']) {
+    '⚠ 3 · ctrl+w', '⚠ 4', '· ⚠ 1 warning · \x1b[1mf2\x1b[0m to view', '· ⚠ 2 warnings · /warnings to view', '· ⚠ 3 · ctrl+w', '· ⚠ 4']) {
     for (const shell of [false, true]) {
       const current = structuredClone(captured)
       current.lines[current.lines.length - 1] = current.lines.at(-1)!.replace(/⚠.*$/, notice)
@@ -201,4 +201,39 @@ test('native warning notices retain draft readings without admitting footer comm
       }
     }
   }
+})
+
+
+test('context percentages separated from an agent label retain draft identity', async () => {
+  // Composer and footer captured from official Codex 0.169.0 before submission.
+  const captured: ViewScreen = JSON.parse(await readFile(new URL('./fixtures/codex-main-draft.json', import.meta.url), 'utf8'))
+  const parent = 'parent', child = 'child', foreign = '01a10000-0000-0000-0000-000000000000'
+  const family = [{ thread: parent }, { thread: child, path: '/root/child' }]
+  assert.equal(selectedView(captured, family, parent)?.thread, parent)
+  assert.equal(hiddenDraft(captured), false, 'a visible Main label selects current readings')
+  assert.equal(codexComposer(captured, ''), false, 'recognizing a draft never admits footer commands')
+  assert.equal(footerThread(captured), undefined)
+  assert.deepEqual(footerCandidates(captured), [])
+  for (const label of ['Main [default]', '`/root/child`']) {
+    for (const separator of [' · ', '    ']) {
+      for (const notice of ['', '    ⚠ 1 warning · f2 to view', ' · ⚠ 2 warnings · /warnings to view', ' · ⚠ 3 · ctrl+w', ' · ⚠ 4']) {
+        const current = structuredClone(captured)
+        current.lines[current.lines.length - 1] = '  ' + label + separator + '68% context left' + notice
+        assert.equal(selectedView(current, family, parent)?.thread, label === 'Main [default]' ? parent : child)
+        assert.equal(codexComposer(current, ''), false)
+      }
+    }
+  }
+  const titled = structuredClone(captured)
+  titled.lines[titled.lines.length - 1] = '  `/root/child` · Main [default] · 68% context left'
+  assert.equal(selectedView(titled, family, parent, 'none')?.thread, parent, 'the final label wins over a quoted title')
+  const unknown = structuredClone(captured)
+  unknown.lines[unknown.lines.length - 1] = '  `/root/unknown` · 68% context left'
+  assert.equal(selectedView(unknown, family, parent), undefined)
+  const clipped = structuredClone(captured)
+  clipped.lines[clipped.lines.length - 1] = '  `/root/chi…` · 68% context left'
+  assert.equal(selectedView(clipped, family, parent), undefined)
+  const explicit = structuredClone(captured)
+  explicit.lines[explicit.lines.length - 1] = '  ' + foreign + ' · Main [default] · 68% context left'
+  assert.equal(selectedView(explicit, family, parent), undefined, 'a foreign ID still blocks Main fallback')
 })

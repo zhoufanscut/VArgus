@@ -424,7 +424,10 @@ inside configured items. In checked source `8703d32bd0`,
 ``Review `/root/first` details`` therefore cannot override the following
 `Main [default]` or a different child's label. Without an agent-navigation hint,
 a lone quoted configured item in the empty primary composer does not establish
-a child identity.
+a child identity. A draft can retain the contextual Main/path label with a middle-dot
+separator before the context percentage and no agent-navigation hint. Display
+matching accepts that suffix as well as a space-separated context hint, while
+startup identity and footer commands still require an empty composer.
 
 For native ID matching, a known first-item `thread-id` (or legacy `session-id`) layout needs the full ID
 prefix to remain visible; later fields may be clipped. Other item orders require
@@ -457,11 +460,12 @@ The display-only draft frame requires a bold live arrow (or `!`) and a native
 `% context left` hint (or `Shell mode` with a live `!`) below the textarea. It
 locates the complete footer after wrapped/multiline input, keeping typed agent
 paths and UUIDs outside that metadata. Native IDs retain ambiguity/clipping rules.
-Codex can append a warning notice on the same hint row. Source `8703d32bd0`,
+Codex can append a warning notice on the same hint row, separated by spaces or
+another middle dot. Source `8703d32bd0`,
 `bottom_pane/chat_composer/warning_notice.rs`, emits `format!("{count} warning{plural}")`
 with a shortcut, then falls back to count-plus-shortcut or count-only notices.
-Draft recognition removes these suffixes from the hint check only; the original
-footer still supplies identity and clipping checks. A captured official 0.167.0
+Display recognition removes these suffixes for the draft hint and contextual-label
+match; the original footer still supplies UUID identity and clipping checks. A captured official 0.167.0
 draft frame with `82% context left` followed by `⚠ 1 warning · f2 to view` was
 rejected before the fix; removing only the notice restored recognition. Fixtures
 cover context and shell hints with each notice form; compact forms are source-derived.

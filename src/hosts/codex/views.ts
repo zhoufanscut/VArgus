@@ -115,12 +115,16 @@ function livePrompt(line: string): boolean {
 // anchors the footer below the textarea; cursor-relative slices can read draft
 // continuation lines as agent labels or IDs. Footer delivery keeps its separate
 // strict empty-composer guard, as do the exported startup ID readers above.
+function withoutWarning(line: string): string {
+  return line.replace(/\s+(?:·\s+)?⚠ \d+(?: warnings? · .+ to view| · .+)?$/, '')
+}
+
 function draftFrame(screen: ViewScreen): { start: number; footer: string[] } | undefined {
   if (screen.x < 2) return
   let end = screen.lines.length - 1
   while (end > screen.y && !plain(screen.lines[end]!).trim()) end--
   // Codex can share this hint row with a full, compact or count-only warning notice.
-  const hint = plain(screen.lines[end] ?? '').trim().replace(/\s+⚠ \d+(?: warnings? · .+ to view| · .+)?$/, '')
+  const hint = withoutWarning(plain(screen.lines[end] ?? '').trim())
   const shell = /\bShell mode$/.test(hint)
   if (end <= screen.y || (!shell && !/\b\d+% context left$/.test(hint))) return
   let footer = end
@@ -163,7 +167,7 @@ export function selectedView<T extends { thread: string; path?: string }>(screen
     const composer = plain(screen.lines[draft?.start ?? screen.y] ?? '')
     if (!composer.startsWith('› ') && !(draft && composer.startsWith('! '))) return
     const rows = draft?.footer ?? screen.lines.slice(screen.y + 1, screen.y + 4).map(plain).filter(l => l.trim())
-    const footer = rows.map(row => row.trim()).join('\n')
+    const footer = rows.map(row => withoutWarning(row.trim())).join('\n')
     if (identity !== 'none') {
       const fields = draft ? rows[0]?.split(' · ').map(item => item.trim()) : footerFields(screen)
       const id = threadField(fields, identity === 'first')
@@ -172,8 +176,9 @@ export function selectedView<T extends { thread: string; path?: string }>(screen
       }
     }
     // Codex appends the contextual label after configurable items, before the
-    // agent-navigation hint. Titles and branches can also contain backticks.
-    const label = [...footer.matchAll(/(?:^| · )(Main \[default\]|`([^`\n]+)`)(?= · [^·\n]* for agents\b|[ \t]*(?:\d+% context left)?$)/gm)].at(-1)
+    // agent-navigation hint. While typing, a middle dot can separate the label
+    // from the context hint instead. Titles and branches can contain backticks.
+    const label = [...footer.matchAll(/(?:^| · )(Main \[default\]|`([^`\n]+)`)(?= · [^·\n]* for agents\b|[ \t]*(?:(?:· )?\d+% context left)?$)/gm)].at(-1)
     if (label?.[1] === 'Main [default]') return family.find(view => view.thread === root)
     if (label?.[2] && (footer.includes(' for agents') || composer.startsWith('› Viewing sub-agent') || draft)) {
       const matched = family.filter(v => v.path === label[2])
