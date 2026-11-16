@@ -95,6 +95,9 @@ Codex CLI:
 | `repo:` `branch:` | repository and branch; Claude supports git and svn, OmO, Antigravity CLI and Codex support git |
 | `?4` | working-tree status: staged `+`, modified `!`, untracked `?`, conflicts `✗`, ahead `⇡`, behind `⇣` |
 
+Effort colours follow the selected theme: `low` uses Alert, `medium` uses Middle,
+and `high`, `xhigh`, and `max` share Calm.
+
 With Claude Code on Kimi Code, an exact match for
 `https://api.kimi.com/coding/` or `https://api.kimi.ai/coding/` enables Kimi's
 `/coding/v1/usages` read and its `5h` and `1m` windows. It uses the existing

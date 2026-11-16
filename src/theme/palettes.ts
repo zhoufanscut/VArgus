@@ -7,7 +7,7 @@ import type { TokenName } from '../core/types.ts'
 //   faint     the quietest tone (parentheticals, the stale `*`)
 //   sep       the ` | ` separator
 //   gradLow   calm tier (< 70 %), and the value tone of token:/repo:/branch:,
-//             and the calm (max) end of the effort colours
+//             and effort `high` or higher
 //   gradMid   watch tier (70-84 %)
 //   gradHigh  alert tier (>= 85 %), and effort `low`
 //   add / del / track   git: staged and ahead / modified and behind / untracked

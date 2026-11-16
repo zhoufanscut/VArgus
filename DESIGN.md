@@ -1676,6 +1676,11 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 ## Colours
 
 - Every colour is a theme token written as a 24-bit SGR sequence (`ESC[38;2;r;g;bm`).
+- Effort uses flat theme tiers: `low` → alert (`gradHigh`), `medium` → middle
+  (`gradMid`), and `high`, `xhigh`, `max` → calm (`gradLow`). The maintainer chose
+  to keep higher efforts at the same calm colour instead of interpolating between
+  tiers. Unknown levels and numeric budgets also use calm; a hidden or unavailable
+  effort leaves the model name alone in calm.
 - `NO_COLOR` set and non-empty in the mod's env: no colour codes at all (no-color.org).
 - Every fragment's text has control characters (C0, C1, DEL), ESC included, replaced with `?`
   before the colour codes go on. VantageHUD's `cleanText` (`sanitize.js`, used by `render.js`)

@@ -1,11 +1,33 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { CodexCollector } from '../../src/hosts/codex/collect.ts'
-import { model } from '../../src/render/fragments/model.ts'
+import { effortColor, model } from '../../src/render/fragments/model.ts'
 import { calls } from '../../src/render/fragments/calls.ts'
 import { DEFAULTS, resolveOptions } from '../../src/options.ts'
 import { en } from '../../src/i18n/en.ts'
 import { makeTheme } from '../../src/theme/index.ts'
+import { PALETTES } from '../../src/theme/palettes.ts'
+
+test('effort uses flat alert, middle and calm tiers in each palette', () => {
+  const collector = new CodexCollector('/repo', '/home/u')
+  collector.start('/repo', 0)
+  const v = collector.snapshot()!
+  v.session.model = 'gpt-6.1-sol'
+  for (const name of Object.keys(PALETTES)) {
+    const t = makeTheme(name, false)
+    for (const [effort, color] of [
+      ['low', t.rgb.gradHigh], ['medium', t.rgb.gradMid], ['high', t.rgb.gradLow],
+      ['xhigh', t.rgb.gradLow], ['max', t.rgb.gradLow], ['HIGH', t.rgb.gradLow],
+      ['odd', t.rgb.gradLow], [4096, t.rgb.gradLow],
+    ] as const) {
+      assert.deepEqual(effortColor(t, effort), color, `${name}: ${effort}`)
+      v.session.effort = effort
+      assert.equal(model({ v, o: DEFAULTS, l: en, t, now: 0 }),
+        t.paint('label', 'sol:') + t.paint(color, String(effort).toLowerCase()))
+    }
+    assert.deepEqual(effortColor(t, undefined), t.rgb.gradLow)
+  }
+})
 
 test('Codex short names retain full IDs internally and preserve unfamiliar model IDs', () => {
   const collector = new CodexCollector('/repo', '/home/u')
@@ -108,7 +130,7 @@ test('OmO speed suffixes follow effort and stay visible when effort is hidden', 
   v.session.fast = true
   const t = makeTheme('graphite', false)
   assert.equal(model({ ...input, t }),
-    t.paint('label', 'sol:') + t.paint(t.rgb.gradMid, 'high') + t.paint('faint', '(ultrafast)'))
+    t.paint('label', 'sol:') + t.paint(t.rgb.gradLow, 'high') + t.paint('faint', '(ultrafast)'))
   v.session.fast = false
   for (const [host, id, name] of [
     ['codex', 'gpt-6.1-sol-fast', 'gpt-6.1-sol-fast'],

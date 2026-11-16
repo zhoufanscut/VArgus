@@ -67,11 +67,11 @@ describe('model', () => {
     expect(model(f)).toBe('carbon:high')
   })
 
-  test('effort colours inverted: max calm ... low alert; unknown or a number calm', async () => {
+  test('effort colours: low alert, medium middle, high or higher calm; unknown or a number calm', async () => {
     expect(effortColor(t, 'max')).toEqual(gradLow)
-    expect(effortColor(t, 'xhigh')).toEqual(t.lerp(gradLow, gradMid, 0.5))
-    expect(effortColor(t, 'HIGH')).toEqual(gradMid)
-    expect(effortColor(t, 'medium')).toEqual(t.lerp(gradMid, gradHigh, 0.5))
+    expect(effortColor(t, 'xhigh')).toEqual(gradLow)
+    expect(effortColor(t, 'HIGH')).toEqual(gradLow)
+    expect(effortColor(t, 'medium')).toEqual(gradMid)
     expect(effortColor(t, 'low')).toEqual(gradHigh)
     expect(effortColor(t, 'odd')).toEqual(gradLow)
     expect(effortColor(t, 4096)).toEqual(gradLow)
@@ -82,7 +82,7 @@ describe('model', () => {
     const m = 'claude-opus-5-5[1m]'
     expect(model(input({ model: m, effort: 'high' }))).toBe('opus:high')
     expect(model(input({ model: m, effort: 'high' }, {}, { color: true })))
-      .toBe(t.paint('label', 'opus:') + t.paint(gradMid, 'high'))
+      .toBe(t.paint('label', 'opus:') + t.paint(gradLow, 'high'))
     expect(model(input({ model: m, effort: 'high' }, { effort: false }, { color: true }))).toBe(t.paint(gradLow, 'opus'))
     expect(model(input({ model: m }))).toBe('opus')
     expect(model(input({}))).toBe(null)

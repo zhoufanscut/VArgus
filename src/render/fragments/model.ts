@@ -65,16 +65,13 @@ export function shortAntigravityModelName(model: string): string | null {
   return id.replace(/\s+/g, '-')
 }
 
-// Effort mapped onto the three tier colours, inverted so more effort reads
-// calmer: max → gradLow ... low → gradHigh, each level its own hue
-// (VantageHUD's EFFORT_COLOR). An unknown level or a numeric budget → gradLow.
+// Effort uses three flat tiers: low → alert, medium → middle, high and
+// higher → calm. An unknown level or a numeric budget also uses calm.
 export function effortColor(t: Theme, effort: string | number | undefined): Rgb {
   const { gradLow, gradMid, gradHigh } = t.rgb
   switch (String(effort ?? 'max').toLowerCase()) {
     case 'low': return gradHigh
-    case 'medium': return t.lerp(gradMid, gradHigh, 0.5)
-    case 'high': return gradMid
-    case 'xhigh': return t.lerp(gradLow, gradMid, 0.5)
+    case 'medium': return gradMid
     default: return gradLow
   }
 }
