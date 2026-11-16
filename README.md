@@ -255,17 +255,27 @@ Search phrases for this workflow: `set up VArgus for Antigravity`, `VArgus agy s
 When the user requests this setup, the agent should:
 
 1. Check the [requirements](#requirements) (`agy` and Node.js 24.12 or later). Reuse
-   the current VArgus checkout or an existing installation.
-2. Create or verify `~/.local/bin/vargus` pointing to the checkout's absolute `bin/vargus`
-   path (or on Windows a forwarding `vargus.cmd` pointing to `bin\vargus.cmd`; see
-   [Windows setup for Antigravity CLI](#windows-setup-for-antigravity-cli)). Inside `agy`'s
-   default terminal sandbox on Linux/macOS, `~/.local/bin` mounts only `agy` read-only, so
-   inspecting (`readlink -f`) or creating (`ln -s`) `~/.local/bin/vargus` requires user
-   approval outside the sandbox. Inspect any existing `vargus` entry before changing it;
-   preserve an unrelated command.
-3. Verify that piping `{}` to `"$HOME/.local/bin/vargus" statusline` (or the checkout's
-   `bin/vargus` inside `agy`'s sandbox, or `vargus statusline` on Windows) exits 0. No npm
-   install or build step is needed.
+   the current VArgus checkout or an existing installation; if neither exists, create
+   `~/.local/share` (`mkdir -p "$HOME/.local/share"`) and clone
+   `https://github.com/zhoufanscut/VArgus` into `~/.local/share/VArgus` (as in
+   [manual setup](#set-up-antigravity-cli), or `%USERPROFILE%\.local\share\VArgus` on
+   Windows; inside `agy`'s sandbox, cloning requires user approval outside the sandbox).
+2. Ensure `~/.local/bin` exists (`mkdir -p "$HOME/.local/bin"`), then create or verify
+   `~/.local/bin/vargus` pointing to the checkout's absolute `bin/vargus` path (or on
+   Windows a forwarding `vargus.cmd` pointing to `bin\vargus.cmd`; see
+   [Windows setup for Antigravity CLI](#windows-setup-for-antigravity-cli)). Inspect any
+   existing `vargus` entry before changing it; preserve an unrelated command. Inside `agy`'s
+   default terminal sandbox:
+   - On Linux, `~/.local/bin` mounts only `agy` read-only, so both inspecting
+     (`readlink -f`) and creating (`mkdir -p`, `ln -s`) `~/.local/bin/vargus` require user
+     approval outside the sandbox.
+   - On macOS, `ls -ld` and `readlink -f` on `~/.local/bin/vargus` work inside the sandbox,
+     while listing `~/.local/bin` (`Operation not permitted`) and creating `~/.local/bin` or
+     `~/.local/bin/vargus` require user approval outside the sandbox.
+3. Verify that piping `{}` to `"$HOME/.local/bin/vargus" statusline` (outside the sandbox
+   when `~/.local/bin/vargus` or its target checkout is blocked by the sandbox, or via the
+   active workspace's `bin/vargus` inside the sandbox; `vargus statusline` on Windows) exits
+   0. No npm install or build step is needed.
 4. Configure `statusLine`:
    - **When running inside `agy`**: `agy` protects `~/.gemini/antigravity-cli/settings.json`
      behind a hardcoded system protection boundary, so an `agy` agent cannot read or edit

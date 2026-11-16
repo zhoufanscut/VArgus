@@ -1160,10 +1160,16 @@ Data sources and caching in `src/hosts/antigravity/`:
 - **Setup boundary**: in live `agy` 1.5.8, `~/.gemini/antigravity-cli/settings.json` is gated
   by a hardcoded system protection boundary (`Permission denied for read_file(.../settings.json).
   Matches hardcoded system protection boundary rule`), and the default Linux terminal sandbox
-  mounts `~/.local/bin` as a synthetic read-only directory containing only `agy`. Agent-assisted
-  setup inside `agy` therefore verifies or creates `~/.local/bin/vargus` with user approval
-  outside the sandbox, checks `printf '{}' | "$HOME/.local/bin/vargus" statusline`, and hands
-  back `/statusline "$HOME/.local/bin/vargus" statusline` (or `/statusline vargus statusline`
+  mounts `~/.local/bin` as a synthetic read-only directory containing only `agy`. Checked on
+  macOS (`agy` 1.5.9, 2026-11-16, Node.js 24.15.0, git 2.54.0), the default Seatbelt sandbox
+  rejects directory listing on `~/.local/bin` and `~/.local/share` (`Operation not permitted`)
+  while allowing `ls -ld` and `readlink -f` on `~/.local/bin/vargus` and running it when its
+  target checkout is the active workspace. Agent-assisted setup inside `agy` therefore clones
+  to `~/.local/share/VArgus` when no checkout exists and creates `~/.local/bin` /
+  `~/.local/bin/vargus` (plus `readlink -f` on Linux, or statusline verification outside an
+  active-workspace checkout) with user approval outside the sandbox, checks
+  `printf '{}' | "$HOME/.local/bin/vargus" statusline`, and hands back
+  `/statusline "$HOME/.local/bin/vargus" statusline` (or `/statusline vargus statusline`
   on Windows) so `agy`'s own TUI command writes `settings.json` and activates the row
   immediately.
 - **Verification limits**: live TUI verification covers Linux with `agy` 1.5.8, Node.js
