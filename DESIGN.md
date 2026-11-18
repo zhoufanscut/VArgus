@@ -40,6 +40,8 @@ The boundaries are enforced by `tests/shared/boundaries.test.mts`:
 
 - `core`, `render`, `theme`, `i18n` and `options` import no host API or output adapter.
   Shared readings use VArgus types, including `RateLimit`, rather than Claude's engine types.
+- `src/node` provides host-neutral Node utilities. Its imports may reach Node APIs
+  and shared code. The boundary test rejects imports of hosts, outputs and CLI wiring here.
 - Each host owns its collection and lifecycle. The boundary test resolves imports
   before checking their host and output directories, including for new hosts.
 - Output adapters import no host code. `src/cli.ts`, `src/cli` and

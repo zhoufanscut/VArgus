@@ -79,6 +79,7 @@ test('shared modules have no host, display, Node or Claude API imports; host col
       if (top !== 'src') continue
       const cli = targetArea === 'cli' || targetArea === 'cli.ts'
       if (shared) assert.ok(!cli && !['hosts', 'outputs', 'node'].includes(targetArea!), message)
+      if (area === 'node') assert.ok(!cli && targetArea !== 'hosts' && targetArea !== 'outputs', message)
       if (claude) assert.notEqual(targetArea, 'node', message)
       if (area === 'hosts') {
         assert.ok(!cli, message)
