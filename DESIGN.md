@@ -53,13 +53,14 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
 
 ### User-facing setup paths
 
-README.md documents each host separately: Claude's inline plugin install and
-`vargus-setup` skill, Antigravity CLI's clone/PATH entry and `statusLine` setting in
-`~/.gemini/antigravity-cli/settings.json`, and Codex's clone/PATH entry and optional startup hooks.
-Plugin installation and `/config` belong to Claude. Antigravity CLI and Codex
-read CLI options resolved against `src/options.ts`; installing the Claude plugin
-neither sets Antigravity's `statusLine` nor installs Codex hooks. The tmux commands run from the clone, so removal
-finishes footer restoration or exits the TUI before removing shared source.
+README.md documents each host's integration and the shared checkout and PATH launcher.
+Remove each integration before checking shared files. Codex controls and Antigravity's
+`statusLine` can share the launcher. The checkout also serves direct commands, OmO's
+extension loader and a Claude directory marketplace. Those references survive
+removing just the launcher. Codex removal finishes footer restoration or exits
+the TUI while shared source is still available.
+Plugin installation and `/config` belong to Claude. Codex and Antigravity CLI
+resolve CLI options against `src/options.ts`.
 For Codex startup hooks, removal edits only VArgus's callback entries, including
 untrusted or modified entries without a trust step, then closes affected TUIs.
 In the isolated 0.167.0 check, reopening `/hooks` after the file edit retained the

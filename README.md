@@ -16,6 +16,7 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
 ## Contents
 
 - [Choose your setup](#choose-your-setup), [Requirements](#requirements)
+- [Shared checkout and launcher](#shared-checkout-and-launcher)
 - [What it shows](#what-it-shows), [How it works](#how-it-works)
 - [OmO Native](#omo-native): setup, controls, update and removal
 - [Antigravity CLI](#antigravity-cli): [agent setup](#set-up-antigravity-cli-with-an-agent),
@@ -62,6 +63,59 @@ Other host versions and macOS need their own live verification.
 Claude inline Windows checks and limitations are described [below](#claude-code).
 Native Windows Codex checks cover Codex 0.167.0, Node.js 24.21.0 and psmux 3.4.0
 with an isolated local mock provider. See [Windows setup](#native-windows-setup).
+
+## Shared checkout and launcher
+
+Reuse one VArgus checkout for Codex, Antigravity CLI, OmO and a Claude directory
+marketplace. Use its absolute path in each setup. If you need a checkout, for example:
+
+```sh
+mkdir -p "$HOME/.local/share"
+git clone https://github.com/zhoufanscut/VArgus "$HOME/.local/share/VArgus"
+```
+
+On Windows, clone to a location such as `%USERPROFILE%\.local\share\VArgus`.
+The Node integrations run
+the source directly without an npm install or build.
+
+### Put vargus on PATH
+
+Codex and Antigravity CLI can share a single launcher. On Linux or macOS, use a
+symlink in a directory on your PATH, for example:
+
+```sh
+mkdir -p "$HOME/.local/bin"
+ln -s "$HOME/.local/share/VArgus/bin/vargus" "$HOME/.local/bin/vargus"
+```
+
+Use your checkout's absolute `bin/vargus` path if it differs. On Windows, put a
+forwarding file named `vargus.cmd` in a user PATH directory such as
+`%USERPROFILE%\.local\bin`:
+
+```bat
+@echo off
+"H:\VArgus\bin\vargus.cmd" %*
+```
+
+Replace the example path with your checkout's absolute path.
+Check any existing launcher before making changes and preserve unrelated commands.
+Add the directory to your user PATH if needed, reopen your terminal, and check
+`vargus --help`.
+
+### Remove shared files
+
+After removing the host integration, check these paths separately.
+
+1. Keep the PATH launcher while Codex controls or hooks, Antigravity's
+   `statusLine`, or any other command uses that launcher. Once it is unused,
+   verify it is the VArgus launcher you installed with
+   `readlink "$HOME/.local/bin/vargus"` on Linux or macOS, or inspect the
+   forwarding `vargus.cmd` on Windows. Remove that file and leave the PATH directory.
+2. Keep the checkout while it is used by a launcher, a hook or status-line
+   command pointing directly into it, an [OmO loader](#omo-native), or a
+   [Claude directory marketplace](#or-from-a-clone-updated-with-git-pull).
+   After removing the remaining integrations that reference that checkout and
+   reloading or closing their sessions as directed, you can delete the checkout.
 
 ## What it shows
 
@@ -158,7 +212,7 @@ contains the architecture, restoration rules and live verification limits.
 
 ## OmO Native
 
-From the checkout, install the loader:
+From the [shared checkout](#shared-checkout-and-launcher), install the loader:
 
 ```sh
 ./bin/vargus omo install
@@ -234,7 +288,8 @@ loader still points to the former top-level extension entry, rerun
 ./bin/vargus omo remove
 ```
 
-Then `/reload` or quit each affected OmO session before deleting the checkout.
+Then `/reload` or quit each affected OmO session before
+[removing shared files](#remove-shared-files).
 Removal touches only the owned loader. The separate experimental
 `vargus-preview.ts`, if installed, is left untouched.
 
@@ -255,27 +310,22 @@ Search phrases for this workflow: `set up VArgus for Antigravity`, `VArgus agy s
 When the user requests this setup, the agent should:
 
 1. Check the [requirements](#requirements) (`agy` and Node.js 24.12 or later). Reuse
-   the current VArgus checkout or an existing installation; if neither exists, create
-   `~/.local/share` (`mkdir -p "$HOME/.local/share"`) and clone
-   `https://github.com/zhoufanscut/VArgus` into `~/.local/share/VArgus` (as in
-   [manual setup](#set-up-antigravity-cli), or `%USERPROFILE%\.local\share\VArgus` on
-   Windows; inside `agy`'s sandbox, cloning requires user approval outside the sandbox).
-2. Ensure `~/.local/bin` exists (`mkdir -p "$HOME/.local/bin"`), then create or verify
-   `~/.local/bin/vargus` pointing to the checkout's absolute `bin/vargus` path (or on
-   Windows a forwarding `vargus.cmd` pointing to `bin\vargus.cmd`; see
-   [Windows setup for Antigravity CLI](#windows-setup-for-antigravity-cli)). Inspect any
-   existing `vargus` entry before changing it; preserve an unrelated command. Inside `agy`'s
-   default terminal sandbox:
-   - On Linux, `~/.local/bin` mounts only `agy` read-only, so both inspecting
-     (`readlink -f`) and creating (`mkdir -p`, `ln -s`) `~/.local/bin/vargus` require user
-     approval outside the sandbox.
-   - On macOS, `ls -ld` and `readlink -f` on `~/.local/bin/vargus` work inside the sandbox,
-     while listing `~/.local/bin` (`Operation not permitted`) and creating `~/.local/bin` or
-     `~/.local/bin/vargus` require user approval outside the sandbox.
-3. Verify that piping `{}` to `"$HOME/.local/bin/vargus" statusline` (outside the sandbox
-   when `~/.local/bin/vargus` or its target checkout is blocked by the sandbox, or via the
-   active workspace's `bin/vargus` inside the sandbox; `vargus statusline` on Windows) exits
-   0. No npm install or build step is needed.
+   the current VArgus checkout or an existing installation. If you need a clone,
+   follow [Shared checkout and launcher](#shared-checkout-and-launcher).
+   Inside `agy`'s sandbox, clone outside the sandbox with user approval.
+2. Set up or verify the [shared PATH launcher](#put-vargus-on-path).
+   Inside `agy`'s default terminal sandbox:
+   - On Linux, `~/.local/bin` mounts only `agy` read-only. Inspecting the launcher
+     with `readlink -f` or creating the directory and link requires user approval
+     to run outside the sandbox.
+   - On macOS, `ls -ld` and `readlink -f` on `~/.local/bin/vargus` work inside
+     the sandbox. Listing `~/.local/bin` returns `Operation not permitted`.
+     Creating the directory or the launcher requires user approval to run
+     outside the sandbox.
+3. Verify that piping `{}` to `"$HOME/.local/bin/vargus" statusline` exits 0.
+   Run the check outside the sandbox if it blocks the launcher or checkout.
+   Inside the sandbox you can also check the active workspace's `bin/vargus`.
+   On Windows, use `vargus statusline`.
 4. Configure `statusLine`:
    - **When running inside `agy`**: `agy` protects `~/.gemini/antigravity-cli/settings.json`
      behind a hardcoded system protection boundary, so an `agy` agent cannot read or edit
@@ -295,14 +345,7 @@ When the user requests this setup, the agent should:
 
 ### Set up Antigravity CLI
 
-Clone VArgus and create the `vargus` symlink if you haven't already:
-
-```sh
-mkdir -p "$HOME/.local/share" "$HOME/.local/bin"
-git clone https://github.com/zhoufanscut/VArgus "$HOME/.local/share/VArgus"
-ln -s "$HOME/.local/share/VArgus/bin/vargus" "$HOME/.local/bin/vargus"
-```
-
+Use the [shared checkout and PATH launcher](#shared-checkout-and-launcher).
 Then activate VArgus right inside `agy` (this saves `statusLine` to
 `~/.gemini/antigravity-cli/settings.json` and enables it immediately):
 
@@ -334,9 +377,7 @@ built-in status line instead of replacing it.
 
 ### Windows setup for Antigravity CLI
 
-Put a forwarding `vargus.cmd` in a directory on your **user** PATH (such as
-`%USERPROFILE%\.local\bin`, as shown under [Codex Windows setup](#native-windows-setup)),
-reopen the terminal so `vargus --help` resolves, and run inside `agy`:
+Set up the [Windows PATH launcher](#put-vargus-on-path), then run inside `agy`:
 
 ```text
 /statusline vargus statusline
@@ -404,8 +445,7 @@ takes effect immediately on the next status-line update with no restart.
 
 1. Run `/statusline delete` inside `agy`, or remove the `"statusLine"` object from
    `~/.gemini/antigravity-cli/settings.json` (preserving your other settings).
-2. Remove `~/.local/bin/vargus` (or `%USERPROFILE%\.local\bin\vargus.cmd`) and the VArgus
-   clone only if neither Codex nor Claude Code still uses them.
+2. Follow [Remove shared files](#remove-shared-files).
 
 ## Codex CLI
 
@@ -423,7 +463,7 @@ When the user requests this setup, the agent should:
 
 1. Check the [requirements](#requirements). Reuse the current VArgus checkout or
    an existing installation; report missing prerequisites before continuing.
-2. Create or verify the `vargus` symlink using the [manual setup](#set-up-codex):
+2. Create or verify the [shared PATH launcher](#put-vargus-on-path):
    `~/.local/bin/vargus` points to the chosen checkout's absolute `bin/vargus` path.
    Inspect an existing entry before changing it; preserve an unrelated command.
    Ensure the chosen directory is on the user's PATH and `vargus --help` resolves
@@ -461,17 +501,7 @@ unrelated command, hooks and saved footer items in the same way.
 
 ### Set up Codex
 
-Clone VArgus and expose its Bash entry through a symlink in a directory on your
-PATH. This example uses `~/.local/share/VArgus`; any clone location works:
-
-```sh
-mkdir -p "$HOME/.local/share" "$HOME/.local/bin"
-git clone https://github.com/zhoufanscut/VArgus "$HOME/.local/share/VArgus"
-ln -s "$HOME/.local/share/VArgus/bin/vargus" "$HOME/.local/bin/vargus"
-```
-
-Make sure `~/.local/bin` is on your PATH. If you already have a VArgus clone, use
-its absolute `bin/vargus` path as the symlink target instead of cloning again.
+Use the [shared checkout and PATH launcher](#shared-checkout-and-launcher).
 
 Start ordinary `codex` in tmux. Run controls from its primary conversation view:
 
@@ -502,19 +532,9 @@ can inherit another terminal's environment, so pane selection does not trust
 ### Native Windows setup
 
 Run Codex in native **psmux**, with Windows Node and PowerShell. Use this checkout's
-`bin\vargus.cmd`; it runs the TypeScript source directly and needs no Bash, build
-or npm install. Put a small forwarding file named `vargus.cmd` in a user PATH
-directory, for example `%USERPROFILE%\.local\bin`:
-
-```bat
-@echo off
-"H:\VArgus\bin\vargus.cmd" %*
-```
-
-Replace `H:\VArgus` with your checkout's absolute path. Inspect any existing
-`vargus` command before writing this file. Add its directory to the **user** PATH
-if needed and reopen the terminal, then check `vargus --help`. A forwarding file
-keeps the repository-relative entry intact and needs no symlink privileges.
+`bin\vargus.cmd` through the [shared Windows PATH launcher](#put-vargus-on-path).
+A forwarding file keeps the repository-relative entry intact and needs no
+symlink privileges.
 
 Use the [automatic startup](#automatic-startup-in-codex) JSON structure, replacing
 the two command strings with PowerShell commands for your actual user path:
@@ -863,12 +883,7 @@ does not build or install anything.
    PATH entry or clone. In checked Codex 0.167.0, reopening the TUI loads the updated
    hook definitions; reopening only `/hooks` inside a running TUI keeps the removed
    entries in its cached inventory.
-4. Remove the PATH symlink you created for `vargus`, after checking its target with
-   `readlink "$HOME/.local/bin/vargus"`. Delete the clone only when neither integration
-   uses it; a Claude plugin installed from that folder still needs it.
-
-On native Windows, remove only the forwarding `vargus.cmd` file you created,
-after inspecting its checkout path. Keep the PATH directory if other commands use it.
+4. Follow [Remove shared files](#remove-shared-files).
 
 The saved footer selection from hook setup is yours to keep or edit. `off` restores
 that saved layout; it does not remove your `thread-id` preference.
@@ -909,17 +924,18 @@ other project.
 
 ##### Or from a clone, updated with `git pull`
 
+Use the [shared checkout](#shared-checkout-and-launcher) and substitute its path below.
+
 ```sh
-git clone https://github.com/zhoufanscut/VArgus ~/.claude/VArgus   # any folder works
-claude plugin marketplace add ~/.claude/VArgus
-claude plugin install vargus@vargus                                # user scope by default
+claude plugin marketplace add "$HOME/.local/share/VArgus"
+claude plugin install vargus@vargus
 ```
 
 Claude Code reads a plugin from a folder marketplace straight from that folder (`claude plugin
-list` shows `Read from: <folder>`), so `git -C ~/.claude/VArgus pull` updates it, no reinstall:
+list` shows `Read from: <folder>`), so `git -C "$HOME/.local/share/VArgus" pull` updates it:
 a new session runs the pulled code, also across a version change, and `/reload-plugins` brings it
 into an open one. You then follow `main`, every commit as soon as you pull. To stay on a release
-instead, fetch tags with `git -C ~/.claude/VArgus fetch --tags` and check out the
+instead, fetch tags with `git -C "$HOME/.local/share/VArgus" fetch --tags` and check out the
 release tag you want (`pull` doesn't update a checked-out tag). Add only one of
 the two marketplaces: both are named `vargus`.
 
@@ -1019,7 +1035,8 @@ from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-
    blank row.
 2. `claude plugin uninstall vargus@vargus --scope <scope>` from a shell (the scope you installed
    at; `user` is the default), or remove it in `/plugin` under **Installed**. From a clone, also
-   `claude plugin marketplace remove vargus`.
+   run `claude plugin marketplace remove vargus` and reload plugins or close affected sessions.
+3. For a directory install, follow [Remove shared files](#remove-shared-files).
 
 ### Claude limits
 
