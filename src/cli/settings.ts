@@ -23,10 +23,14 @@ export async function readSettings(file: string): Promise<{ previous: string | u
 }
 
 export async function writeSettings(file: string, previous: string | undefined, settings: Record<string, unknown>): Promise<void> {
+  return writeSetupFile(file, previous, JSON.stringify(settings, null, 2) + '\n')
+}
+
+export async function writeSetupFile(file: string, previous: string | undefined, content: string): Promise<void> {
   const temporary = `${file}.${randomUUID()}.tmp`
   const mode = previous === undefined ? 0o600 : (await stat(file)).mode & 0o777
   try {
-    await writeFile(temporary, JSON.stringify(settings, null, 2) + '\n', { flag: 'wx', mode })
+    await writeFile(temporary, content, { flag: 'wx', mode })
     if (await readFile(file, 'utf8').catch(allowMissing) !== previous) {
       throw new Error(`${file} changed during setup. Run the command again.`)
     }

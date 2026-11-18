@@ -18,7 +18,7 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
 - [Choose your setup](#choose-your-setup), [Requirements](#requirements)
 - [Shared checkout and launcher](#shared-checkout-and-launcher)
 - [What it shows](#what-it-shows), [How it works](#how-it-works)
-- [OmO Native](#omo-native): setup, controls, update and removal
+- [OmO Native](#omo-native), [configure OmO Native](#configure-omo-native)
 - [Antigravity CLI](#antigravity-cli): [agent setup](#set-up-antigravity-cli-with-an-agent),
   [terminal setup](#set-up-antigravity-cli), [in-session setup](#set-up-in-an-open-agy-session),
   [Windows setup](#windows-setup-for-antigravity-cli),
@@ -179,9 +179,9 @@ for session age, uncached input plus output tokens, and tool, subagent (`invoke_
 `swarm` `add`), workflow (`run_workflow`) and skill (`SKILL.md` reads) counts. Subagent
 conversations have separate transcripts and are not summed into the parent's `token:`.
 
-Each fragment has a switch: [Claude's `/config`](#configure-claude),
-[Antigravity CLI's `--config`](#configure-antigravity-cli), or
-[Codex's CLI options](#configure-codex). Claude can also show per-model weekly
+Each fragment has a switch. See the settings for [Claude](#configure-claude),
+[OmO Native](#configure-omo-native), [Antigravity CLI](#configure-antigravity-cli),
+and [Codex](#configure-codex). Claude can also show per-model weekly
 limits and a gateway spend limit; Antigravity CLI shows the active model group's
 `5h:` and `7d:` windows (plus the other quota group's weekly bucket from 80% when
 `otherModelWeekly` is on); Codex uses its recorded quota windows. Workflow counts
@@ -234,6 +234,22 @@ dialogs and the working indicator remain owned by OmO. Other footer-replacing
 extensions can compete with VArgus; disabling VArgus restores OmO's built-in footer,
 not an earlier custom footer.
 
+### Configure OmO Native
+
+To use a standalone JSON options file, pass its path at installation. You can
+reuse the file you pass to Codex or Antigravity CLI.
+
+```sh
+./bin/vargus omo install --config "$HOME/.config/vargus.json"
+```
+
+Use a JSON object with the [shared option keys](src/options.ts), for example
+`{"theme":"ember","session":false}`. The loader saves the absolute path and
+VArgus reads the file when OmO loads the extension. Run `/reload` after editing
+the file. To change the path, rerun `install --config` with the new path. A plain
+`install` keeps the saved path. To stop using the file, run `omo remove` and then
+`omo install` through the VArgus launcher.
+
 ```text
 /vargus off
 /vargus on
@@ -241,10 +257,11 @@ not an earlier custom footer.
 /vargus config {"theme":"graphite","folder":true,"rateLimits":true}
 ```
 
-Controls and configuration are saved in the current session's custom entries.
-An explicit `off` survives reload and resume; new sessions default on.
-Configuration accepts the shared fragment switches and themes, merges supplied
-options, and does not re-enable a disabled session.
+VArgus saves your on/off choice and `/vargus config` overrides with the current
+session. Saved options take precedence over file values, and the file takes
+precedence over built-in defaults. Sessions configured with an older VArgus may
+have saved a full set of options. An explicit `off` survives reload and resume.
+New sessions default on.
 
 Tokens count persisted main-session assistant input plus output across the whole
 session history, including earlier branches and compaction history. Cache reads,

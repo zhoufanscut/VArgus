@@ -1026,18 +1026,24 @@ The native output clips the final fragment at grapheme boundaries, reconstructin
 only the renderer's SGR vocabulary, so even a one-column viewport cannot split a
 wide glyph or leak a partial ANSI escape.
 
-`/vargus on|off|status|config JSON` persists enabled/options in `vargus-settings`
-custom entries. Bundled `docs/extensions.md:2319-2341` establishes that these entries
-survive reload without participating in model context. Off stops the timer,
-unsubscribes quota updates, removes only the `vargus` widget and restores the built-in
-footer. Shutdown does the same; separate instances own separate state. There is no
-API for retrieving a previous custom footer, so another footer extension can compete.
+`/vargus on|off|config JSON` persists enabled/options in `vargus-settings` custom
+entries. The extension applies saved session options over the optional file and
+uses built-in defaults for missing keys. The command saves only keys supplied in
+the session so file edits can still apply to other keys on reload. Full snapshots
+from older versions retain their saved values. Bundled `docs/extensions.md:2319-2341`
+establishes that these entries survive reload without participating in model context.
+Off stops the timer, unsubscribes quota updates, removes only the `vargus` widget
+and restores the built-in footer. Shutdown does the same. Each instance owns its
+state. There is no API for retrieving a previous custom footer, so another footer
+extension can compete.
 
 `vargus omo install|remove` queries `omo config agent-dir --json` (bundled
 `docs/agent-directory-selection.md`, version 1 contract), or accepts an explicit
 extension directory. The generated loader imports the checkout entry by file URL.
-No machine-specific path is shipped in source. Only the owned loader is replaced
-or removed; other extensions, settings and the UUID-scoped preview remain untouched.
+`install --config FILE` checks for a readable JSON object and records its absolute
+path in the loader. The extension reads the file during registration, so `/reload`
+applies edits. A plain reinstall carries the path forward while updating the import.
+Removal deletes the owned loader and preserves the options file.
 Removal requires reload/quit before deleting the source checkout.
 
 Verification on 2026-11-14: the entry loaded in an isolated OmO 5.1.61 Linux TUI.
@@ -1066,6 +1072,11 @@ quota fragment under the existing width policy. Switching to ChatGPT showed
 `sol:medium(fast)` and `sol:xhigh(ultrafast)` with ChatGPT windows, then switching
 to OpenCode's Gemini 4 Argon showed `argon:medium` without those windows.
 These are live provider-selection and naming checks, not account-failover proof.
+
+In the Senpi 2026.10.25-2 Linux TUI, the generated loader applied the options file
+at startup. `/reload` applied a file edit to `session` and preserved a saved
+`folder` override. The installed OmO 5.1.61 launcher stopped with
+`unsafe trust ancestor` in the isolated test home.
 
 Focused collector, output, lifecycle and real-Git tests cover replay,
 compaction-shaped history, account changes, staleness, narrow/wide text, session

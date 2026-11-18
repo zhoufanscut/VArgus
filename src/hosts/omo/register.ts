@@ -1,9 +1,10 @@
 import { homedir, release } from 'node:os'
-import { collectOmo, omoSettingsReducer, OMO_EDIT_ENTRY } from './collect.ts'
+import { collectOmo, omoSettingsReducer, OMO_CONFIG_ENTRY, OMO_EDIT_ENTRY } from './collect.ts'
 import { omoDisplay } from './display.ts'
 import type { AccountLimits, NativeContext, SessionEntry } from './contracts.ts'
 import { OmoVcs } from './vcs.ts'
 import { OmoKimi, type ProviderAuth } from './kimi.ts'
+import { parseOmoOptions, readOmoOptions } from './options.ts'
 import { mountOmo, type OmoUi } from '../../outputs/omo.ts'
 import { resolveOptions } from '../../options.ts'
 import { resolveLabels } from '../../i18n/index.ts'
@@ -38,7 +39,11 @@ export type OmoApi = {
   }): void
 }
 
-export default function vargus(pi: OmoApi): void {
+export function configuredVargus(file: string): (pi: OmoApi) => void {
+  return pi => vargus(pi, readOmoOptions(file))
+}
+
+export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> = {}): void {
   let active: { ctx: Context; stop(): void; update(forceGit?: boolean): void } | undefined
   let treeTarget: string | undefined
 
@@ -52,7 +57,7 @@ export default function vargus(pi: OmoApi): void {
     if (ctx.mode !== 'tui') return
     const settings = ctx.sessionManager.reduceHistory(omoSettingsReducer)
     if (!settings.enabled) return
-    const options = resolveOptions(settings.options)
+    const options = resolveOptions({ ...fileOptions, ...settings.options })
     const vcs = new OmoVcs()
     const kimi = new OmoKimi(() => instance.ctx.modelRegistry.getProviderAuth('kimi-coding'))
     const theme = makeTheme(options.theme, process.env.NO_COLOR !== undefined)
@@ -160,25 +165,24 @@ export default function vargus(pi: OmoApi): void {
         return
       }
       if (text === 'off' || text === 'on') {
-        pi.appendEntry('vargus-settings', { ...previous, enabled: text === 'on' })
+        pi.appendEntry(OMO_CONFIG_ENTRY, { ...previous, enabled: text === 'on' })
         if (text === 'off') stop()
         else start(ctx)
         return
       }
       if (text.startsWith('config ')) {
-        let given: unknown
-        try { given = JSON.parse(text.slice(7)) }
-        catch (error) {
-          if (!(error instanceof SyntaxError)) throw error
+        let given: Record<string, unknown>
+        try { given = parseOmoOptions(text.slice(7)) }
+        catch {
           ctx.ui.notify('VArgus config must be a JSON object.', 'error')
           return
         }
-        if (given === null || typeof given !== 'object' || Array.isArray(given)) {
-          ctx.ui.notify('VArgus config must be a JSON object.', 'error')
-          return
-        }
-        const options = resolveOptions({ ...previous.options, ...given })
-        pi.appendEntry('vargus-settings', { enabled: previous.enabled, options })
+        const overrides = { ...previous.options, ...given }
+        // Persist the session's keys so other options still follow the file on reload.
+        const options = Object.fromEntries(
+          Object.entries(resolveOptions(overrides)).filter(([key]) => Object.hasOwn(overrides, key)),
+        )
+        pi.appendEntry(OMO_CONFIG_ENTRY, { enabled: previous.enabled, options })
         start(ctx)
         return
       }

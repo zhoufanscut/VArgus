@@ -1,5 +1,6 @@
 const HELP = `Usage:
-  vargus omo install|remove [--dir EXTENSIONS_DIRECTORY]
+  vargus omo install [--dir EXTENSIONS_DIRECTORY] [--config FILE]
+  vargus omo remove [--dir EXTENSIONS_DIRECTORY]
   vargus codex install|remove [--home CODEX_HOME]
   vargus antigravity install
   vargus claude install

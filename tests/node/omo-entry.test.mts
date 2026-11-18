@@ -1,8 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, writeFile, readdir, rm } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, writeFile, readdir, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import vargus, { type OmoApi } from '../../src/hosts/omo/register.ts'
 import { omo } from '../../src/cli/omo.ts'
 import type { SessionEntry } from '../../src/hosts/omo/contracts.ts'
@@ -44,7 +45,7 @@ function host(mode = 'tui') {
     registerCommand(_name, value) { command = value },
   }
   return {
-    load() { vargus(api) },
+    load(factory: typeof vargus = vargus) { factory(api) },
     event(name: string, event: unknown = {}) { handlers.get(name)?.(event, ctx) },
     append(entry: SessionEntry) { entries.push(entry) },
     async command(args: string) {
@@ -169,4 +170,72 @@ test('portable OmO setup loads the real entry and removes only the owned loader'
     await assert.rejects(omo(['remove', '--dir', dir]), /unrelated or modified/)
     assert.equal(await readFile(join(dir, 'vargus.ts'), 'utf8'), 'unrelated user extension')
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('OmO reinstall updates a symlinked loader at its target', { skip: process.platform === 'win32' }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-linked-'))
+  const extensions = join(dir, 'extensions')
+  const target = join(dir, 'vargus.ts')
+  const link = join(extensions, 'vargus.ts')
+  const config = join(dir, 'options.json')
+  try {
+    await omo(['install', '--dir', dir])
+    await mkdir(extensions)
+    await symlink(target, link)
+    await writeFile(config, '{"model":false}')
+    await omo(['install', '--dir', extensions, '--config', config])
+    assert.ok((await lstat(link)).isSymbolicLink())
+    const updated = await readFile(target, 'utf8')
+    assert.match(updated, /export default configuredVargus\(/)
+    await omo(['remove', '--dir', extensions])
+    assert.deepEqual(await readdir(extensions), [])
+    assert.equal(await readFile(target, 'utf8'), updated)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('OmO options file applies on reload and keeps session overrides', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-config-'))
+  const first = host()
+  const fresh = host()
+  const config = join(dir, 'shared options.json')
+  const extensions = join(dir, 'extensions')
+  const loader = join(extensions, 'vargus.ts')
+  const readRow = (h: ReturnType<typeof host>) => h.row?.render(200).join('') ?? ''
+  try {
+    await writeFile(config, '{"model":false,"rateLimits":false}')
+    await omo(['install', '--dir', extensions])
+    await omo(['install', '--config', relative(process.cwd(), config), '--dir', extensions])
+    const installed = await readFile(loader, 'utf8')
+    await omo(['install', '--dir', extensions])
+    assert.equal(await readFile(loader, 'utf8'), installed)
+    const { default: factory } = await import(pathToFileURL(loader).href)
+
+    first.load(factory); first.event('session_start')
+    assert.equal(first.hidden, true)
+    assert.doesNotMatch(readRow(first), /sol/)
+    assert.equal(first.listeners, 0)
+    await first.command('config {"model":true}')
+    assert.match(readRow(first), /sol/)
+    assert.equal(first.listeners, 0)
+
+    await writeFile(config, '{"model":false,"rateLimits":true}')
+    first.event('session_shutdown')
+    first.load(factory); first.event('session_start')
+    assert.match(readRow(first), /sol/)
+    assert.equal(first.listeners, 1)
+    fresh.load(factory); fresh.event('session_start')
+    assert.doesNotMatch(readRow(fresh), /sol/)
+    assert.equal(fresh.listeners, 1)
+
+    const invalid = join(dir, 'invalid.json')
+    await writeFile(invalid, '[]')
+    await assert.rejects(omo(['install', '--dir', extensions, '--config', invalid]), /JSON options object/)
+    assert.equal(await readFile(loader, 'utf8'), installed)
+    await omo(['remove', '--dir', extensions])
+    assert.deepEqual(await readdir(extensions), [])
+    assert.equal(await readFile(config, 'utf8'), '{"model":false,"rateLimits":true}')
+  } finally {
+    first.event('session_shutdown'); fresh.event('session_shutdown')
+    await rm(dir, { recursive: true, force: true })
+  }
 })
