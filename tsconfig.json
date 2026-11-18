@@ -17,7 +17,6 @@
     ".claude-plugin/types",
     "hooks",
     "src/hosts/claude",
-    "types",
     "tests/**/*.test.ts"
   ],
   "exclude": [

@@ -1274,6 +1274,7 @@ the status-line payload and teammates running in their own tmux pane.
 .claude-plugin/plugin.json       Claude manifest, userConfig and state contract
 hooks/hooks.json                 points directly to ../src/hosts/claude/register.ts
 src/hosts/claude/register.ts      Claude mod lifecycle and wiring
+src/hosts/claude/state.d.ts       self-contained Claude $.state contract
 src/hosts/claude/collect/         Claude collectors, authentication and polling
 src/hosts/claude/write.ts         Claude native line file
 src/hosts/claude/paths.ts         pure Claude config/data path rules
@@ -1290,7 +1291,6 @@ src/outputs/tmux/                tmux encoding, pane ownership and row lifecycle
 src/cli.ts                      CLI dispatch
 bin/vargus                      Bash symlink entry for the TypeScript CLI
 bin/vargus.cmd                  Windows batch entry for the TypeScript CLI
-types/index.d.ts                self-contained Claude $.state contract
 tests/*.test.ts                 Claude engine and shared rendering tests
 tests/node/*.test.mts            Node boundaries, Antigravity, Codex and tmux integration
 ```

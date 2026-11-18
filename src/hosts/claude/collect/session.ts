@@ -30,7 +30,7 @@ import type {
   SessionMeasureInput, ToolCallInput, TurnStepInput, TurnStepResult,
 } from 'claude-code'
 
-import type { VargusCounts } from '../../../../types'
+import type { VargusCounts } from '../state'
 
 const COUNTS = { plugin: 'vargus', key: 'counts' } as const
 

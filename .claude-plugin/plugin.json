@@ -7,7 +7,7 @@
   },
   "repository": "https://github.com/zhoufanscut/VArgus",
   "license": "MIT",
-  "types": "./types/index.d.ts",
+  "types": "./src/hosts/claude/state.d.ts",
   "userConfig": {
     "folder": {
       "type": "boolean",
