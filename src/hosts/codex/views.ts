@@ -119,14 +119,21 @@ function withoutWarning(line: string): string {
   return line.replace(/\s+(?:·\s+)?⚠ \d+(?: warnings? · .+ to view| · .+)?$/, '')
 }
 
-function draftFrame(screen: ViewScreen): { start: number; footer: string[] } | undefined {
+function emptySideComposer(screen: ViewScreen): boolean {
+  const line = screen.lines[screen.y] ?? ''
+  return screen.x === 2 && livePrompt(line) && plain(line) === '› Ask a follow-up question'
+    && /\x1b\[(?:[0-9]+;)*2mAsk a follow-up question/.test(line)
+}
+
+function draftFrame(screen: ViewScreen): { start: number; footer: string[]; side: boolean } | undefined {
   if (screen.x < 2) return
   let end = screen.lines.length - 1
   while (end > screen.y && !plain(screen.lines[end]!).trim()) end--
   // Codex can share this hint row with a full, compact or count-only warning notice.
   const hint = withoutWarning(plain(screen.lines[end] ?? '').trim())
   const shell = /\bShell mode$/.test(hint)
-  if (end <= screen.y || (!shell && !/\b\d+% context left$/.test(hint))) return
+  const side = /(?:^| · | {2,})Side from (?:main|parent) thread\b.* · [^·]+ to (?:close|archive)$/.test(hint)
+  if (end <= screen.y || (!side && !shell && !/\b\d+% context left$/.test(hint))) return
   let footer = end
   while (footer > screen.y + 1 && plain(screen.lines[footer - 1]!).trim()) footer--
   if (footer <= screen.y + 1 || plain(screen.lines[footer - 1]!).trim()) return
@@ -140,20 +147,21 @@ function draftFrame(screen: ViewScreen): { start: number; footer: string[] } | u
   // Parent-owned children retain a bold arrow but have a dim placeholder, which
   // can be clipped before the existing empty-composer guard recognizes it.
   if (/\x1b\[(?:[0-9]+;)*2m(?:Ask Codex|Viewing sub-agent)/.test(screen.lines[start]!)) return
-  if (plain(screen.lines[start]!).startsWith('! ') !== shell) return
+  if (!side && plain(screen.lines[start]!).startsWith('! ') !== shell) return
   for (let i = start + 1; i < footer - 1; i++) {
     const line = plain(screen.lines[i]!)
     if (line.trim() && !line.startsWith('  ')) return
   }
-  return { start, footer: screen.lines.slice(footer, end + 1).map(plain) }
+  return { start, footer: screen.lines.slice(footer, end + 1).map(plain), side }
 }
 
-// An unlabelled editable draft can belong to any view. It permits showing a
-// historical snapshot, never assigning current readings to the root.
-export function hiddenDraft(screen: ViewScreen): boolean {
+// An unidentified draft or a side chat can show the last confirmed snapshot.
+export function canHoldReadings(screen: ViewScreen): boolean {
   if (!screen.visible || screen.command !== 'codex' || codexComposer(screen, '')) return false
+  if (emptySideComposer(screen)) return true
   const draft = draftFrame(screen)
   if (!draft) return false
+  if (draft.side) return true
   const footer = draft.footer.join('\n')
   return !/[`…]/.test(footer) && !/^\s*Main \[default\]/m.test(footer)
     && !draft.footer.some(line => line.split(' · ').some(field => isId(field.trim())))
@@ -162,8 +170,10 @@ export function hiddenDraft(screen: ViewScreen): boolean {
 // Resolve the displayed saved-log family through the versioned Codex UI.
 export function selectedView<T extends { thread: string; path?: string }>(screen: ViewScreen,
   family: T[], root: string, identity: 'first' | 'whole' | 'none' = 'whole'): T | undefined {
-    if (!screen.visible || screen.command !== 'codex') return
-    const draft = codexComposer(screen, '') ? undefined : draftFrame(screen)
+    if (!screen.visible || screen.command !== 'codex' || emptySideComposer(screen)) return
+    const empty = codexComposer(screen, '')
+    const draft = empty ? undefined : draftFrame(screen)
+    if (draft?.side) return
     const composer = plain(screen.lines[draft?.start ?? screen.y] ?? '')
     if (!composer.startsWith('› ') && !(draft && composer.startsWith('! '))) return
     const rows = draft?.footer ?? screen.lines.slice(screen.y + 1, screen.y + 4).map(plain).filter(l => l.trim())
@@ -175,10 +185,11 @@ export function selectedView<T extends { thread: string; path?: string }>(screen
         return id ? family.find(view => view.thread === id) : undefined
       }
     }
-    // Codex appends the contextual label after configurable items, before the
-    // agent-navigation hint. While typing, a middle dot can separate the label
-    // from the context hint instead. Titles and branches can contain backticks.
-    const label = [...footer.matchAll(/(?:^| · )(Main \[default\]|`([^`\n]+)`)(?= · [^·\n]* for agents\b|[ \t]*(?:(?:· )?\d+% context left)?$)/gm)].at(-1)
+    // The label can follow configurable items or be right-aligned beside the
+    // native shortcuts after those items clear. Titles can contain backticks.
+    const label = [...footer.matchAll(
+      /(?:^| · | for (?:agents|shortcuts) +)(Main \[default\]|`([^`\n]+)`)(?= · [^·\n]* for agents\b|[ \t]*(?:(?:· )?\d+% context left)?$)/gm,
+    )].at(-1)
     if (label?.[1] === 'Main [default]') return family.find(view => view.thread === root)
     if (label?.[2] && (footer.includes(' for agents') || composer.startsWith('› Viewing sub-agent') || draft)) {
       const matched = family.filter(v => v.path === label[2])
@@ -187,5 +198,5 @@ export function selectedView<T extends { thread: string; path?: string }>(screen
     // Empty parent-owned children use a dim placeholder but allow editable
     // drafts. Only the empty primary fallback can use the activation root.
     // Standalone /new and /resume still require a fresh !vargus on binding.
-    if (codexComposer(screen, '') && composer === '› Ask Codex to do anything') return family.find(view => view.thread === root)
+    if (empty && composer === '› Ask Codex to do anything') return family.find(view => view.thread === root)
 }

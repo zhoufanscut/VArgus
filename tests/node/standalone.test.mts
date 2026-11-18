@@ -35,11 +35,12 @@ for (const fixture of [
     if (req.method !== 'POST') { res.end('{}'); return }
     let text = ''; for await (const part of req) text += String(part)
     const title = JSON.parse(text).text?.format !== undefined
+    const reply = text.includes('VARGUS_SIDE_QUESTION') ? 'LOCAL SIDE RESPONSE' : 'LOCAL CONTROL RESPONSE'
     const id = `response_${++posts}`
     const events = [
       { type: 'response.created', response: { id } },
       { type: 'response.output_item.done', item: { type: 'message', role: 'assistant', id: `msg_${id}`,
-        content: [{ type: 'output_text', text: title ? JSON.stringify({ title: 'Local control test' }) : 'LOCAL CONTROL RESPONSE' }] } },
+        content: [{ type: 'output_text', text: title ? JSON.stringify({ title: 'Local control test' }) : reply }] } },
       { type: 'response.completed', response: { id, usage: { input_tokens: 42424, input_tokens_details: { cached_tokens: 40000 },
         output_tokens: 777, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 43201 } } },
     ]
@@ -207,6 +208,30 @@ trust_level = "trusted"
       const controlDir = join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`)
       const file = (await readdir(controlDir)).find(name => name.endsWith('.json'))!
       const runtime = async () => JSON.parse(await readFile(join(controlDir, file), 'utf8'))
+      const main = await runtime(), mainBackups = await readdir(footerDir)
+      await submit('/btw VARGUS_SIDE_QUESTION')
+      await wait(screen, /LOCAL SIDE RESPONSE/)
+      const sideFrame = await wait(screen, /› Ask a follow-up question/)
+      assert.match(sideFrame.slice(sideFrame.lastIndexOf('› Ask a follow-up question')), footerMatches)
+      const sidePosts = posts
+      assert.ok(sidePosts > afterTurn)
+      const heldRow = async () => (await runtime()).paused?.thread === main.thread ? row() : ''
+      await wait(heldRow, /token:6\.4k/)
+      assert.equal((await runtime()).selected, undefined)
+      await tmux('send-keys', '-l', '-t', pane, 'A preserved side draft')
+      await delay(1400)
+      assert.match(await heldRow(), /token:6\.4k/)
+      assert.match(await screen(), /› A preserved side draft/)
+      await tmux('send-keys', '-t', pane, 'C-e', 'C-u')
+      await wait(screen, /› Ask a follow-up question/)
+      await tmux('send-keys', '-t', pane, 'C-c')
+      await wait(async () => (await runtime()).selected ?? '', new RegExp(main.thread))
+      assert.equal((await runtime()).paused, undefined)
+      assert.match(await row(), /token:6\.4k/)
+      assert.deepEqual(await readdir(footerDir), mainBackups)
+      assert.equal(posts, sidePosts)
+      afterTurn = sidePosts
+
       const beforeUpgrade = await runtime()
       // Load a separate legacy-style worker: it reports v5 and retains the old
       // false option. Bare on must replace that Node process and drop the key.

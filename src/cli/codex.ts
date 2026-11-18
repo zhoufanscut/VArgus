@@ -7,7 +7,7 @@ import { randomBytes, createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { TmuxOutput } from '../outputs/tmux/client.ts'
 import { findRollout, RolloutReader } from '../hosts/codex/rollout.ts'
-import { Views, hiddenDraft, selectedView, type View, type ViewScreen } from '../hosts/codex/views.ts'
+import { Views, canHoldReadings, selectedView, type View, type ViewScreen } from '../hosts/codex/views.ts'
 import { applicationTarget, type Target } from '../outputs/tmux/target.ts'
 import { PaneInput } from '../outputs/tmux/input.ts'
 import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, FooterSettings, type FooterSelection } from '../hosts/codex/footer.ts'
@@ -349,7 +349,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
       } catch (e) { error = (e as Error).message }
     }
     if (!view) error = 'View identity is unknown; widen the pane or close the popup and leave the composer empty.'
-    const hold = !!(lastReadings && !view && hiddenDraft(screen))
+    const hold = !!(lastReadings && !view && canHoldReadings(screen))
     if (mode !== 'on') paused = undefined
     if (mode === 'on' && (changed || Date.now() >= renderAt || hold !== !!paused)) {
       renderAt = Date.now() + 1000

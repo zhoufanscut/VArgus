@@ -581,9 +581,9 @@ The helper follows the displayed parent or subagent through Alt+Left/Right and
 `/subagents`. Each view shows its own recorded readings; child totals are not
 aggregated. VArgus matches Codex's contextual agent label to saved session metadata.
 If a popup, clipped label or ambiguous agent path prevents identification, the row
-blanks until the view can be identified again, except for the last-confirmed draft
-snapshot described below. At an empty composer, blank content also releases this
-pane's extra tmux row. The last pane to release it restores the original bar height,
+blanks until the view can be identified again or the snapshot rules below apply.
+At an empty composer, blank content also releases this pane's extra tmux row.
+The last pane to release it restores the original bar height,
 so `/new` can show the native Codex footer without an empty extra row. Content
 returning brings VArgus back. On Linux/macOS, another pane using VArgus keeps the
 extra row in its window; windows without VArgus keep the original height. `status` reports the current view or pause.
@@ -592,8 +592,8 @@ to bind the new conversation. Its token total covers recorded uncached input and
 Tool counts replay completed visible items and exclude `!` controls. `🤖2` counts
 recorded subagent starts in the displayed conversation; `⚡3` counts observed skill
 loads, once per skill path per user turn. Workflow counts are omitted. Missing readings stay hidden.
-Ephemeral chats without a saved transcript are unsupported. Log-backed readings
-update when Codex writes them; model/effort picks are not inferred ahead of that.
+Live readings come from saved transcripts and update as Codex writes them.
+Model and effort picks appear once recorded.
 For paginated subagent logs with Codex's recorded history boundary, VArgus skips
 inherited parent activity and counts the child's own work. Inherited skill catalogs
 can still identify later skill reads by the child. Logs without that supported
@@ -638,13 +638,19 @@ the last confirmed readings while typing hides the view label, including with pl
 `!vargus on`; no options file is needed. Readings and time stay frozen without an
 extra label in the row; `!vargus status` reports that the current view is unknown.
 These historical readings may belong to a different view after navigation.
-Live readings resume when the view is identified again. This needs a previously
-rendered snapshot in the current helper plus the native `% context left` or matched
-`Shell mode` hint. A native warning notice beside the hint keeps these readings
-visible. Dialogs, explicit foreign/clipped identities and unsupported
-layouts still blank the row. Releasing the extra row at an empty composer also
-discards its snapshot, so typing in a new conversation cannot revive old readings.
+Live readings resume when the view is identified again. Holding readings in an
+ordinary draft requires a previously rendered snapshot in the current helper and
+the native `% context left` or matching `Shell mode` hint. A native warning beside
+the hint keeps the snapshot visible. Dialogs, unsupported layouts, and ordinary
+drafts with foreign or clipped identities blank the row. Releasing the extra row
+at an empty composer also discards its snapshot, so typing in a new conversation
+cannot revive old readings.
 Reloading discards the snapshot until a view is recognized again.
+
+Side chats opened with `/btw` or `/side` keep the last confirmed readings while
+the side chat prompt or its draft hint is visible. Live readings resume when you
+return to a recognized saved conversation.
+
 See [Narrow terminals and SSH](#narrow-terminals-and-ssh) for
 footer clipping and restore commands that would wrap. A visible native statusline error
 makes completion inconclusive, including an error from an earlier attempt: the

@@ -408,8 +408,8 @@ The official [hooks documentation](https://learn.chatgpt.com/docs/hooks#common-i
 says the transcript format "isn't a stable interface". No hook installation is
 required for these controls: their environment supplies the exact thread identity.
 Compatibility comes from the versioned log fixtures and the real official TUI
-with a localhost mock provider. Ephemeral chats have no required saved log and
-are refused. Changes not yet written to the log remain unknown. `hosts/codex/views.ts`
+with a localhost mock provider. Live readings and `on` require a saved transcript.
+Changes not yet written to the log remain unknown. `hosts/codex/views.ts`
 matches the contextual footer below the composer to `session_meta` child paths and
 parent relationships. In checked source `tui/src/app/agent_navigation.rs`,
 `active_agent_label` returns a backtick-wrapped `agent_path` for a child and
@@ -418,9 +418,9 @@ when configurable items are cleared. For on-mode readings, the catalog rejects
 ambiguous/reused paths within the bound family; unrelated families do not select a child. A full unambiguous UUID
 field anywhere in the native footer selects an exact known family member before path
 matching; a full foreign ID stops selection. This also recognizes a child when a
-crowded footer clips its path. Without that ID, clipped paths, popups and other
-unrecognized views blank the row and pause footer commands. Log
-mtime is never a selection signal. The writable primary prompt uses the activation's
+crowded footer clips its path. Clipped paths and popups can leave the view unknown.
+Footer commands pause for unknown views, and the display follows the snapshot rules
+below. Log mtime is never a selection signal. The writable primary prompt uses the activation's
 thread identity when its Main label is absent; empty parent-owned child views use
 a dim placeholder even though their drafts remain editable. Without the optional startup hook, `/new` and `/resume` require `on` again; this is not a general
 external frontend-selection API. Future host format changes must
@@ -438,6 +438,12 @@ a child identity. A draft can retain the contextual Main/path label with a middl
 separator before the context percentage and no agent-navigation hint. Display
 matching accepts that suffix as well as a space-separated context hint, while
 startup identity and footer commands still require an empty composer.
+
+After `/statusline --clear`, Codex 0.169.1 can align the agent label and context
+percentage to the right of the native shortcuts. In the Linux reload and
+fullscreen captures, the composer was empty and the full child path was visible.
+Replacing just the gap between the shortcuts and label with ` · ` let the old
+parser resolve the child. Display and footer delivery now recognize that gap.
 
 For native ID matching, a known first-item `thread-id` (or legacy `session-id`) layout needs the full ID
 prefix to remain visible; later fields may be clipped. Other item orders require
@@ -467,9 +473,10 @@ chose last readings after the indistinguishable child-draft probe and later aske
 to remove the visible paused marker.
 
 The display-only draft frame requires a bold live arrow (or `!`) and a native
-`% context left` hint (or `Shell mode` with a live `!`) below the textarea. It
-locates the complete footer after wrapped/multiline input, keeping typed agent
-paths and UUIDs outside that metadata. Native IDs retain ambiguity/clipping rules.
+hint below the textarea. It accepts `% context left`, `Shell mode` with a live `!`,
+or the side chat hint. It locates the complete footer after wrapped or multiline
+input, keeping typed agent paths and UUIDs outside that metadata. Native IDs retain
+ambiguity and clipping rules.
 Codex can append a warning notice on the same hint row, separated by spaces or
 another middle dot. Source `8703d32bd0`,
 `bottom_pane/chat_composer/warning_notice.rs`, emits `format!("{count} warning{plural}")`
@@ -479,12 +486,19 @@ match; the original footer still supplies UUID identity and clipping checks. A c
 draft frame with `82% context left` followed by `⚠ 1 warning · f2 to view` was
 rejected before the fix; removing only the notice restored recognition. Fixtures
 cover context and shell hints with each notice form; compact forms are source-derived.
-No paused snapshot is shown for explicit foreign/clipped metadata, dim history or
-placeholders, reversed picker arrows, or other unrecognized screens. Existing
-Main/path selection remains intact. Startup matching and footer delivery retain
-their strict empty-editor guards. Off removes the row immediately. The snapshot
-is local to one loaded helper; reload or a fresh activation needs a recognized
-view before it can hold readings. Claude does not use this standalone holding behavior.
+The snapshot for an ordinary draft requires a live composer and an unlabelled
+footer. Startup matching and footer delivery retain their strict empty-editor
+guards. Off removes the row immediately. The snapshot is local to one loaded
+helper; reload or a fresh activation needs a recognized view before it can hold
+readings. Claude does not use this standalone holding behavior.
+
+`/btw` and `/side` open a side chat. In a Codex 0.169.1 fullscreen probe, the
+side chat displayed its own Thread ID and the set of saved rollouts stayed the
+same. The side chat's dim `Ask a follow-up question` placeholder or the native
+`Side from …` hint below a live draft keeps the last confirmed readings frozen.
+The helper leaves the side thread unselected and resumes live readings and
+footer automation in a recognized saved conversation.
+[Codex side chats](https://learn.chatgpt.com/docs/developer-commands#start-a-side-chat-with-side)
 
 The official-TUI probes distinguished this from row allocation or helper exit:
 ordinary parent text lost selection while clearing restored it; typing the exact
