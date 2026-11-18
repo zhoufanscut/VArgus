@@ -1255,7 +1255,7 @@ the status-line payload and teammates running in their own tmux pane.
 
 | term | meaning |
 |---|---|
-| mod | a plugin whose `hooks/hooks.json` names a hooks module: code that stays loaded for the session |
+| mod | a plugin whose hook descriptor names a hooks module: code that stays loaded for the session |
 | the host | Claude Code as the mod sees it: the events it raises and the `$` interface it hands each hook |
 | the line | what VArgus shows: one or more rows of text with ANSI colours |
 | line file | the file the mod writes the line to, one per session, replaced whole on each write ([The line file](#the-line-file)) |
@@ -1271,9 +1271,9 @@ the status-line payload and teammates running in their own tmux pane.
 ## How it works
 
 ```
-.claude-plugin/plugin.json       Claude manifest, userConfig and state contract
-hooks/hooks.json                 points directly to ../src/hosts/claude/register.ts
+.claude-plugin/plugin.json       Claude manifest, userConfig, hook and state paths
 src/hosts/claude/register.ts      Claude mod lifecycle and wiring
+src/hosts/claude/hooks.json       hook descriptor pointing to ./register.ts
 src/hosts/claude/state.d.ts       self-contained Claude $.state contract
 src/hosts/claude/collect/         Claude collectors, authentication and polling
 src/hosts/claude/write.ts         Claude native line file
@@ -1294,6 +1294,13 @@ bin/vargus.cmd                  Windows batch entry for the TypeScript CLI
 tests/*.test.ts                 Claude engine and shared rendering tests
 tests/node/*.test.mts            Node boundaries, Antigravity, Codex and tmux integration
 ```
+
+The plugin manifest's `hooks` field names the hook descriptor. The mods reference defines the
+module path as “relative to this file”, so the descriptor can name the adjacent `./register.ts`.
+[Claude Code mods reference](https://code.claude.com/docs/en/plugins/mods/reference#files)
+
+A throwaway mod ran its `session.start` hook from this layout when loaded with `--plugin-dir`
+on Claude Code 2.1.299 and 2.1.323.
 
 Collectors hear events and update values; the renderer turns them into text; the writer puts the
 text in the line file. The reader prints it on Claude Code's next status-line run.

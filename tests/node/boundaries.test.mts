@@ -91,8 +91,10 @@ test('shared modules have no host, display, Node or Claude API imports; host col
 })
 
 test('the reachable Claude mod graph excludes Node code', async () => {
-  const manifest = JSON.parse(await readFile('hooks/hooks.json', 'utf8')) as { modules: string[] }
-  const pending = manifest.modules.map(spec => resolve(root, 'hooks', spec))
+  const plugin = JSON.parse(await readFile(join(root, '.claude-plugin/plugin.json'), 'utf8')) as { hooks: string }
+  const hookFile = resolve(root, plugin.hooks)
+  const { modules } = JSON.parse(await readFile(hookFile, 'utf8')) as { modules: string[] }
+  const pending = modules.map(spec => resolve(dirname(hookFile), spec))
   const visited = new Set<string>()
   while (pending.length) {
     const file = pending.pop()!

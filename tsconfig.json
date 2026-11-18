@@ -15,7 +15,6 @@
   },
   "include": [
     ".claude-plugin/types",
-    "hooks",
     "src/hosts/claude",
     "tests/**/*.test.ts"
   ],
