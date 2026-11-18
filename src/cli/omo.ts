@@ -7,8 +7,8 @@ import { writeSetupFile } from './settings.ts'
 
 const MARKER = '// VArgus OmO native extension loader.\n'
 const HELP = `Usage:
-  vargus omo install [--dir EXTENSIONS_DIRECTORY] [--config FILE]
-  vargus omo remove [--dir EXTENSIONS_DIRECTORY]`
+  vargus install omo [--dir EXTENSIONS_DIRECTORY] [--config FILE]
+  vargus remove omo [--dir EXTENSIONS_DIRECTORY]`
 
 function loaderSource(entrySpecifier: string, configArgument?: string): string {
   return MARKER + (configArgument === undefined

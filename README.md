@@ -101,7 +101,8 @@ forwarding file named `vargus.cmd` in a user PATH directory such as
 Replace the example path with your checkout's absolute path.
 Check any existing launcher before making changes and preserve unrelated commands.
 Add the directory to your user PATH if needed, reopen your terminal, and check
-`vargus --help`.
+`vargus --help`. Use `vargus install --help` or `vargus remove --help` to see the
+supported hosts and options.
 
 ### Remove shared files
 
@@ -215,10 +216,10 @@ contains the architecture, restoration rules and live verification limits.
 From the [shared checkout](#shared-checkout-and-launcher), install the loader:
 
 ```sh
-./bin/vargus omo install
+./bin/vargus install omo
 ```
 
-On Windows use `bin\vargus.cmd omo install`. The command asks
+On Windows use `bin\vargus.cmd install omo`. The command asks
 `omo config agent-dir --json` for the active agent directory and creates only
 `extensions/vargus.ts` there. Use `--dir EXTENSIONS_DIRECTORY` to choose an explicit
 extension directory. It refuses to overwrite an unrelated or modified loader.
@@ -240,15 +241,15 @@ To use a standalone JSON options file, pass its path at installation. You can
 reuse the file you pass to Codex or Antigravity CLI.
 
 ```sh
-./bin/vargus omo install --config "$HOME/.config/vargus.json"
+./bin/vargus install omo --config "$HOME/.config/vargus.json"
 ```
 
 Use a JSON object with the [shared option keys](src/options.ts), for example
 `{"theme":"ember","session":false}`. The loader saves the absolute path and
 VArgus reads the file when OmO loads the extension. Run `/reload` after editing
-the file. To change the path, rerun `install --config` with the new path. A plain
-`install` keeps the saved path. To stop using the file, run `omo remove` and then
-`omo install` through the VArgus launcher.
+the file. To change the path, rerun `vargus install omo --config FILE` with the new
+path. Reinstalling without `--config` keeps the saved path. To stop using the
+file, run `vargus remove omo` and then `vargus install omo`.
 
 ```text
 /vargus off
@@ -299,10 +300,10 @@ and may also poll Kimi; VArgus does not consume its hidden footer status.
 
 After updating this checkout, run `/reload` in OmO. If the checkout moved or your
 loader still points to the former top-level extension entry, rerun
-`./bin/vargus omo install` first to refresh its target. To remove:
+`./bin/vargus install omo` first to refresh its target. To remove:
 
 ```sh
-./bin/vargus omo remove
+./bin/vargus remove omo
 ```
 
 Then `/reload` or quit each affected OmO session before
@@ -353,7 +354,7 @@ When the user requests this setup, the agent should:
      Running `/statusline <command>` in `agy` saves `statusLine` to `settings.json` and
      activates VArgus immediately in the open TUI with no restart.
    - **When running from another coding agent outside `agy`**: run
-     `vargus antigravity install`. If the installer finds a different command, report it
+     `vargus install antigravity`. If the installer finds a different command, report it
      so the user can choose a status line with `/statusline` in `agy`.
 
 ### Set up Antigravity CLI
@@ -362,7 +363,7 @@ Use the [shared checkout and PATH launcher](#shared-checkout-and-launcher).
 Run this from a terminal on Linux, macOS or Windows:
 
 ```sh
-vargus antigravity install
+vargus install antigravity
 ```
 
 The installer adds `vargus statusline` to `~/.gemini/antigravity-cli/settings.json`
@@ -404,7 +405,7 @@ built-in status line instead of replacing it.
 ### Windows setup for Antigravity CLI
 
 Set up the [Windows PATH launcher](#put-vargus-on-path), then run
-`vargus antigravity install` from a terminal. To save and apply the setting in an
+`vargus install antigravity` from a terminal. To save and apply the setting in an
 open `agy` session, run:
 
 ```text
@@ -492,7 +493,7 @@ When the user requests this setup, the agent should:
 1. Check the [requirements](#requirements) and reuse an existing
    [checkout and PATH launcher](#shared-checkout-and-launcher) when possible.
    Verify `vargus --help` through the launcher.
-2. Run `vargus codex install` for the user's Codex home, or pass
+2. Run `vargus install codex` for the user's Codex home, or pass
    `--home /absolute/path` for another home. Report the checkout, launcher
    and hook file used.
 3. Have the user select **Thread ID** in the `/statusline` picker, review and trust
@@ -537,7 +538,7 @@ Run Codex in native **psmux**, with Windows Node and PowerShell. Use this checko
 A forwarding file keeps the repository-relative entry intact and needs no
 symlink privileges.
 
-Run `vargus codex install` and follow [Automatic startup in Codex](#automatic-startup-in-codex)
+Run `vargus install codex` and follow [Automatic startup in Codex](#automatic-startup-in-codex)
 inside psmux. The setup command writes PowerShell callbacks on Windows.
 
 Windows background child processes use hidden windows. Windows process lookup
@@ -686,7 +687,7 @@ the pending restore before relying on a shorter layout for a new `on`/`off` cycl
 With the [PATH launcher](#put-vargus-on-path) in place, run:
 
 ```sh
-vargus codex install
+vargus install codex
 ```
 
 The command prepares `vargus/autostart` and adds the VArgus **SessionStart** and
@@ -795,7 +796,7 @@ does not build or install anything.
 
 ### Uninstall Codex
 
-1. If you installed automatic startup, run `vargus codex remove` with the
+1. If you installed automatic startup, run `vargus remove codex` with the
    same Codex home. If VArgus uses a custom shell wrapper or appears before
    another callback in its group, remove the VArgus callbacks from `hooks.json`
    by hand. Keep the other callbacks and review the affected groups in
@@ -834,11 +835,11 @@ The plugin uses Claude's native status-line row. Start `claude` normally after s
 With `vargus` on your PATH:
 
 ```sh
-vargus claude install
+vargus install claude
 ```
 
 From the [shared checkout](#shared-checkout-and-launcher), use
-`./bin/vargus claude install`. On Windows use `bin\vargus.cmd claude install` with
+`./bin/vargus install claude`. On Windows use `bin\vargus.cmd install claude` with
 `claude.exe` on your PATH. The installer uses Node.js 24.12 or later, like the
 other `vargus` commands.
 
@@ -969,7 +970,7 @@ reported. Other models' weekly limits use the same threshold when enabled.
 - **Blank a stopped line** (off by default): if the plugin stops mid-session (its module fails
   to load at `/reload-plugins`; turning it off is expected to do the same, not tested), the row
   goes blank within about two minutes instead of showing frozen numbers. After turning it on or
-  off in `/config`, rerun `vargus claude install` for a user-scope install or use the matching
+  off in `/config`, rerun `vargus install claude` for a user-scope install or use the matching
   entry in [Set up the status line](#set-up-the-status-line). The plugin rewrites the line every
   30 s while it is on. If that reader stays configured after you turn the option off, the row
   goes blank whenever the line has not changed for two minutes.

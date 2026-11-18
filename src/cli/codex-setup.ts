@@ -10,7 +10,9 @@ type Callback = { type: string; command?: string; commandWindows?: string; comma
 type Group = { hooks?: Callback[]; matcher?: string }
 type HookFile = { hooks?: Record<string, Group[]> }
 
-const HELP = 'Usage: vargus codex install|remove [--home CODEX_HOME]'
+const HELP = `Usage:
+  vargus install codex [--home CODEX_HOME]
+  vargus remove codex [--home CODEX_HOME]`
 const EVENTS = [
   { name: 'SessionStart', hook: 'session-start', matcher: '^(startup|resume|clear|fork)$' },
   { name: 'UserPromptSubmit', hook: 'prompt', matcher: undefined },

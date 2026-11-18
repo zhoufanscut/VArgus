@@ -50,7 +50,7 @@ async function fixture(t: TestContext) {
     HOME: home, CLAUDE_CONFIG_DIR: config, CLAUDE_CALLS: calls, VARGUS_CLI_MAIN: '1',
   }
   return { config, settings, calls,
-    install: () => exec(process.execPath, [entry, 'claude', 'install'], { cwd: home, env, timeout: 10000, killSignal: 'SIGKILL' }),
+    install: () => exec(process.execPath, [entry, 'install', 'claude'], { cwd: home, env, timeout: 10000, killSignal: 'SIGKILL' }),
     load: async () => JSON.parse(await readFile(settings, 'utf8')),
   }
 }

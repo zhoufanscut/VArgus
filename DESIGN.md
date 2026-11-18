@@ -60,6 +60,8 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
 ### User-facing setup paths
 
 README.md documents each host's integration and the shared checkout and PATH launcher.
+`vargus install HOST` sets up the integration for the selected host. `vargus remove HOST`
+removes the Codex startup hooks or OmO extension loader.
 Remove each integration before checking shared files. Codex controls and Antigravity's
 `statusLine` can share the launcher. The checkout also serves direct commands, OmO's
 extension loader and a Claude directory marketplace. Those references survive
@@ -492,11 +494,11 @@ behavior preserves unknown identity and retains a frozen historical snapshot.
 
 #### Codex startup hooks
 
-`codexAutoStart` defaults to true in the Codex options. `vargus codex install`
+`codexAutoStart` defaults to true in the Codex options. `vargus install codex`
 creates the startup state directory and adds missing SessionStart and
 UserPromptSubmit callbacks to the selected home's `hooks.json`. It preserves
 existing callbacks and their arguments. Generated callbacks invoke the checkout
-entry by absolute path. `vargus codex remove` removes the direct VArgus callbacks.
+entry by absolute path. `vargus remove codex` removes the direct VArgus callbacks.
 If a legacy mixed group would shift a retained callback, removal leaves the file
 intact. In Codex 0.169.1, a shifted callback with an unchanged command and hash
 was marked modified. Thread ID selection and callback trust are set in Codex's UI.
@@ -1037,11 +1039,11 @@ and restores the built-in footer. Shutdown does the same. Each instance owns its
 state. There is no API for retrieving a previous custom footer, so another footer
 extension can compete.
 
-`vargus omo install|remove` queries `omo config agent-dir --json` (bundled
-`docs/agent-directory-selection.md`, version 1 contract), or accepts an explicit
+`vargus install omo` and `vargus remove omo` query `omo config agent-dir --json` (bundled
+`docs/agent-directory-selection.md`, version 1 contract) or accept an explicit
 extension directory. The generated loader imports the checkout entry by file URL.
-`install --config FILE` checks for a readable JSON object and records its absolute
-path in the loader. The extension reads the file during registration, so `/reload`
+`vargus install omo --config FILE` checks for a readable JSON object and records its
+absolute path in the loader. The extension reads the file during registration, so `/reload`
 applies edits. A plain reinstall carries the path forward while updating the import.
 Removal deletes the owned loader and preserves the options file.
 Removal requires reload/quit before deleting the source checkout.
@@ -1185,7 +1187,7 @@ Data sources and caching in `src/hosts/antigravity/`:
   `10 × lastMs` hold expires. Each `git` command uses a 4 s timeout (under `agy`'s 5 s
   `statusLine` limit) so a stalled mount still exits 0 and records its hold-off. Linked
   worktrees (`commondir`) and `detachedHead` ref/operation reads follow the shared Git rules.
-- **Terminal installer**: `vargus antigravity install` sets `statusLine.command` to
+- **Terminal installer**: `vargus install antigravity` sets `statusLine.command` to
   `vargus statusline` and enables the row when the settings have no custom command. The
   [Antigravity status-line guide](https://antigravity.google/docs/cli/statusline/#configuration)
   documents `sh -c` on POSIX and `cmd /c` on Windows. Using the shared PATH launcher
@@ -1259,7 +1261,7 @@ the status-line payload and teammates running in their own tmux pane.
 | 0.1.0's options are the fragment switches and a theme picker (default `graphite`); VantageHUD's other options are built in at their defaults | The maintainer's own VantageHUD config changes only the theme; fewer options to build and test. Custom themes, bar gauges and label overrides come later ([Config](#config)) |
 | Feature defaults follow AGENTS.md | The maintainer chose default-on feature work across hosts; existing option defaults are documented under Config |
 | The mod only observes: a hook on an engine event passes it on unchanged with `next(e)` | A status line has no reason to change or block what the engine and other mods do |
-| Set up from the terminal with `vargus claude install` or follow the README's manual setup | A plugin cannot set `statusLine`, so setup writes the reader entry in Claude's settings |
+| Set up from the terminal with `vargus install claude` or follow the README's manual setup | A plugin cannot set `statusLine`, so setup writes the reader entry in Claude's settings |
 | The mod sits at the repo root, and the repo is its own marketplace; plugin name `vargus` | One repo to install from |
 
 ## Terms
@@ -1562,7 +1564,7 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 
 ## Setup
 
-- `vargus claude install` installs the plugin and inline reader at user scope. It
+- `vargus install claude` installs the plugin and inline reader at user scope. It
   uses Claude Code's [plugin CLI](https://code.claude.com/docs/en/plugins/cli-reference)
   to register the current checkout as a local directory marketplace or reuse the
   registered `vargus` marketplace. Claude Code 2.1.323 rejected adding a second

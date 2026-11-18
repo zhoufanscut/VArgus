@@ -8,12 +8,12 @@ test('removed Codex launcher directs users to standalone controls', async () => 
 })
 
 test('removed Claude launcher directs users to the inline plugin and ignores its old option', async () => {
-  await assert.rejects(main(['claude', '--tmux']), /Start Claude normally.*vargus claude install/)
-  await assert.rejects(main(['claude', 'install', '--extra']), /Usage: vargus claude install/)
+  await assert.rejects(main(['claude', '--tmux']), /Start Claude normally.*vargus install claude/)
+  await assert.rejects(main(['install', 'claude', '--extra']), /vargus install claude/)
   assert.deepEqual(resolveOptions({ tmuxOutput: true }), DEFAULTS)
 })
 
 test('antigravity verb directs users to the installer and in-session configuration', async () => {
-  await assert.rejects(main(['antigravity']), /Usage: vargus antigravity install.*\/statusline/)
-  await assert.rejects(main(['antigravity', 'install', '--extra']), /Usage: vargus antigravity install/)
+  await assert.rejects(main(['antigravity']), /Usage: vargus install antigravity.*\/statusline/)
+  await assert.rejects(main(['install', 'antigravity', '--extra']), /vargus install antigravity/)
 })

@@ -15,7 +15,7 @@ test('Codex setup installs and removes only its own callbacks in the selected ho
     Stop: [{ hooks: [{ type: 'command', command: 'stop-handler' }] }],
   } }
   const path = join(home, 'hooks.json')
-  const run = (action: string) => main(['codex', action, '--home', home])
+  const run = (action: string) => main([action, 'codex', '--home', home])
   try {
     await writeFile(join(home, 'config.toml'), config)
     await writeFile(path, JSON.stringify(existing))
@@ -68,9 +68,9 @@ test('Codex setup reuses legacy callbacks and leaves other handlers in their gro
     await mkdir(home)
     const raw = JSON.stringify(config)
     await writeFile(path, raw)
-    assert.equal(await main(['codex', 'install']), 0)
+    assert.equal(await main(['install', 'codex']), 0)
     assert.equal(await readFile(path, 'utf8'), raw)
-    assert.equal(await main(['codex', 'remove']), 0)
+    assert.equal(await main(['remove', 'codex']), 0)
     assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { hooks: {
       SessionStart: [{ matcher: 'startup', hooks: [other] }],
       UserPromptSubmit: [{ hooks: [] }, { hooks: [other] }],
@@ -94,7 +94,7 @@ test('Codex removal leaves both events intact when it would move a retained call
   } })
   try {
     await writeFile(path, raw)
-    await assert.rejects(main(['codex', 'remove', '--home', home]), /UserPromptSubmit .* would move other callbacks/)
+    await assert.rejects(main(['remove', 'codex', '--home', home]), /UserPromptSubmit .* would move other callbacks/)
     assert.equal(await readFile(path, 'utf8'), raw)
   } finally {
     await rm(home, { recursive: true, force: true })

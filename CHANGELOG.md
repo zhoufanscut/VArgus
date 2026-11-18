@@ -8,16 +8,21 @@ Notable changes to this project. The format follows
 
 ### Added
 
-- `vargus antigravity install` configures the native status line from a terminal
+- `vargus install antigravity` configures the native status line from a terminal
   and preserves any existing custom status line.
-- `vargus claude install` installs the plugin at user scope and configures the
+- `vargus install claude` installs the plugin at user scope and configures the
   inline status line from a terminal.
+
+### Changed
+
+- Setup commands put the action first. Update scripts to use `vargus install HOST`
+  and `vargus remove HOST`. Terminal removal is supported for Codex and OmO.
 
 ### Removed
 
 - Claude Code's optional Detail view and its `/vargus` command. VArgus ignores
   the old `detailView` setting and keeps the saved status-line options.
-- The bundled `vargus-setup` skill. Use `vargus claude install` for user-scope
+- The bundled `vargus-setup` skill. Use `vargus install claude` for user-scope
   setup or follow the manual Claude setup and uninstall instructions in README.md.
 
 ## [0.6.0] - 2026-11-14
