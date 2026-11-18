@@ -40,16 +40,15 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
 
 - `core`, `render`, `theme`, `i18n` and `options` import no host API or output adapter.
   Shared readings use VArgus types, including `RateLimit`, rather than Claude's engine types.
-- Claude, OmO, Codex and Antigravity collectors do not import each other or an output adapter.
+- Each host owns its collection and lifecycle. The boundary test resolves imports
+  before checking their host and output directories, including for new hosts.
 - Output adapters import no host code. `src/cli.ts`, `src/cli` and
   `src/hosts/omo/register.ts` wire collection to display. The OmO registration entry
   alone may import `src/outputs/omo.ts` from within its host directory.
 - The Claude mod imports no Node code. The manifest points directly to its register module:
   Claude Code 2.1.319 validation rejects a re-exported `register` entry point.
-- The Claude plugin, Antigravity CLI `statusLine` command and standalone Codex helper need no npm
-  install or `node_modules` folder. npm supplies development/test tools only; `ws` is used
-  by the hook regression rig to inspect Codex's daemon. `.test.mts` keeps Node tests outside
-  the Claude engine's `.test.ts` runner.
+- The Node TypeScript project includes new host directories under `src`. The
+  Claude project starts at the mod and its tests and follows their imports.
 
 ### User-facing setup paths
 
@@ -1792,9 +1791,10 @@ the Claude mod. A throwaway mod run in a live session settles each.
 
 ## Tests
 
-- `npm ci` installs development/test tools only. `npm test`
-  type-checks the Node graph and runs `.test.mts` files directly in Node: boundary, protocol/log,
-  real app-server/localhost mock-provider turns and isolated tmux lifecycle tests.
+- `npm ci` installs development/test tools. `npm run test:fixtures` type-checks
+  the Node graph and runs local fixtures, including boundaries and protocol/log
+  checks. `npm test` also runs app-server turns with a localhost mock provider
+  and isolated tmux or psmux lifecycle tests.
   Standalone tests copy source, the Bash entry and package metadata without `dist` or
   `node_modules`; legacy-worker and reload probes change the copied `.ts` files.
   Standalone and sibling-view command helpers require the current shell marker's

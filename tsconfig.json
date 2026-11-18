@@ -19,18 +19,11 @@
   "include": [
     ".claude-plugin/types",
     "hooks",
-    "src",
+    "src/hosts/claude",
     "types",
-    "tests"
+    "tests/**/*.test.ts"
   ],
   "exclude": [
-    "src/cli.ts",
-    "src/cli",
-    "src/hosts/antigravity",
-    "src/hosts/codex",
-    "src/hosts/omo",
-    "src/node",
-    "src/outputs/tmux",
     "tests/node"
   ]
 }

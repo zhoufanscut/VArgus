@@ -1067,9 +1067,22 @@ and its tests; Codex's saved-log collection is described separately under
 - [DESIGN.md](DESIGN.md): how VArgus works, every rule with its reason, and what is still to be
   checked.
 - [AGENTS.md](AGENTS.md): working rules for coding agents in this repo.
-- Node development only: `npm ci`, `npm test` (tests require Codex CLI and tmux).
-  On Windows, `npm test` runs shared checks and the native Codex/psmux rig;
-  POSIX executable-shim and Linux engine rigs are excluded and reported.
-  All npm dependencies are development/test tools; users run the source directly.
+- Run `npm ci` for development tools. `npm run test:fixtures` type-checks the
+  Node source and runs local fixtures with Node and Git. `npm test` adds native
+  Codex and tmux checks, or Codex and psmux checks on Windows.
 - Claude checks: `npm run test:claude` runs plugin validation, type-checking, engine
   tests, and the reader/manifest checks. DESIGN.md "Tests" has the details.
+
+### Add a host
+
+Use [Antigravity's stdin command](src/cli/antigravity.ts) as a starting point for
+a command-based host, or [OmO's native registration](src/hosts/omo/register.ts)
+for an in-process extension.
+
+- Add one adapter under `src/hosts/<host>` for readings and host lifecycle.
+- Wire it to the shared renderer and output at a CLI or native entry point.
+  Register any native entry's output import explicitly in the boundary test.
+- Add a fixture that exercises the entry with a representative payload or
+  session. Run `npm run test:fixtures`.
+- Document setup and removal, including any shared checkout or launcher it uses.
+  Keep user installs source-only.

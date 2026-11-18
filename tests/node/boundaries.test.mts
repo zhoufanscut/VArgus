@@ -1,65 +1,113 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readdir, readFile } from 'node:fs/promises'
-import { join, resolve, dirname } from 'node:path'
+import { readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+
+const root = await realpath('.')
+const sharedAreas = new Set(['core', 'render', 'theme', 'i18n', 'options.ts'])
+const nativeOutputs = new Map([
+  ['src/hosts/omo/register.ts', 'src/outputs/omo.ts'],
+])
+
+function projectPath(file: string): string {
+  return relative(root, file).split(sep).join('/')
+}
 
 async function files(dir: string): Promise<string[]> {
   return (await Promise.all((await readdir(dir, { withFileTypes: true })).map(e =>
-    e.isDirectory() ? files(join(dir, e.name)) : /\.[cm]?tsx?$/.test(e.name) ? [join(dir, e.name).replaceAll('\\', '/')] : []))).flat()
+    e.isDirectory() ? files(join(dir, e.name)) : /\.[cm]?tsx?$/.test(e.name) ? [join(dir, e.name)] : []))).flat()
 }
 
+// Consume comments and unrelated quoted text while collecting literal module
+// paths. Dynamic imports may use an ordinary string or a constant template.
+const moduleText = new RegExp([
+  String.raw`//[^\r\n]*|/\*[\s\S]*?\*/`,
+  String.raw`(?:\bfrom\b|\bimport\b(?:\s*\(\s*)?)\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)')`,
+  '\\bimport\\s*\\(\\s*`([^`$\\r\\n]+)`',
+  String.raw`"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'`,
+].join('|'), 'g')
+
+function importSpecifiers(source: string): string[] {
+  return [...source.matchAll(moduleText)].flatMap(([, double, single, template]) => {
+    const specifier = double ?? single ?? template
+    return specifier === undefined ? [] : [specifier]
+  })
+}
+
+async function localModule(file: string, spec: string): Promise<string> {
+  const base = resolve(dirname(file), spec)
+  for (const candidate of [base, base + '.ts', base + '.tsx', base + '.d.ts',
+    join(base, 'index.ts'), join(base, 'index.d.ts')]) {
+    try {
+      if ((await stat(candidate)).isFile()) return await realpath(candidate)
+    } catch (error) {
+      if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
+    }
+  }
+  assert.fail(`Cannot resolve ${spec} from ${projectPath(file)}`)
+}
+
+test('module specifiers include literal dynamic imports and skip comments', () => {
+  const source = [
+    "// import '../retired.ts'",
+    "/* export * from '../retired.ts' */",
+    `const message = "Try import '../retired.ts'"`,
+    "import type { Value } from '../core/values.ts'",
+    'export { example } from "../core/example.ts"',
+    'const load = import(`../other/entry.ts`)',
+  ].join('\n')
+  assert.deepEqual(importSpecifiers(source), ['../core/values.ts', '../core/example.ts', '../other/entry.ts'])
+})
+
 test('shared modules have no host, display, Node or Claude API imports; host collectors are independent', async () => {
-  const checked = await files('src')
-  assert.ok(checked.includes('src/hosts/claude/register.ts'))
-  assert.ok(checked.includes('src/hosts/codex/collect.ts'))
-  assert.ok(checked.includes('src/hosts/antigravity/collect.ts'))
-  assert.ok(checked.includes('src/hosts/omo/collect.ts'))
-  assert.ok(checked.includes('src/hosts/omo/register.ts'))
-  assert.ok(checked.includes('src/cli.ts'))
+  const checked = await files(join(root, 'src'))
+  assert.ok(checked.includes(join(root, 'src', 'hosts', 'claude', 'register.ts')))
+  assert.ok(checked.includes(join(root, 'src', 'cli.ts')))
   for (const file of checked) {
-    const text = await readFile(file, 'utf8')
-    const imports = [...text.matchAll(/(?:from\s+|import\s*(?:\(\s*)?)['"]([^'"]+)['"]/g)].map(m => m[1]!)
-    for (const spec of imports) assert.ok(spec.startsWith('.') || spec.startsWith('node:') || spec === 'claude-code', `${file} imports an npm package: ${spec}`)
-    if (/^src\/(core|render|theme|i18n)\//.test(file) || file === 'src/options.ts') {
-      for (const spec of imports) assert.ok(!/hosts|outputs|claude-code|^node:/.test(spec), `${file} imports ${spec}`)
+    const path = projectPath(file)
+    const [, area, host] = path.split('/')
+    const shared = sharedAreas.has(area!)
+    const claude = area === 'hosts' && host === 'claude'
+    for (const spec of importSpecifiers(await readFile(file, 'utf8'))) {
+      const message = `${path} imports ${spec}`
+      if (!spec.startsWith('.')) {
+        assert.ok(spec.startsWith('node:') ? !shared && !claude : spec === 'claude-code' && claude, message)
+        continue
+      }
+      const target = projectPath(await localModule(file, spec))
+      const [top, targetArea, targetHost] = target.split('/')
+      if (top !== 'src') continue
+      const cli = targetArea === 'cli' || targetArea === 'cli.ts'
+      if (shared) assert.ok(!cli && !['hosts', 'outputs', 'node'].includes(targetArea!), message)
+      if (claude) assert.notEqual(targetArea, 'node', message)
+      if (area === 'hosts') {
+        assert.ok(!cli, message)
+        if (targetArea === 'hosts') assert.equal(targetHost, host, message)
+        if (targetArea === 'outputs') assert.equal(target, nativeOutputs.get(path), message)
+      }
+      if (area === 'outputs') assert.ok(!cli && targetArea !== 'hosts', message)
     }
-    if (file.startsWith('src/hosts/codex/')) for (const spec of imports) assert.ok(!/claude|antigravity|omo|claude-code|outputs/.test(spec), `${file} imports ${spec}`)
-    if (file.startsWith('src/hosts/claude/')) for (const spec of imports) assert.ok(!/codex|antigravity|omo|outputs/.test(spec), `${file} imports ${spec}`)
-    if (file.startsWith('src/hosts/antigravity/')) for (const spec of imports) assert.ok(!/claude|codex|omo|claude-code|outputs/.test(spec), `${file} imports ${spec}`)
-    if (file.startsWith('src/hosts/omo/')) for (const spec of imports) {
-      assert.ok(!/claude|codex|antigravity/.test(spec), `${file} imports ${spec}`)
-      if (/outputs/.test(spec)) assert.ok(file === 'src/hosts/omo/register.ts' && spec === '../../outputs/omo.ts', `${file} imports ${spec}`)
-    }
-    if (file.startsWith('src/outputs/')) for (const spec of imports) assert.ok(!/hosts|claude-code/.test(spec), `${file} imports ${spec}`)
   }
 })
 
 test('the reachable Claude mod graph excludes Node code', async () => {
   const manifest = JSON.parse(await readFile('hooks/hooks.json', 'utf8')) as { modules: string[] }
-  const pending = manifest.modules.map(spec => resolve('hooks', spec))
+  const pending = manifest.modules.map(spec => resolve(root, 'hooks', spec))
   const visited = new Set<string>()
   while (pending.length) {
     const file = pending.pop()!
     if (visited.has(file)) continue
     visited.add(file)
-    const text = await readFile(file, 'utf8')
-    for (const [, spec] of text.matchAll(/(?:from\s+|import\s*)['"]([^'"]+)['"]/g)) {
-      if (!spec!.startsWith('.')) {
+    for (const spec of importSpecifiers(await readFile(file, 'utf8'))) {
+      if (!spec.startsWith('.')) {
         assert.equal(spec, 'claude-code', `${file} imports a package outside the mod API`)
         continue
       }
-      const base = resolve(dirname(file), spec!)
-      const destination = [base, base + '.ts', base + '.tsx', base + '.d.ts', join(base, 'index.ts'), join(base, 'index.d.ts')]
-      let found: string | undefined
-      for (const candidate of destination) {
-        try { await readFile(candidate); found = candidate; break } catch { /* next valid source spelling */ }
-      }
-      assert.ok(found, `Cannot resolve ${spec} from ${file}`)
-      pending.push(found)
+      pending.push(await localModule(file, spec))
     }
   }
-  assert.ok(visited.has(resolve('src/hosts/claude/register.ts')))
-  assert.ok(visited.has(resolve('src/render/index.ts')))
+  assert.ok(visited.has(join(root, 'src', 'hosts', 'claude', 'register.ts')))
+  assert.ok(visited.has(join(root, 'src', 'render', 'index.ts')))
 })
 
 test('user installs declare no npm runtime dependencies', async () => {
