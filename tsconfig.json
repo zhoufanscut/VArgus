@@ -16,9 +16,6 @@
   "include": [
     ".claude-plugin/types",
     "src/hosts/claude",
-    "tests/**/*.test.ts"
-  ],
-  "exclude": [
-    "tests/node"
+    "tests/claude/**/*.test.ts"
   ]
 }

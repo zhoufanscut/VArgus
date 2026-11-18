@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { initialLimits } from '../src/hosts/claude/collect/limits'
-import { initialSession } from '../src/hosts/claude/collect/session'
-import { claudeDisplay } from '../src/hosts/claude/display'
+import { initialLimits } from '../../src/hosts/claude/collect/limits'
+import { initialSession } from '../../src/hosts/claude/collect/session'
+import { claudeDisplay } from '../../src/hosts/claude/display'
 import {
   deriveRepoAndBranch, initialVcs, parseGitStatus, parseSvnInfoXml, parseSvnStatusXml, repoNameFromUrl,
   type VcsValues,
-} from '../src/hosts/claude/collect/vcs'
-import type { FragmentInput, Theme } from '../src/core/types'
-import { en, type Labels } from '../src/i18n/en'
-import { DEFAULTS, type Options } from '../src/options'
-import { branch, repo, status } from '../src/render/fragments/vcs'
-import { makeTheme } from '../src/theme'
+} from '../../src/hosts/claude/collect/vcs'
+import type { FragmentInput, Theme } from '../../src/core/types'
+import { en, type Labels } from '../../src/i18n/en'
+import { DEFAULTS, type Options } from '../../src/options'
+import { branch, repo, status } from '../../src/render/fragments/vcs'
+import { makeTheme } from '../../src/theme'
 
 // The vcs parsers and fragments (DESIGN, "Rules carried over from VantageHUD",
 // git and svn; "Fragments" 9-11; "Languages"). git output captured from git

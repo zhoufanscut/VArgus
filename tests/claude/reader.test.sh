@@ -1,8 +1,8 @@
 #!/bin/sh
 # The statusLine commands from README.md, run against line files in a test home.
-# Run: sh tests/reader.test.sh   (exits 1 on a failure)
+# Run: sh tests/claude/reader.test.sh   (exits 1 on a failure)
 set -u
-root=$(cd "$(dirname "$0")/.." && pwd)
+root=$(cd "$(dirname "$0")/../.." && pwd)
 fails=0
 fail() { echo "FAIL: $*"; fails=$((fails + 1)); }
 

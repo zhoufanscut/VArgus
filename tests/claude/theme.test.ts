@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { DEFAULT_THEME, makeTheme, resolvePalette } from '../src/theme'
-import { PALETTES } from '../src/theme/palettes'
+import { DEFAULT_THEME, makeTheme, resolvePalette } from '../../src/theme'
+import { PALETTES } from '../../src/theme/palettes'
 
 // Themes (DESIGN, "Colours", "Rules carried over from VantageHUD", Themes).
 

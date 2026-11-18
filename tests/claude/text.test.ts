@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { cleanText, shortenHome } from '../src/render/text'
+import { cleanText, shortenHome } from '../../src/render/text'
 
 describe('text', () => {
   test('control characters, ESC included, become ?', async () => {

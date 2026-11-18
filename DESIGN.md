@@ -36,7 +36,7 @@ Code comments cite this file by section name: `(DESIGN, "The line file")`.
 
 ## Hosts and outputs
 
-The boundaries are enforced by `tests/node/boundaries.test.mts`:
+The boundaries are enforced by `tests/shared/boundaries.test.mts`:
 
 - `core`, `render`, `theme`, `i18n` and `options` import no host API or output adapter.
   Shared readings use VArgus types, including `RateLimit`, rather than Claude's engine types.
@@ -1318,8 +1318,13 @@ src/outputs/tmux/                tmux encoding, pane ownership and row lifecycle
 src/cli.ts                      CLI dispatch
 bin/vargus                      Bash symlink entry for the TypeScript CLI
 bin/vargus.cmd                  Windows batch entry for the TypeScript CLI
-tests/*.test.ts                 Claude engine and shared rendering tests
-tests/node/*.test.mts            Node boundaries, Antigravity, Codex and tmux integration
+tests/antigravity/               Antigravity payload, transcripts, CLI and setup
+tests/claude/                    Claude engine, installer, reader and manifest checks
+tests/codex/                     Codex, tmux and psmux tests
+tests/codex/fixtures/            Saved Codex pane inputs for views.test.mts
+tests/omo/                       OmO collection, layout and setup
+tests/shared/                    Cross-host displays, CLI and source boundaries
+tests/run-node.mjs               Node suite discovery and platform selection
 ```
 
 The plugin manifest's `hooks` field names the hook descriptor. The mods reference defines the
@@ -1778,8 +1783,8 @@ the Claude mod. A throwaway mod run in a live session settles each.
 
 ## Tests
 
-- `npm ci` installs development/test tools. `npm run test:fixtures` type-checks
-  the Node graph and runs local fixtures, including boundaries and protocol/log
+- `npm ci` installs development/test tools. `npm run test:local` type-checks
+  the Node graph and runs local checks, including boundaries and protocol/log
   checks. `npm test` also runs app-server turns with a localhost mock provider
   and isolated tmux or psmux lifecycle tests.
   Standalone tests copy source, the Bash entry and package metadata without `dist` or
@@ -1787,7 +1792,7 @@ the Claude mod. A throwaway mod run in a live session settles each.
   Standalone and sibling-view command helpers require the current shell marker's
   native completion footer and an idle activity indicator before sending another control.
   Daemon-heavy Node cases run serially to bound resource use.
-  On Windows, `tests/node/run.mjs` reports and excludes POSIX executable-shim and
+  On Windows, `tests/run-node.mjs` reports and excludes POSIX executable-shim and
   Linux engine rigs, runs the shared checks and `windows.test.mts`, and skips
   the Bash symlink and POSIX metadata-shim cases. The boundary traversal and
   file URL fixture normalize native paths; saved transcript comparisons use
@@ -1807,9 +1812,9 @@ the Claude mod. A throwaway mod run in a live session settles each.
   writer's tests drive the mod through `$.session.start` and answer its calls with hooks of their
   own beneath it (`fs.write`, `fs.list`, `fs.stat`, `process.run`, `session.id`), each returning
   `{ value }`, and end it through `$.session.end` with a `session.end` hook beneath.
-- `sh tests/manifest.test.sh` checks the Claude picker against the shared and
+- `sh tests/claude/manifest.test.sh` checks the Claude picker against the shared and
   Claude-specific keys and defaults in `src/options.ts`.
-- `sh tests/reader.test.sh` checks the README's two reader commands and runs them with `sh`
+- `sh tests/claude/reader.test.sh` checks the README's two reader commands and runs them with `sh`
   and `bash` against a present line file, a missing file and an empty session id. It also checks
   a stale line with `blankStopped`.
 - Development loop: install from the working copy (`claude plugin marketplace add --scope local

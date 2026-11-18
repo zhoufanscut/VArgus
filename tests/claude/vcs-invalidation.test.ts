@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { EngineInterface, ToolCallInput } from 'claude-code'
 
-import { initialVcs, startVcs, toolCalledVcs } from '../src/hosts/claude/collect/vcs'
+import { initialVcs, startVcs, toolCalledVcs } from '../../src/hosts/claude/collect/vcs'
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 30; i++) await Promise.resolve()

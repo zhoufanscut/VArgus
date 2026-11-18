@@ -1,7 +1,7 @@
 import { describe, expect, mock, test, type MockClock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { dataDir, homeDir, moveArgv, removeArgv } from '../src/hosts/claude/write'
+import { dataDir, homeDir, moveArgv, removeArgv } from '../../src/hosts/claude/write'
 
 // The line file (DESIGN, "The line file"), driven through the mod's own hooks.
 

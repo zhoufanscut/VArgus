@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { initialLimits, modelLabel, parseUsage, retryAfterMs, type LimitsValues, type UsageData } from '../src/hosts/claude/collect/limits'
-import { directUsageProvider } from '../src/hosts/claude/collect/usage-providers'
-import { initialSession } from '../src/hosts/claude/collect/session'
-import { claudeDisplay } from '../src/hosts/claude/display'
-import { initialVcs } from '../src/hosts/claude/collect/vcs'
-import type { FragmentInput, Theme } from '../src/core/types'
-import { en, type Labels } from '../src/i18n/en'
-import { DEFAULTS, type Options } from '../src/options'
-import { limits } from '../src/render/fragments/limits'
-import { makeTheme } from '../src/theme'
+import { initialLimits, modelLabel, parseUsage, retryAfterMs, type LimitsValues, type UsageData } from '../../src/hosts/claude/collect/limits'
+import { directUsageProvider } from '../../src/hosts/claude/collect/usage-providers'
+import { initialSession } from '../../src/hosts/claude/collect/session'
+import { claudeDisplay } from '../../src/hosts/claude/display'
+import { initialVcs } from '../../src/hosts/claude/collect/vcs'
+import type { FragmentInput, Theme } from '../../src/core/types'
+import { en, type Labels } from '../../src/i18n/en'
+import { DEFAULTS, type Options } from '../../src/options'
+import { limits } from '../../src/render/fragments/limits'
+import { makeTheme } from '../../src/theme'
 
 // The limits fragment and the usage API's parser (DESIGN, "Rules carried over
 // from VantageHUD": Usage API, Usage cache and staleness, Limits display).

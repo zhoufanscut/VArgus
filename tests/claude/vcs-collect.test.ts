@@ -1,7 +1,7 @@
 import { describe, expect, mock, test, type MockClock } from 'claude-code/testing'
 import type { On, SessionRepo } from 'claude-code'
 
-import { findSvnRoot, resolvePath } from '../src/hosts/claude/collect/vcs'
+import { findSvnRoot, resolvePath } from '../../src/hosts/claude/collect/vcs'
 
 // The vcs collector driven through the mod's own hooks: the git-vs-svn
 // choice, the worktree and detached-HEAD reads from the git dir, and the

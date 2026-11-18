@@ -2,8 +2,8 @@
 # plugin.json's userConfig matches the shared and Claude-specific DEFAULTS in
 # src/options.ts; every line of the DEFAULTS block is one this test reads; the theme
 # picker's options are the palettes in src/theme/palettes.ts, in order.
-# Run: sh tests/manifest.test.sh   (exits 1 on a failure)
-root=$(cd "$(dirname "$0")/.." && pwd)
+# Run: sh tests/claude/manifest.test.sh   (exits 1 on a failure)
+root=$(cd "$(dirname "$0")/../.." && pwd)
 node --input-type=module -e '
 import { readFileSync } from "node:fs"
 const root = process.argv[1]

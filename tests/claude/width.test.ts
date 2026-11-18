@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { stringWidth } from '../src/render/width'
+import { stringWidth } from '../../src/render/width'
 
 // Width (DESIGN, "Rules carried over from VantageHUD"): columns, not length.
 

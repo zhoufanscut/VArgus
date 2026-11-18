@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import type { Fragment, FragmentInput, Values } from '../src/core/types'
-import { resolveLabels } from '../src/i18n'
-import { en } from '../src/i18n/en'
-import { DEFAULTS, resolveOptions, type Options } from '../src/options'
-import { ORDER, render } from '../src/render'
-import { initialLimits } from '../src/hosts/claude/collect/limits'
-import { initialSession } from '../src/hosts/claude/collect/session'
-import { claudeDisplay } from '../src/hosts/claude/display'
-import { initialVcs } from '../src/hosts/claude/collect/vcs'
-import { makeTheme } from '../src/theme'
+import type { Fragment, FragmentInput, Values } from '../../src/core/types'
+import { resolveLabels } from '../../src/i18n'
+import { en } from '../../src/i18n/en'
+import { DEFAULTS, resolveOptions, type Options } from '../../src/options'
+import { ORDER, render } from '../../src/render'
+import { initialLimits } from '../../src/hosts/claude/collect/limits'
+import { initialSession } from '../../src/hosts/claude/collect/session'
+import { claudeDisplay } from '../../src/hosts/claude/display'
+import { initialVcs } from '../../src/hosts/claude/collect/vcs'
+import { makeTheme } from '../../src/theme'
 
 // The composer (DESIGN, "When the line is written", "Fragments", "Config").
 
