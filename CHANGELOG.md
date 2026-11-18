@@ -6,6 +6,11 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `vargus antigravity install` configures the native status line from a terminal
+  and preserves any existing custom status line.
+
 ### Removed
 
 - Claude Code's optional Detail view and its `/vargus` command. VArgus ignores

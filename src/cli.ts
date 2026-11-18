@@ -1,13 +1,14 @@
 const HELP = `Usage:
   vargus omo install|remove [--dir EXTENSIONS_DIRECTORY]
   vargus codex install|remove [--home CODEX_HOME]
+  vargus antigravity install
   vargus statusline [--theme NAME] [--config FILE]
   vargus on|off|status|reload [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
   vargus hook session-start|prompt [--config FILE] [--pane %ID] [--socket PATH]
   vargus tmux-reset
 
-Antigravity CLI runs \`vargus statusline\` natively as \`statusLine.command\` in
-~/.gemini/antigravity-cli/settings.json, piping session JSON on stdin with no tmux.
+Antigravity install sets \`statusLine.command\` in ~/.gemini/antigravity-cli/settings.json.
+Antigravity CLI runs \`vargus statusline\` from PATH and pipes session JSON on stdin.
 
 The tmux row is opt-in for Codex. Standalone on/off hide/restore Codex's saved footer
 through tmux /statusline commands. Off removes the row; inactive views restore
@@ -24,6 +25,12 @@ cleans up an abandoned row when no VArgus helper is still running.
 export async function main(argv: string[]): Promise<number> {
   if (argv[0] === '--help' || !argv.length) { console.log(HELP); return 0 }
   if (argv[0] === 'statusline') return (await import('./cli/antigravity.ts')).statusline(argv.slice(1))
+  if (argv[0] === 'antigravity') {
+    if (argv[1] !== 'install' || argv.length !== 2) {
+      throw new Error('Usage: vargus antigravity install. In an open Antigravity CLI session, use /statusline.')
+    }
+    return (await import('./cli/antigravity-setup.ts')).installAntigravity()
+  }
   if (argv[0] === 'omo') return (await import('./cli/omo.ts')).omo(argv.slice(1))
   if (argv[0] === 'codex' && (argv[1] === 'install' || argv[1] === 'remove')) {
     return (await import('./cli/codex-setup.ts')).codexSetup(argv.slice(1))
@@ -33,7 +40,6 @@ export async function main(argv: string[]): Promise<number> {
   if (argv[0] === 'hook') return (await import('./cli/hooks.ts')).hook(argv.slice(1))
   if (argv[0] === '__row') return (await import('./cli/codex.ts')).rowWorker(JSON.parse(argv[1]!))
   if (argv[0] === 'tmux-reset') { await (await import('./outputs/tmux/client.ts')).TmuxOutput.environment().reset(); return 0 }
-  if (argv[0] === 'antigravity') throw new Error('Start Antigravity CLI normally and set statusLine.command to "vargus statusline".')
   if (argv[0] === 'codex') throw new Error('Start Codex normally in tmux and run !vargus on. The Codex transport launcher was removed.')
   if (argv[0] === 'claude') throw new Error('Start Claude normally and use the VArgus inline plugin. The Claude tmux launcher was removed.')
   throw new Error(HELP)

@@ -20,7 +20,8 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
 - [What it shows](#what-it-shows), [How it works](#how-it-works)
 - [OmO Native](#omo-native): setup, controls, update and removal
 - [Antigravity CLI](#antigravity-cli): [agent setup](#set-up-antigravity-cli-with-an-agent),
-  [manual setup](#set-up-antigravity-cli), [Windows setup](#windows-setup-for-antigravity-cli),
+  [terminal setup](#set-up-antigravity-cli), [in-session setup](#set-up-in-an-open-agy-session),
+  [Windows setup](#windows-setup-for-antigravity-cli),
   [configure](#configure-antigravity-cli), [update](#update-antigravity-cli), [uninstall](#uninstall-antigravity-cli)
 - [Codex CLI](#codex-cli): [agent setup](#set-up-codex-with-an-agent), [manual setup](#set-up-codex),
   [automatic startup](#automatic-startup-in-codex),
@@ -35,7 +36,7 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
 |---|---|---|
 | Claude Code | Inline row under the prompt | [Install the Claude plugin](#set-up-claude) |
 | OmO Native | Native widget under the editor | [Install the native extension](#omo-native) |
-| Antigravity CLI (`agy`) | Native inline `statusLine` under the prompt | [Ask an agent to set it up](#set-up-antigravity-cli-with-an-agent), or [set it up by hand](#set-up-antigravity-cli) |
+| Antigravity CLI (`agy`) | Native inline `statusLine` under the prompt | [Install from a terminal](#set-up-antigravity-cli) or [set it up inside `agy`](#set-up-in-an-open-agy-session) |
 | Codex CLI | tmux row | [Ask an agent to set it up](#set-up-codex-with-an-agent), or [set it up by hand](#set-up-codex) |
 
 The Claude plugin installation is only for Claude Code. Antigravity CLI and Codex use this clone's
@@ -334,19 +335,28 @@ When the user requests this setup, the agent should:
      - Windows: `/statusline vargus statusline`
      Running `/statusline <command>` in `agy` saves `statusLine` to `settings.json` and
      activates VArgus immediately in the open TUI with no restart.
-   - **When running from another coding agent outside `agy`**: read
-     `~/.gemini/antigravity-cli/settings.json` (or
-     `%USERPROFILE%\.gemini\antigravity-cli\settings.json` on Windows) before editing; if an
-     unrelated `statusLine` command is already configured, show it and ask before replacing
-     it; then merge the `statusLine` object from [manual setup](#set-up-antigravity-cli) (or
-     [Windows setup](#windows-setup-for-antigravity-cli) on Windows), preserving every other
-     setting.
+   - **When running from another coding agent outside `agy`**: run
+     `vargus antigravity install`. If the installer finds a different command, report it
+     so the user can choose a status line with `/statusline` in `agy`.
 
 ### Set up Antigravity CLI
 
 Use the [shared checkout and PATH launcher](#shared-checkout-and-launcher).
-Then activate VArgus right inside `agy` (this saves `statusLine` to
-`~/.gemini/antigravity-cli/settings.json` and enables it immediately):
+Run this from a terminal on Linux, macOS or Windows:
+
+```sh
+vargus antigravity install
+```
+
+The installer adds `vargus statusline` to `~/.gemini/antigravity-cli/settings.json`
+and preserves your other settings. It keeps an existing VArgus command and its options,
+and stops if a different status line command is configured. Open or reopen `agy` to
+load the settings. The launcher's directory must be on `agy`'s PATH.
+
+### Set up in an open `agy` session
+
+After setting up the launcher, run this inside `agy` on Linux or macOS to save the
+setting and show the row immediately:
 
 ```text
 /statusline "$HOME/.local/bin/vargus" statusline
@@ -376,7 +386,9 @@ built-in status line instead of replacing it.
 
 ### Windows setup for Antigravity CLI
 
-Set up the [Windows PATH launcher](#put-vargus-on-path), then run inside `agy`:
+Set up the [Windows PATH launcher](#put-vargus-on-path), then run
+`vargus antigravity install` from a terminal. To save and apply the setting in an
+open `agy` session, run:
 
 ```text
 /statusline vargus statusline

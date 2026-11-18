@@ -1174,6 +1174,15 @@ Data sources and caching in `src/hosts/antigravity/`:
   `10 × lastMs` hold expires. Each `git` command uses a 4 s timeout (under `agy`'s 5 s
   `statusLine` limit) so a stalled mount still exits 0 and records its hold-off. Linked
   worktrees (`commondir`) and `detachedHead` ref/operation reads follow the shared Git rules.
+- **Terminal installer**: `vargus antigravity install` sets `statusLine.command` to
+  `vargus statusline` and enables the row when the settings have no custom command. The
+  [Antigravity status-line guide](https://antigravity.google/docs/cli/statusline/#configuration)
+  documents `sh -c` on POSIX and `cmd /c` on Windows. Using the shared PATH launcher
+  keeps executable path quoting out of the command on both platforms. The installer
+  preserves the other settings and existing display options. It leaves direct VArgus
+  commands as configured and stops on a different custom command. The installer takes
+  a VArgus setup lock and rechecks the file before atomically replacing it.
+  A symlinked settings file is updated at its target.
 - **Setup boundary**: in live `agy` 1.5.8, `~/.gemini/antigravity-cli/settings.json` is gated
   by a hardcoded system protection boundary (`Permission denied for read_file(.../settings.json).
   Matches hardcoded system protection boundary rule`), and the default Linux terminal sandbox
