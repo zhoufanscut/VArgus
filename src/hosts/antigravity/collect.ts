@@ -1,4 +1,6 @@
-import { initialLimits, type LimitsValues, type ModelBucket, type RateLimit } from '../../core/limits.ts'
+import { resetTime, showModelWeekly, type QuotaWindow } from '../../core/limits.ts'
+import { en, type Labels } from '../../i18n/en.ts'
+import { DEFAULTS } from '../../options.ts'
 import { initialSession } from '../../core/session.ts'
 import type { Values } from '../../core/types.ts'
 import { initialVcs } from '../../core/vcs.ts'
@@ -40,6 +42,8 @@ export type AntigravityPayload = {
 }
 
 export type AntigravityEnv = {
+  otherModelWeekly?: boolean
+  labels?: Labels
   home?: string
   isWsl?: boolean
   now?: number
@@ -84,17 +88,14 @@ function bucketPercentUsed(bucket: { remaining_fraction: number }): number {
 
 const MAX_DATE_MS = 8.64e15
 
-function bucketResetIso(bucket: AntigravityQuotaBucket, now: number): string | undefined {
-  if (typeof bucket.reset_time === 'string' && !Number.isNaN(Date.parse(bucket.reset_time))) {
-    return bucket.reset_time
-  }
+function bucketResetTime(bucket: AntigravityQuotaBucket, now: number): number | null {
+  const absolute = resetTime(bucket.reset_time)
+  if (absolute !== null) return absolute
   if (typeof bucket.reset_in_seconds === 'number' && Number.isFinite(bucket.reset_in_seconds)) {
     const ms = now + bucket.reset_in_seconds * 1000
-    if (Number.isFinite(ms) && Math.abs(ms) <= MAX_DATE_MS) {
-      return new Date(ms).toISOString()
-    }
+    if (Number.isFinite(ms) && Math.abs(ms) <= MAX_DATE_MS) return Math.trunc(ms)
   }
-  return undefined
+  return null
 }
 
 function preferredQuotaPrefix(model: string | undefined): 'gemini' | '3p' | null {
@@ -119,8 +120,10 @@ export function collectAntigravityLimits(
   quota: AntigravityPayload['quota'],
   model: string | undefined,
   now: number,
-): LimitsValues {
-  const limits = initialLimits()
+  otherModelWeekly = DEFAULTS.otherModelWeekly,
+  labels: Labels = en,
+): QuotaWindow[] {
+  const limits: QuotaWindow[] = []
   if (!quota || typeof quota !== 'object') return limits
 
   const prefix = preferredQuotaPrefix(model)
@@ -128,50 +131,28 @@ export function collectAntigravityLimits(
   // disabled/missing group never displays the other group's quota; unfamiliar
   // gateway models fall back only when a single `*-5h` / `*-weekly` bucket exists.
   const fiveHourBucket = prefix
-    ? (validBucket(quota[`${prefix}-5h`]) ? quota[`${prefix}-5h`] : undefined)
+    ? quota[`${prefix}-5h`]
     : findSingleSuffixBucket(quota, '-5h')
   const weeklyBucket = prefix
-    ? (validBucket(quota[`${prefix}-weekly`]) ? quota[`${prefix}-weekly`] : undefined)
+    ? quota[`${prefix}-weekly`]
     : findSingleSuffixBucket(quota, '-weekly')
 
-  const engine: RateLimit[] = []
-  if (fiveHourBucket && validBucket(fiveHourBucket)) {
-    engine.push({
-      kind: 'five_hour',
-      percentUsed: bucketPercentUsed(fiveHourBucket),
-      resetsAt: bucketResetIso(fiveHourBucket, now),
-    })
+  if (validBucket(fiveHourBucket)) {
+    limits.push({ label: labels.fiveHour, percent: bucketPercentUsed(fiveHourBucket), resetsAt: bucketResetTime(fiveHourBucket, now) })
   }
-  if (weeklyBucket && validBucket(weeklyBucket)) {
-    engine.push({
-      kind: 'seven_day',
-      percentUsed: bucketPercentUsed(weeklyBucket),
-      resetsAt: bucketResetIso(weeklyBucket, now),
-    })
+  if (validBucket(weeklyBucket)) {
+    limits.push({ label: labels.sevenDay, percent: bucketPercentUsed(weeklyBucket), resetsAt: bucketResetTime(weeklyBucket, now) })
   }
-  limits.engine = engine
 
-  // Surface the non-active quota group's weekly bucket (`3p` on Gemini, `gm` on
-  // Claude/GPT) through `limits.api.others` so `otherModelWeekly` shows it from 80%.
   const otherPrefix = prefix === 'gemini' ? '3p' : prefix === '3p' ? 'gemini' : null
   const otherWeekly = otherPrefix ? quota[`${otherPrefix}-weekly`] : undefined
-  if (otherPrefix && validBucket(otherWeekly)) {
-    const resetIso = bucketResetIso(otherWeekly, now)
-    const resetsAt = resetIso ? Date.parse(resetIso) : null
-    const entry: ModelBucket = {
+  if (otherModelWeekly && validBucket(otherWeekly) && showModelWeekly(bucketPercentUsed(otherWeekly))) {
+    limits.push({
       label: otherPrefix === 'gemini' ? 'gm' : '3p',
       percent: bucketPercentUsed(otherWeekly),
-      resetsAt: resetsAt !== null && !Number.isNaN(resetsAt) ? resetsAt : null,
-    }
-    limits.api = {
-      sonnet: null,
-      opus: null,
-      others: [entry],
-      extra: null,
-    }
-    limits.lastSuccessAt = now
+      resetsAt: bucketResetTime(otherWeekly, now),
+    })
   }
-
   return limits
 }
 
@@ -212,7 +193,7 @@ export function collectAntigravityPayload(payload: AntigravityPayload, env: Anti
       isWsl: env.isWsl ?? false,
     },
     session,
-    limits: collectAntigravityLimits(payload.quota, model, now),
+    limits: collectAntigravityLimits(payload.quota, model, now, env.otherModelWeekly, env.labels),
     vcs: initialVcs(),
   }
 }

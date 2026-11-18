@@ -1,6 +1,5 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { initialLimits } from '../../src/core/limits.ts'
 
 import type { Fragment, FragmentInput, Values } from '../../src/core/types.ts'
 import { initialSession } from '../../src/core/session.ts'
@@ -28,7 +27,7 @@ function input(session: Partial<Values['session']>, o: Partial<Options> = {}, is
   const v: Values = {
     core: { cwd: '/home/u/proj', home: '/home/u', columns: undefined, isWsl },
     session: { ...initialSession(), ...session },
-    limits: initialLimits(),
+    limits: [],
     vcs: initialVcs(),
   }
   return { v, display: displaySession(v.session, shortModelName), o: { ...DEFAULTS, ...o }, l: marked, t: makeTheme('graphite', false), now: 3 * 3_600_000 }

@@ -39,7 +39,10 @@ export async function renderAntigravityStatusLine(
   const cacheDir = runtime.cacheDir ?? defaultCacheDir()
   const options = resolveOptions(runtime.givenOptions ?? {})
   const theme = makeTheme(options.theme, noColor)
+  const labels = resolveLabels('en')
   const values = collectAntigravityPayload(payload, {
+    labels,
+    otherModelWeekly: options.otherModelWeekly,
     home,
     isWsl,
     now,
@@ -85,7 +88,7 @@ export async function renderAntigravityStatusLine(
     v: values,
     display: antigravityDisplay(values.session),
     o: options,
-    l: resolveLabels('en'),
+    l: labels,
     t: theme,
     now,
   })

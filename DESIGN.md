@@ -39,7 +39,8 @@ Code comments cite this file by section name: `(DESIGN, "The line file")`.
 The boundaries are enforced by `tests/shared/boundaries.test.mts`:
 
 - `core`, `render`, `theme`, `i18n` and `options` import no host API or output adapter.
-  Shared readings use VArgus types, including `RateLimit`, rather than Claude's engine types.
+  Each host supplies the quota fragment with an ordered list of labeled windows and any
+  error badge. The renderer formats percentages, colors, costs and reset countdowns.
 - `src/node` provides host-neutral Node utilities. Its imports may reach Node APIs
   and shared code. The boundary test rejects imports of hosts, outputs and CLI wiring here.
 - Each host owns its collection and lifecycle. The boundary test resolves imports
@@ -1016,9 +1017,9 @@ the maintainer requested window-only labels on 2026-11-14, hiding provider/accou
 names. Reports are filtered by `ctx.model.provider` on every collection, including
 `model_select`, so API models and Kimi never inherit another provider's windows.
 Windows remain separate without claiming any account is active. Known
-300-minute and 10080-minute windows map to `five_hour` and `seven_day`; other
-durations retain their labels. All labeled engine windows render, including repeated
-kinds from different accounts. Controls in external labels are sanitized.
+300-minute windows come first, followed by 10080-minute windows and other durations.
+The collector preserves the host labels and repeated windows from different accounts.
+The renderer sanitizes control characters in external labels.
 Error reports show `*`, readings older than `MAX_STALE_MS` disappear, and the
 shared renderer suppresses expired resets. Missing reports never become zero usage.
 Kimi Coding has a separate usage collector, enabled with the shared rate-limits
@@ -1174,9 +1175,9 @@ Data sources and caching in `src/hosts/antigravity/`:
   `remaining_fraction` in `[0, 1]` and `reset_time` (`disabled: true` skipped per
   `agy changelog` 1.0.8). Gemini and Orchestrator models select `gemini-*`; Claude and GPT
   models select `3p-*`; an unfamiliar gateway model falls back only when a single
-  unambiguous `*-5h` or `*-weekly` bucket exists. `percentUsed` is
+  unambiguous `*-5h` or `*-weekly` bucket exists. The used percentage is
   `(1 - remaining_fraction) * 100`. The non-active group's weekly bucket (`3p` or `gm`) is
-  exposed through `limits.api.others` so `otherModelWeekly` shows it from 80%.
+  included as a labeled window when `otherModelWeekly` is enabled and usage rounds to at least 80%.
 - **Transcript path and incremental replay (`transcript.ts`)**: with `ANTIGRAVITY_*`
   environment variables stripped, `agy` 1.5.8 sets none in `statusLine.command`'s
   environment and emits `transcript_path` as

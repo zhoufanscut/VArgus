@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { initialLimits, modelLabel, parseUsage, retryAfterMs, type LimitsValues, type UsageData } from '../../src/hosts/claude/collect/limits'
+import { claudeQuotaReadings, initialClaudeLimits, type ClaudeLimits, type UsageData } from '../../src/hosts/claude/quota'
+import { modelLabel, parseUsage, retryAfterMs } from '../../src/hosts/claude/collect/limits'
 import { directUsageProvider } from '../../src/hosts/claude/collect/usage-providers'
 import { initialSession } from '../../src/hosts/claude/collect/session'
 import { claudeDisplay } from '../../src/hosts/claude/display'
@@ -19,19 +20,20 @@ const MIN = 60_000
 const at = (ms: number) => new Date(NOW + ms).toISOString()
 
 function draw(
-  limitsValues: Partial<LimitsValues>,
+  limitsValues: Partial<ClaudeLimits>,
   o: Partial<Options> = {},
   { l = en as Labels, t = makeTheme('graphite', true) }: { l?: Labels; t?: Theme } = {},
 ): string | null {
+  const options = { ...DEFAULTS, ...o }
   const f: FragmentInput = {
     v: {
       core: { cwd: '/', home: undefined, columns: undefined, isWsl: false },
       session: initialSession(),
-      limits: { ...initialLimits(), ...limitsValues },
+      limits: claudeQuotaReadings({ ...initialClaudeLimits(), ...limitsValues }, options, l, NOW),
       vcs: initialVcs(),
     },
     display: claudeDisplay(initialSession()),
-    o: { ...DEFAULTS, ...o },
+    o: options,
     l,
     t,
     now: NOW,
@@ -45,7 +47,7 @@ const engine = [
 ]
 
 const api = (over: Partial<UsageData> = {}): UsageData => ({ sonnet: null, opus: null, others: [], extra: null, ...over })
-const good = (data: UsageData): Partial<LimitsValues> => ({ api: data, lastSuccessAt: NOW - MIN, error: null })
+const good = (data: UsageData): Partial<ClaudeLimits> => ({ api: data, lastSuccessAt: NOW - MIN, error: null })
 
 describe('limits fragment', () => {
   test('the engine windows: 5h:4%(4h37m) 7d:39%(5d6h)', async () => {
@@ -106,7 +108,7 @@ describe('limits fragment', () => {
   })
 
   test('past 15 min after the last good read: the error instead of the numbers', async () => {
-    const stale = (error: LimitsValues['error']) =>
+    const stale = (error: ClaudeLimits['error']) =>
       draw({ engine: engine.slice(0, 1), api: api({ opus: { percent: 12, resetsAt: null } }), lastSuccessAt: NOW - 15 * MIN - 1, error })
     expect(stale('network')).toBe('5h:4%(4h37m) [API err]')
     expect(stale('auth')).toBe('5h:4%(4h37m) [API auth]')

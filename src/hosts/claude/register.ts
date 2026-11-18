@@ -1,6 +1,7 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import { initialLimits, measuredLimits, startLimits } from './collect/limits'
+import { initialClaudeLimits, claudeQuotaReadings } from './quota'
+import { measuredLimits, startLimits } from './collect/limits'
 import {
   compacted, initialSession, measured, sessionEnding, startSession, stepDone, stepStarting, toolCalled,
 } from './collect/session'
@@ -21,10 +22,11 @@ let tick: Timer | null = null
 let theme: Theme | null = null
 let options: Options | null = null
 const labels = resolveLabels('en')
+const quota = initialClaudeLimits()
 const values: Values = {
   core: { cwd: '', home: undefined, columns: undefined, isWsl: false },
   session: initialSession(),
-  limits: initialLimits(),
+  limits: [],
   vcs: initialVcs(),
 }
 
@@ -36,6 +38,7 @@ async function refresh($: EngineInterface): Promise<void> {
   // keeps the last model, never costs the line)
   values.session.model = await $.session.model().catch(() => values.session.model)
   const now = await $.clock.now()
+  values.limits = options.rateLimits ? claudeQuotaReadings(quota, options, labels, now) : []
   const text = render({ v: values, display: claudeDisplay(values.session), o: options, l: labels, t: theme, now })
   await writeLine($, writer, text)
 }
@@ -62,7 +65,7 @@ export const register: Register = (on, given) => {
       if (options?.repo || options?.branch || options?.status) {
         startVcs($, values.vcs, e, options?.detachedHead ?? false)
       }
-      if (options?.rateLimits) startLimits($, values.limits, e)
+      if (options?.rateLimits) startLimits($, quota, e)
       values.core.home = homeDir(await $.env.get('HOME'), await $.env.get('USERPROFILE'))
       values.core.isWsl = await isWsl($)
       theme = makeTheme(options?.theme ?? 'graphite', !!(await $.env.get('NO_COLOR')))
@@ -85,7 +88,7 @@ export const register: Register = (on, given) => {
   // Each only observes: it passes the event on and returns what next gave.
   on('session.measure', async ($, e, next) => {
     measured($, e, values.session)
-    measuredLimits($, values.limits, e)
+    measuredLimits($, quota, e)
     return next(e)
   })
 

@@ -70,13 +70,17 @@ test('Codex quota windows use reported duration and sparse notifications preserv
   c.updateLimits({
     limitId: 'codex', primary: { usedPercent: 25, windowDurationMins: 15, resetsAt: 9000000000 }, secondary: null,
   })
-  assert.deepEqual(c.snapshot()!.limits.engine.map(l => [l.label, l.percentUsed]), [['15m', 25], ['7d', 61]])
+  const bothWindows = [
+    { label: '15m', percent: 25, resetsAt: 9_000_000_000_000 },
+    { label: '7d', percent: 61, resetsAt: 9_000_000_000_000 },
+  ]
+  assert.deepEqual(c.snapshot()!.limits, bothWindows)
   c.updateLimits({
     limitId: 'model', normalModelSlug: 'gpt-6.1-sol', primary: { usedPercent: 70, windowDurationMins: 300, resetsAt: null },
   })
-  assert.deepEqual(c.snapshot()!.limits.engine.map(l => [l.label, l.percentUsed]), [['5h', 70]])
+  assert.deepEqual(c.snapshot()!.limits, [{ label: '5h', percent: 70, resetsAt: null }])
   c.snapshot()!.session.model = 'gpt-6-luna'
-  assert.deepEqual(c.snapshot()!.limits.engine.map(l => [l.label, l.percentUsed]), [['15m', 25], ['7d', 61]])
+  assert.deepEqual(c.snapshot()!.limits, bothWindows)
 })
 
 test('item identities prevent duplicate tool counts; messages and subagent tools do not inflate lead counts', () => {

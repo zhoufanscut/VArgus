@@ -64,25 +64,18 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     const labels = resolveLabels('en')
     const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
     let disposed = false
-    let values = collectOmo(ctx, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
-    const output = mountOmo(ctx.ui, width => render({
-      v: { ...values, core: { ...values.core, columns: width, isWsl } },
-      display: omoDisplay(values.session),
-      o: options, l: labels, t: theme, now: Date.now(),
-    }))
+    let values = collectOmo(ctx, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now(), options.spendLimit, labels)
     const instance = {
       ctx,
       update(forceGit = false) {
         if (disposed) return
         const current = instance.ctx
-        values = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
+        values = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now(), options.spendLimit, labels)
         if (options.rateLimits) {
           void kimi.refresh(current.model?.provider).then(() => {
             if (disposed || instance.ctx.model?.provider !== 'kimi-coding') return
-            values.limits = kimi.values
             output.refresh()
           })
-          if (current.model?.provider === 'kimi-coding') values.limits = kimi.values
         }
         values.vcs = vcs.values
         output.refresh()
@@ -103,6 +96,16 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         output.dispose()
       },
     }
+    const output = mountOmo(ctx.ui, width => {
+      const now = Date.now()
+      const limits = options.rateLimits && instance.ctx.model?.provider === 'kimi-coding'
+        ? kimi.readings(now, labels) : values.limits
+      return render({
+        v: { ...values, limits, core: { ...values.core, columns: width, isWsl } },
+        display: omoDisplay(values.session),
+        o: options, l: labels, t: theme, now,
+      })
+    })
     const unsubscribe = options.rateLimits ? pi.onSubscriptionLimits(() => instance.update()) : () => {}
     const timer = setInterval(() => instance.update(), 1000)
     timer.unref()

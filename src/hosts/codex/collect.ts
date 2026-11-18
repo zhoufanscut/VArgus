@@ -1,5 +1,5 @@
 import { initialSession } from '../../core/session.ts'
-import { initialLimits, type RateLimit } from '../../core/limits.ts'
+import type { QuotaWindow } from '../../core/limits.ts'
 import { initialVcs } from '../../core/vcs.ts'
 import type { Values } from '../../core/types.ts'
 import type { Item, Limits, TokenUsage } from './protocol.ts'
@@ -19,7 +19,7 @@ export class CodexCollector {
   constructor(cwd: string, home: string | undefined) {
     this.values = {
       core: { cwd, home, columns: undefined, isWsl: false },
-      session: initialSession(), limits: initialLimits(), vcs: initialVcs(),
+      session: initialSession(), limits: [], vcs: initialVcs(),
     }
   }
 
@@ -73,16 +73,16 @@ export class CodexCollector {
     v.session.counts.tokens = this.usage
     const limit = [...this.limits.values()].find(l => v.session.model !== undefined && l.normalModelSlug === v.session.model)
       ?? this.limits.get('codex')
-    v.limits.engine = limit ? [this.window(limit.primary, 'five_hour'), this.window(limit.secondary, 'seven_day')]
-      .filter((w): w is RateLimit => w !== undefined) : []
+    v.limits = limit ? [this.window(limit.primary, 'primary'), this.window(limit.secondary, 'secondary')]
+      .filter((w): w is QuotaWindow => w !== undefined) : []
     return v
   }
 
-  private window(w: Limits['primary'], kind: string): RateLimit | undefined {
+  private window(w: Limits['primary'], fallbackLabel: string): QuotaWindow | undefined {
     if (!w) return undefined
     const mins = w.windowDurationMins
-    const label = mins == null ? (kind === 'five_hour' ? 'primary' : 'secondary')
+    const label = mins == null ? fallbackLabel
       : mins % 1440 === 0 ? `${mins / 1440}d` : mins % 60 === 0 ? `${mins / 60}h` : `${mins}m`
-    return { kind, label, percentUsed: w.usedPercent, resetsAt: w.resetsAt == null ? undefined : new Date(w.resetsAt * 1000).toISOString() }
+    return { label, percent: w.usedPercent, resetsAt: w.resetsAt == null ? null : w.resetsAt * 1000 }
   }
 }

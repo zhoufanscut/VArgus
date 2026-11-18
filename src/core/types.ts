@@ -1,7 +1,7 @@
 import type { Labels } from '../i18n/index.ts'
 import type { Options } from '../options.ts'
 import type { Counts, SessionValues } from './session.ts'
-import type { LimitsValues } from './limits.ts'
+import type { QuotaReading } from './limits.ts'
 import type { VcsValues } from './vcs.ts'
 
 // The shared contract between collectors, fragments and the composer
@@ -35,7 +35,7 @@ export type CoreValues = {
 export type Values = {
   core: CoreValues
   session: SessionValues
-  limits: LimitsValues
+  limits: QuotaReading[]
   vcs: VcsValues
 }
 

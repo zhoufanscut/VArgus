@@ -1049,6 +1049,7 @@ a command-based host, or [OmO's native registration](src/hosts/omo/register.ts)
 for an in-process extension.
 
 - Add one adapter under `src/hosts/<host>` for readings and host lifecycle.
+  For quotas, supply windows in display order using the [shared quota types](src/core/limits.ts).
 - Wire it to the shared renderer and output at a CLI or native entry point.
   Register any native entry's output import explicitly in the boundary test.
 - Add a `.test.mts` file under `tests/<host>/` that exercises the entry with a

@@ -14,9 +14,9 @@
 // (no lock; the store's last write wins, both results are good); the first
 // API read of a session shows nothing for sn/op/extra until it answers.
 
-import { initialLimits, MAX_STALE_MS, type Bucket, type ModelBucket, type ExtraBucket, type UsageData, type ApiError, type LimitsValues } from '../../../core/limits'
-export { initialLimits, MAX_STALE_MS, type Bucket, type ModelBucket, type ExtraBucket, type UsageData, type ApiError, type LimitsValues } from '../../../core/limits'
-import type { EngineInterface, HttpInit, SessionMeasureInput, SessionRateLimit, SessionStartInput, Timer } from 'claude-code'
+import type { ApiError, Bucket } from '../../../core/limits'
+import type { ClaudeLimits, ExtraBucket, ModelBucket, UsageData } from '../quota'
+import type { EngineInterface, HttpInit, SessionMeasureInput, SessionStartInput, Timer } from 'claude-code'
 import { directUsageProvider } from './usage-providers'
 
 // What `$.store` keeps per account, shared by every session of that account.
@@ -55,7 +55,7 @@ let reading = false
 
 // From session.measure: the engine's windows, pushed after each main-thread
 // turn and when a window moves a whole point (types, 'session.measure').
-export function measuredLimits($: EngineInterface, values: LimitsValues, e: SessionMeasureInput): void {
+export function measuredLimits($: EngineInterface, values: ClaudeLimits, e: SessionMeasureInput): void {
   void $
   values.engine = [...e.rateLimits]
 }
@@ -63,7 +63,7 @@ export function measuredLimits($: EngineInterface, values: LimitsValues, e: Sess
 // From session.start. Only an interactive session shows a line (DESIGN, "When
 // the line is written"). Returns at once: the engine awaits the first
 // session.start before the first prompt, and a read can take up to 30 s.
-export function startLimits($: EngineInterface, values: LimitsValues, e: SessionStartInput): void {
+export function startLimits($: EngineInterface, values: ClaudeLimits, e: SessionStartInput): void {
   if (!e.isInteractive) return
   timer?.cancel()
   timer = $.clock.every(CHECK_MS, () => {
@@ -72,7 +72,7 @@ export function startLimits($: EngineInterface, values: LimitsValues, e: Session
   firstRead($, values).catch(() => {})
 }
 
-async function firstRead($: EngineInterface, values: LimitsValues): Promise<void> {
+async function firstRead($: EngineInterface, values: ClaudeLimits): Promise<void> {
   values.engine = [...(await $.session.usage()).rateLimits]
   await readUsage($, values)
 }
@@ -106,7 +106,7 @@ async function isApiSkipped($: EngineInterface): Promise<boolean> {
   return !!(await $.env.get('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'))
 }
 
-function show(values: LimitsValues, cache: UsageCache | null): void {
+function show(values: ClaudeLimits, cache: UsageCache | null): void {
   values.api = cache?.data ?? null
   values.lastSuccessAt = cache?.lastSuccessAt ?? null
   values.error = cache?.error ?? null
@@ -128,7 +128,7 @@ type UsageRequest = {
 // read it), else the API. One key per provider and account: CLAUDE_CONFIG_DIR
 // picks the credentials, and one shared cache once showed one account's
 // numbers in another's session (DESIGN, "Usage cache and staleness").
-async function readUsage($: EngineInterface, values: LimitsValues): Promise<void> {
+async function readUsage($: EngineInterface, values: ClaudeLimits): Promise<void> {
   if (reading) return
   reading = true
   try {

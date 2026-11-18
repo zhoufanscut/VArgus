@@ -1,102 +1,30 @@
+import type { QuotaWindow } from '../../core/limits.ts'
 import type { Fragment, Theme } from '../../core/types.ts'
-import { MAX_STALE_MS } from '../../core/limits.ts'
 import { formatDuration } from '../format.ts'
 import { cleanText } from '../text.ts'
-
-// The rate limits (DESIGN, "Fragments" row 3; "Rules carried over from
-// VantageHUD": Limits display, Usage cache and staleness):
-// `5h:4%(4h37m) 7d:39%(5d6h) sn:85%(2d1h) op:12%(2d1h) extra:40%($20.00/$50.00)(9d2h) spend:63%(25d3h)`.
-
-// Sonnet's weekly, and other models' with otherModelWeekly on, show from this
-// percent (VantageHUD's sonnetWeeklyVisibility default): a model barely used
-// would otherwise sit at 0% on every line.
-export const MODEL_WEEKLY_FROM = 80
-
-type Window = {
-  label: string
-  percent: number
-  resetsAt: number | null
-  stale?: boolean
-  // the spend limit's percent is not clamped: an exceeded one reads 104%
-  unclamped?: boolean
-  // extra usage's `($spent/$limit)`, between the percent and the reset
-  dollars?: string
-}
 
 // One window: label, percent by the gradient, stale `*`, the time to reset.
 // Null for a window past its reset: its percent belongs to the window that
 // just ended. A window with no reset time is kept (the API can send null).
-function drawWindow(t: Theme, now: number, w: Window): string | null {
+function drawWindow(t: Theme, now: number, w: QuotaWindow): string | null {
   if (w.resetsAt !== null && w.resetsAt <= now) return null
   const rounded = Math.max(0, Math.round(w.percent))
   const pct = w.unclamped ? rounded : Math.min(100, rounded)
-  let out = t.paint('label', `${w.label}:`) + t.paint(t.gradient(Math.min(100, pct)), `${pct}%`)
+  let out = t.paint('label', `${cleanText(w.label)}:`) + t.paint(t.gradient(Math.min(100, pct)), `${pct}%`)
   if (w.stale) out += t.paint('faint', '*')
-  if (w.dollars) out += t.paint('faint', w.dollars)
+  if (w.cost) out += t.paint('faint', `($${w.cost.spentUsd.toFixed(2)}/$${w.cost.limitUsd.toFixed(2)})`)
   if (w.resetsAt !== null) out += t.paint('label', `(${w.stale ? '~' : ''}${formatDuration((w.resetsAt - now) / 60_000)})`)
   return out
 }
 
-function engineTime(iso: string | undefined): number | null {
-  const ms = iso ? Date.parse(iso) : NaN
-  return Number.isNaN(ms) ? null : ms
-}
-
-export const limits: Fragment = ({ v, o, l, t, now }) => {
-  const L = v.limits
-  const parts: (string | null)[] = []
-  const engine = (kind: string) => L.engine.find(r => r.kind === kind)
-  const api = L.api && L.lastSuccessAt !== null && now - L.lastSuccessAt <= MAX_STALE_MS ? L.api : null
-  const stale = L.error !== null
-
-  // Host windows are live unless the collector explicitly marks a retained
-  // failed report stale. A direct provider's 5h reading is a fallback only.
-  for (const [kind, label] of [['five_hour', l.fiveHour], ['seven_day', l.sevenDay]] as const) {
-    const readings = L.engine.filter(r => r.kind === kind)
-    if (readings.length) for (const r of readings) parts.push(drawWindow(t, now, {
-      label: cleanText(r.label ?? label), percent: r.percentUsed, resetsAt: engineTime(r.resetsAt), stale: r.stale,
-    }))
-    else if (kind === 'five_hour' && api?.fiveHour) parts.push(drawWindow(t, now, { label, ...api.fiveHour, stale }))
-  }
-  for (const r of L.engine) {
-    if (r.kind === 'five_hour' || r.kind === 'seven_day' || r.kind === 'spend_limit' || !r.label) continue
-    parts.push(drawWindow(t, now, {
-      label: cleanText(r.label), percent: r.percentUsed, resetsAt: engineTime(r.resetsAt), stale: r.stale,
-    }))
-  }
-  if (api?.monthly) parts.push(drawWindow(t, now, { label: l.monthly, ...api.monthly, stale }))
-
-  // The usage API's remaining numbers: shown up to 15 min after the last good
-  // read, stale-marked while the last read failed; past that, the error instead.
-  if (api) {
-    const shown = (p: number) => Math.round(p) >= MODEL_WEEKLY_FROM
-    if (api.sonnet && shown(api.sonnet.percent)) parts.push(drawWindow(t, now, { label: l.sonnetWeekly, ...api.sonnet, stale }))
-    if (api.opus) parts.push(drawWindow(t, now, { label: l.opusWeekly, ...api.opus, stale }))
-    // Other models' labels come from the API's model name, letters only.
-    if (o.otherModelWeekly) {
-      for (const m of api.others) if (shown(m.percent)) parts.push(drawWindow(t, now, { ...m, stale }))
+export const limits: Fragment = ({ v, l, t, now }) => {
+  const parts = v.limits.map(reading => {
+    switch (reading) {
+      case 'rate_limited': return t.paint('faint', l.apiRateLimited)
+      case 'auth': return t.paint('gradMid', l.apiAuth)
+      case 'network': return t.paint('gradMid', l.apiError)
+      default: return drawWindow(t, now, reading)
     }
-    if (api.extra) {
-      const dollars = `($${api.extra.spentUsd.toFixed(2)}/$${api.extra.limitUsd.toFixed(2)})`
-      parts.push(drawWindow(t, now, { label: l.extra, ...api.extra, stale, dollars }))
-    }
-  } else if (L.error === 'rate_limited') {
-    parts.push(t.paint('faint', l.apiRateLimited))
-  } else if (L.error === 'auth') {
-    parts.push(t.paint('gradMid', l.apiAuth))
-  } else if (L.error === 'network') {
-    parts.push(t.paint('gradMid', l.apiError))
-  }
-
-  // A Claude gateway's spend limit, opt-in. No dollars: the engine gives
-  // none (DESIGN, "What VArgus cannot show").
-  const spend = o.spendLimit ? engine('spend_limit') : undefined
-  if (spend) {
-    parts.push(drawWindow(t, now, {
-      label: l.spendLimit, percent: spend.percentUsed, resetsAt: engineTime(spend.resetsAt), unclamped: true,
-    }))
-  }
-
-  const text = parts.filter(Boolean).join(' ')
-  return text || null
+  })
+  return parts.filter(Boolean).join(' ') || null
 }

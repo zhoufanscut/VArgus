@@ -1,6 +1,5 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { initialLimits } from '../../src/core/limits.ts'
 
 import { initialSession } from '../../src/core/session.ts'
 import { displaySession, shortModelName } from '../../src/render/session.ts'
@@ -79,7 +78,7 @@ function input(vcs: Partial<VcsValues>, o: Partial<Options> = {}, l: Labels = en
     v: {
       core: { cwd: '/w', home: '/h', columns: undefined, isWsl: false },
       session: initialSession(),
-      limits: initialLimits(),
+      limits: [],
       vcs: { ...initialVcs(), ...vcs },
     },
     display: displaySession(initialSession(), shortModelName),

@@ -1,5 +1,6 @@
-import { initialLimits, type LimitsValues } from '../../core/limits.ts'
-import { parseKimiUsage } from '../../core/kimi.ts'
+import { isRecentUsage, type ApiError, type QuotaReading, type QuotaWindow } from '../../core/limits.ts'
+import type { Labels } from '../../i18n/en.ts'
+import { parseKimiUsage, type KimiUsage } from '../../core/kimi.ts'
 
 export type ProviderAuth = {
   readonly auth: { readonly apiKey?: string; readonly baseUrl?: string }
@@ -14,7 +15,8 @@ const URLS = {
 // One native row owns this cache and request lifetime. Credentials are resolved
 // by OmO, never read from a hard-coded auth.json path.
 export class OmoKimi {
-  private limits = initialLimits()
+  private usage: { data: KimiUsage; at: number } | undefined
+  private error: ApiError | null = null
   private controller: AbortController | undefined
   private retryAt = 0
   private failures = 0
@@ -25,7 +27,15 @@ export class OmoKimi {
 
   constructor(resolveAuth: () => Promise<ProviderAuth | undefined>) { this.resolveAuth = resolveAuth }
 
-  get values(): LimitsValues { return this.limits }
+  readings(now: number, labels: Labels): QuotaReading[] {
+    if (!this.usage || !isRecentUsage(this.usage.at, now)) return this.error ? [this.error] : []
+    const { fiveHour, monthly } = this.usage.data
+    const stale = this.error !== null
+    const windows: QuotaWindow[] = []
+    if (fiveHour) windows.push({ label: labels.fiveHour, ...fiveHour, stale })
+    if (monthly) windows.push({ label: labels.monthly, ...monthly, stale })
+    return windows
+  }
 
   async refresh(provider: string | undefined, now = Date.now()): Promise<void> {
     if (this.disposed) return
@@ -33,7 +43,8 @@ export class OmoKimi {
       if (this.selected) {
         this.controller?.abort()
         this.controller = undefined
-        this.limits = initialLimits()
+        this.usage = undefined
+        this.error = null
         this.retryAt = 0
         this.failures = 0
       }
@@ -52,13 +63,13 @@ export class OmoKimi {
       const region = auth?.env?.KIMI_CODE_REGION
       const url = region === 'mainland-cn' ? URLS['mainland-cn'] : region === 'global' ? URLS.global : undefined
       if (!auth?.auth.apiKey || !url) {
-        this.limits.error = 'auth'
+        this.error = 'auth'
         this.retryAt = now + 120_000
         return
       }
       if (auth.auth.baseUrl && auth.auth.baseUrl.replace(/\/+$/, '') !== url.replace(/\/v1\/usages$/, '')
         && auth.auth.baseUrl.replace(/\/+$/, '') !== url.replace(/\/usages$/, '')) {
-        this.limits.error = 'auth'
+        this.error = 'auth'
         this.retryAt = now + 120_000
         return
       }
@@ -70,7 +81,7 @@ export class OmoKimi {
       })
       if (controller.signal.aborted) return
       if (!response.ok) {
-        this.limits.error = response.status === 429 ? 'rate_limited' : response.status === 401 || response.status === 403 ? 'auth' : 'network'
+        this.error = response.status === 429 ? 'rate_limited' : response.status === 401 || response.status === 403 ? 'auth' : 'network'
         this.failures = response.status === 429 ? this.failures + 1 : 0
         const retry = response.headers.get('retry-after') ?? ''
         const retryMs = /^\s*\d+\s*$/.test(retry) ? Math.min(Number(retry) * 1000, 3_600_000) : 0
@@ -82,18 +93,19 @@ export class OmoKimi {
       if (controller.signal.aborted) return
       const usage = parseKimiUsage(body)
       if (!usage) {
-        this.limits.error = 'network'
+        this.error = 'network'
         this.retryAt = Date.now() + 120_000
         return
       }
       const succeededAt = Date.now()
-      this.limits = { ...initialLimits(), api: usage, lastSuccessAt: succeededAt }
+      this.usage = { data: usage, at: succeededAt }
+      this.error = null
       this.retryAt = succeededAt + 90_000
       this.failures = 0
     } catch (error) {
       if (!(error instanceof Error)) throw error
       if (this.controller !== controller || this.disposed) return
-      this.limits.error = 'network'
+      this.error = 'network'
       this.retryAt = Date.now() + 120_000
     } finally {
       clearTimeout(timeout)
@@ -105,6 +117,7 @@ export class OmoKimi {
     this.disposed = true
     this.controller?.abort()
     this.controller = undefined
-    this.limits = initialLimits()
+    this.usage = undefined
+    this.error = null
   }
 }

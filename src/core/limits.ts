@@ -1,44 +1,28 @@
-// Shared rate-limit readings; each host supplies its own collection policy.
-export type RateLimit = { kind: string; percentUsed: number; resetsAt?: string; label?: string; stale?: boolean }
-
-
+// Reset times are Unix milliseconds, or null when the source has no reset time.
 export type Bucket = { percent: number; resetsAt: number | null }
 
-export type ModelBucket = Bucket & { label: string }
-
-export type ExtraBucket = Bucket & { spentUsd: number; limitUsd: number }
-
-
-export type UsageData = {
-  // Direct providers' windows; an engine reading takes precedence.
-  fiveHour?: Bucket
-  monthly?: Bucket
-  sonnet: Bucket | null
-  opus: Bucket | null
-  // other models' weekly caps, labelled by the API's model name (modelLabel)
-  others: ModelBucket[]
-  extra: ExtraBucket | null
+export type QuotaWindow = Bucket & {
+  label: string
+  stale?: boolean
+  unclamped?: boolean
+  cost?: { spentUsd: number; limitUsd: number }
 }
-
 
 export type ApiError = 'rate_limited' | 'auth' | 'network'
+// A host supplies its visible windows and error badges in display order.
+export type QuotaReading = QuotaWindow | ApiError
 
-
-export type LimitsValues = {
-  // the engine's windows as it last reported them
-  engine: RateLimit[]
-  // the usage API's last good numbers and when they were read ($.clock ms)
-  api: UsageData | null
-  lastSuccessAt: number | null
-  // why the last read failed; null after a good read or when the API is skipped
-  error: ApiError | null
-}
-
-
-export function initialLimits(): LimitsValues {
-  return { engine: [], api: null, lastSuccessAt: null, error: null }
-}
-
-// Past this the last good numbers are not shown and the error is (DESIGN,
-// "Usage cache and staleness").
 export const MAX_STALE_MS = 15 * 60_000
+
+export function isRecentUsage(lastSuccessAt: number | null, now: number): boolean {
+  return lastSuccessAt !== null && now - lastSuccessAt <= MAX_STALE_MS
+}
+
+export function showModelWeekly(percent: number): boolean {
+  return Math.round(percent) >= 80
+}
+
+export function resetTime(iso: string | undefined): number | null {
+  const ms = iso ? Date.parse(iso) : NaN
+  return Number.isNaN(ms) ? null : ms
+}

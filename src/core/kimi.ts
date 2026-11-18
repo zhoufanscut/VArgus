@@ -1,4 +1,6 @@
-import type { Bucket, UsageData } from './limits.ts'
+import type { Bucket } from './limits.ts'
+
+export type KimiUsage = { fiveHour?: Bucket; monthly?: Bucket }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -32,7 +34,7 @@ function ratioBucket(value: unknown): Bucket | undefined {
 
 // Kimi Code's aggregate ratios plus the measured 300-minute count fallback.
 // Shared parsing keeps host collectors independent.
-export function parseKimiUsage(body: unknown): UsageData | null {
+export function parseKimiUsage(body: unknown): KimiUsage | null {
   const b = record(body)
   if (!b) return null
   const usages = record(b.usages)
@@ -56,6 +58,5 @@ export function parseKimiUsage(body: unknown): UsageData | null {
   return fiveHour || monthly ? {
     ...(fiveHour ? { fiveHour } : {}),
     ...(monthly ? { monthly } : {}),
-    sonnet: null, opus: null, others: [], extra: null,
   } : null
 }

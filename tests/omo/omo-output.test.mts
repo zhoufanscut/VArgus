@@ -2,7 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { clipOmoLine, mountOmo, type OmoUi } from '../../src/outputs/omo.ts'
 import { initialSession } from '../../src/core/session.ts'
-import { initialLimits } from '../../src/core/limits.ts'
 import { initialVcs } from '../../src/core/vcs.ts'
 import type { FragmentInput } from '../../src/core/types.ts'
 import { DEFAULTS } from '../../src/options.ts'
@@ -17,7 +16,7 @@ function input(reading: Partial<FragmentInput['v']['session']> = {}): FragmentIn
   return {
     v: {
       core: { cwd: '/repo', home: undefined, columns: 200, isWsl: false },
-      session, limits: initialLimits(), vcs: initialVcs(),
+      session, limits: [], vcs: initialVcs(),
     },
     display: omoDisplay(session),
     o: DEFAULTS, l: en, t: makeTheme('graphite', true), now: 0,

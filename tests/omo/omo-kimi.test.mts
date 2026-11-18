@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { OmoKimi, type ProviderAuth } from '../../src/hosts/omo/kimi.ts'
+import { en } from '../../src/i18n/en.ts'
 
 const auth: ProviderAuth = { auth: { apiKey: 'test-key' }, env: { KIMI_CODE_REGION: 'global' } }
 const body = { usages: {
@@ -15,8 +16,10 @@ test('Kimi plan reads five-hour and monthly usage and polls no faster than 90 se
   const kimi = new OmoKimi(async () => auth)
   try {
     await kimi.refresh('kimi-coding')
-    assert.deepEqual(kimi.values.api?.fiveHour, { percent: 25, resetsAt: Date.parse('2026-11-14T20:00:00Z') })
-    assert.deepEqual(kimi.values.api?.monthly, { percent: 60, resetsAt: Date.parse('2026-12-01T00:00:00Z') })
+    assert.deepEqual(kimi.readings(now, en), [
+      { label: '5h', percent: 25, resetsAt: Date.parse('2026-11-14T20:00:00Z'), stale: false },
+      { label: '1m', percent: 60, resetsAt: Date.parse('2026-12-01T00:00:00Z'), stale: false },
+    ])
     await kimi.refresh('kimi-coding')
     assert.equal(request.mock.callCount(), 1)
     t.mock.timers.setTime(now + 90_000)
@@ -33,8 +36,9 @@ test('Kimi count windows use remaining counts when aggregate five-hour ratios ar
   const kimi = new OmoKimi(async () => auth)
   try {
     await kimi.refresh('kimi-coding')
-    assert.equal(kimi.values.api?.fiveHour?.percent, 75)
-    assert.equal(kimi.values.api?.monthly, undefined)
+    assert.deepEqual(kimi.readings(Date.now(), en), [
+      { label: '5h', percent: 75, resetsAt: Date.parse('2026-11-14T20:00:00Z'), stale: false },
+    ])
   } finally { kimi.dispose() }
 })
 
@@ -50,9 +54,8 @@ test('Kimi retains its last good usage on throttling and honors Retry-After', as
     throttled = true
     t.mock.timers.setTime(now + 90_000)
     await kimi.refresh('kimi-coding')
-    assert.equal(kimi.values.error, 'rate_limited')
-    assert.equal(kimi.values.lastSuccessAt, now)
-    assert.equal(kimi.values.api?.fiveHour?.percent, 25)
+    assert.partialDeepStrictEqual(kimi.readings(now + 15 * 60_000, en)[0], { label: '5h', percent: 25, stale: true })
+    assert.deepEqual(kimi.readings(now + 15 * 60_000 + 1, en), ['rate_limited'])
     t.mock.timers.setTime(now + 689_999)
     await kimi.refresh('kimi-coding')
     assert.equal(request.mock.callCount(), 2)
@@ -78,8 +81,7 @@ test('switching away or disposing discards an in-flight Kimi reading', async t =
     else await kimi.refresh('deepseek')
     release(Response.json(body))
     await pending
-    assert.equal(kimi.values.api, null)
-    assert.equal(kimi.values.error, null)
+    assert.deepEqual(kimi.readings(Date.now(), en), [])
     kimi.dispose()
     t.mock.restoreAll()
   }
@@ -96,8 +98,7 @@ test('Kimi credentials only go to the pinned regional usage endpoint', async t =
     try {
       await kimi.refresh('kimi-coding')
       assert.equal(request.mock.callCount(), 0)
-      assert.equal(kimi.values.error, 'auth')
-      assert.equal(kimi.values.api, null)
+      assert.deepEqual(kimi.readings(Date.now(), en), ['auth'])
     } finally { kimi.dispose(); t.mock.restoreAll() }
   }
   const request = t.mock.method(globalThis, 'fetch', async () => Response.json(body))
@@ -105,7 +106,7 @@ test('Kimi credentials only go to the pinned regional usage endpoint', async t =
   try {
     await kimi.refresh('kimi-coding')
     assert.equal(request.mock.calls[0]?.arguments[0], 'https://api.kimi.com/coding/v1/usages')
-    assert.equal(kimi.values.api?.monthly?.percent, 60)
+    assert.partialDeepStrictEqual(kimi.readings(Date.now(), en)[1], { label: '1m', percent: 60 })
   } finally { kimi.dispose() }
 })
 
@@ -115,8 +116,7 @@ test('missing usage is not fabricated as zero and failures back off', async t =>
     const kimi = new OmoKimi(async () => auth)
     try {
       await kimi.refresh('kimi-coding')
-      assert.equal(kimi.values.api, null)
-      assert.equal(kimi.values.error, response.status === 401 ? 'auth' : 'network')
+      assert.deepEqual(kimi.readings(Date.now(), en), [response.status === 401 ? 'auth' : 'network'])
       await kimi.refresh('kimi-coding')
       assert.equal(request.mock.callCount(), 1)
     } finally { kimi.dispose(); t.mock.restoreAll() }

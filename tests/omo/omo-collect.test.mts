@@ -160,12 +160,12 @@ test('quotas show window labels without account names and preserve readings and 
     windows: [{ id: 'codex:primary', label: '5h', usedPercent: 50 }],
   }]
   const limits = collectOmo(host().ctx, accounts, undefined, now).limits
-  assert.deepEqual(limits.engine.map(w => w.kind), ['five_hour', 'seven_day', 'codex:review', 'five_hour'])
-  assert.deepEqual(limits.engine.map(w => w.percentUsed), [0, 40, 100, 50])
-  assert.deepEqual(limits.engine.map(w => w.label), ['5h', '7d', 'review', '5h'])
-  assert.equal(limits.engine[3]?.stale, true)
-  assert.equal(limits.engine[0]?.stale, undefined)
-  assert.equal(limits.engine[1]?.resetsAt, new Date(now + 1000).toISOString())
+  assert.deepEqual(limits, [
+    { label: '5h', percent: 0, resetsAt: null },
+    { label: '5h', percent: 50, resetsAt: null, stale: true },
+    { label: '7d', percent: 40, resetsAt: now + 1000 },
+    { label: 'review', percent: 100, resetsAt: null },
+  ])
 })
 
 test('expired, invalid and unsupported quota values never become zero readings', () => {
@@ -180,8 +180,7 @@ test('expired, invalid and unsupported quota values never become zero readings',
       { id: 'overflow', label: 'overflow', usedPercent: 101 },
     ] },
   ], undefined, now).limits
-  assert.deepEqual(limits.engine, [])
-  assert.equal(limits.api, null)
+  assert.deepEqual(limits, [])
 })
 
 test('quota windows follow the selected provider across subscription and API model switches', () => {
@@ -196,9 +195,9 @@ test('quota windows follow the selected provider across subscription and API mod
     ['chatgpt-subscription', [37]], ['kimi-coding', [62]], ['deepseek', []],
   ] as const) {
     const selected = { ...ctx, model: { id: 'model', provider } }
-    assert.deepEqual(collectOmo(selected, accounts, undefined, now).limits.engine.map(w => w.percentUsed), expected)
+    assert.deepEqual(collectOmo(selected, accounts, undefined, now).limits.map(w => typeof w === 'string' ? w : w.percent), expected)
   }
-  assert.deepEqual(collectOmo({ ...ctx, model: undefined }, accounts, undefined, now).limits.engine, [])
+  assert.deepEqual(collectOmo({ ...ctx, model: undefined }, accounts, undefined, now).limits, [])
 })
 
 test('malformed persisted message data is ignored at the host boundary', () => {

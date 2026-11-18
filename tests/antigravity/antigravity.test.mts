@@ -70,6 +70,10 @@ test('Antigravity model catalog shortens Gemini/Claude families, keeps Orchestra
 
 test('Antigravity quota maps active model group, skips disabled or expired windows, and supports otherModelWeekly', () => {
   const now = Date.parse('2026-11-14T01:00:00Z')
+  function draw(payload: AntigravityPayload, otherModelWeekly = false) {
+    const v = collectAntigravityPayload(payload, { now, otherModelWeekly })
+    return limits({ v, display: antigravityDisplay(v.session), o: DEFAULTS, l: en, t: plain, now })
+  }
   const quota: NonNullable<AntigravityPayload['quota']> = {
     'gemini-5h': { remaining_fraction: 0.96, reset_time: '2026-11-14T05:37:00Z' },
     'gemini-weekly': { remaining_fraction: 0.61, reset_time: '2026-11-20T07:00:00Z' },
@@ -77,30 +81,30 @@ test('Antigravity quota maps active model group, skips disabled or expired windo
     '3p-weekly': { remaining_fraction: 0.15, reset_time: '2026-11-18T01:00:00Z' },
   }
 
-  const geminiValues = collectAntigravityPayload({
+  const gemini = {
     model: { display_name: 'Gemini 4 Carbon (High)', effort: 'high' },
     quota,
-  }, { now })
-  assert.equal(limits({ v: geminiValues, display: antigravityDisplay(geminiValues.session), o: DEFAULTS, l: en, t: plain, now }), '5h:4%(4h37m) 7d:39%(6d6h)')
+  }
+  assert.equal(draw(gemini), '5h:4%(4h37m) 7d:39%(6d6h)')
   assert.equal(
-    limits({ v: geminiValues, display: antigravityDisplay(geminiValues.session), o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
+    draw(gemini, true),
     '5h:4%(4h37m) 7d:39%(6d6h) 3p:85%(4d0h)',
   )
 
-  const claudeValues = collectAntigravityPayload({
+  const claude = {
     model: { display_name: 'Claude Opus 5.5 (High)', effort: 'high' },
     quota,
-  }, { now })
-  assert.equal(limits({ v: claudeValues, display: antigravityDisplay(claudeValues.session), o: DEFAULTS, l: en, t: plain, now }), '5h:25%(3h0m) 7d:85%(4d0h)')
+  }
+  assert.equal(draw(claude), '5h:25%(3h0m) 7d:85%(4d0h)')
   // Gemini weekly is 39% (< 80%), so `otherModelWeekly` leaves `gm` hidden until 80%.
   assert.equal(
-    limits({ v: claudeValues, display: antigravityDisplay(claudeValues.session), o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
+    draw(claude, true),
     '5h:25%(3h0m) 7d:85%(4d0h)',
   )
 
   // When a known model group's own buckets (`3p-*`) are disabled or missing, it never
   // falls back to `gemini-*` for `5h:`/`7d:` or duplicates `gm:` alongside `7d:`.
-  const disabled3pValues = collectAntigravityPayload({
+  const disabled3p = {
     model: { display_name: 'Claude Opus 5.5 (High)', effort: 'high' },
     quota: {
       'gemini-5h': { remaining_fraction: 0.9, reset_time: '2026-11-14T05:37:00Z' },
@@ -108,34 +112,34 @@ test('Antigravity quota maps active model group, skips disabled or expired windo
       '3p-5h': { remaining_fraction: 0.5, disabled: true, reset_time: '2026-11-14T04:00:00Z' },
       '3p-weekly': { remaining_fraction: 0.5, disabled: true, reset_time: '2026-11-18T01:00:00Z' },
     },
-  }, { now })
-  assert.equal(limits({ v: disabled3pValues, display: antigravityDisplay(disabled3pValues.session), o: DEFAULTS, l: en, t: plain, now }), null)
+  }
+  assert.equal(draw(disabled3p), null)
   assert.equal(
-    limits({ v: disabled3pValues, display: antigravityDisplay(disabled3pValues.session), o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
+    draw(disabled3p, true),
     'gm:90%(6d6h)',
   )
 
   // Disabled buckets and windows already past reset (`reset_time <= now` or `reset_in_seconds <= 0`)
   // are omitted; custom single suffix falls back cleanly; out-of-range `reset_in_seconds` never throws.
-  const fallbackValues = collectAntigravityPayload({
+  const fallback = {
     model: { display_name: 'vendor/gateway-model' },
     quota: {
       'enterprise-5h': { remaining_fraction: 0.5, reset_in_seconds: 3600 },
       'enterprise-weekly': { remaining_fraction: 0.2, disabled: true, reset_time: '2026-11-20T01:00:00Z' },
     },
-  }, { now })
-  assert.equal(limits({ v: fallbackValues, display: antigravityDisplay(fallbackValues.session), o: DEFAULTS, l: en, t: plain, now }), '5h:50%(1h0m)')
+  }
+  assert.equal(draw(fallback), '5h:50%(1h0m)')
 
-  const expiredAndHugeValues = collectAntigravityPayload({
+  const expiredAndHuge = {
     model: { display_name: 'Gemini 4 Carbon (High)', effort: 'high' },
     quota: {
       'gemini-5h': { remaining_fraction: 0.4, reset_in_seconds: 0 },
       'gemini-weekly': { remaining_fraction: 0.3, reset_in_seconds: 1e15 },
       '3p-weekly': { remaining_fraction: 0.05, reset_time: '2026-11-14T00:59:59Z' },
     },
-  }, { now })
+  }
   assert.equal(
-    limits({ v: expiredAndHugeValues, display: antigravityDisplay(expiredAndHugeValues.session), o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
+    draw(expiredAndHuge, true),
     '7d:70%',
   )
 })

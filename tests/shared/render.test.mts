@@ -1,6 +1,5 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { initialLimits } from '../../src/core/limits.ts'
 
 import type { Fragment, FragmentInput, Values } from '../../src/core/types.ts'
 import { resolveLabels } from '../../src/i18n/index.ts'
@@ -19,7 +18,7 @@ function input(columns?: number, o: Partial<Options> = {}): FragmentInput {
   const v: Values = {
     core: { cwd: '/home/u/proj/x', home: '/home/u', columns, isWsl: false },
     session: initialSession(),
-    limits: initialLimits(),
+    limits: [],
     vcs: initialVcs(),
   }
   return { v, display: displaySession(v.session, shortModelName), o: { ...DEFAULTS, ...o }, l: en, t: makeTheme('graphite', true), now: 0 }
@@ -72,13 +71,16 @@ describe('options and labels', () => {
   })
 })
 
-test('quota windows retain multiple labeled accounts, stale marks and unfamiliar durations', () => {
+test('quota windows retain labels, stale marks, reset times and dollar amounts', () => {
   const f = input()
-  f.v.limits.engine = [
-    { kind: 'five_hour', label: 'account-a/5h', percentUsed: 10 },
-    { kind: 'five_hour', label: 'account-b/5h', percentUsed: 20, stale: true, resetsAt: new Date(3600000).toISOString() },
-    { kind: 'other', label: 'provider/day\n', percentUsed: 30 },
-    { kind: 'seven_day', label: 'expired', percentUsed: 99, resetsAt: new Date(0).toISOString() },
+  f.v.limits = [
+    { label: 'account-a/5h', percent: 10, resetsAt: null },
+    { label: 'account-b/5h', percent: 20, stale: true, resetsAt: 3600000 },
+    { label: 'provider/day\n', percent: 30, resetsAt: null },
+    { label: 'expired', percent: 99, resetsAt: 0 },
   ]
   assert.equal(limits(f), 'account-a/5h:10% account-b/5h:20%*(~1h0m) provider/day?:30%')
+
+  f.v.limits = [{ label: 'extra', percent: 40, resetsAt: 60_000, cost: { spentUsd: 20, limitUsd: 50 } }]
+  assert.equal(limits(f), 'extra:40%($20.00/$50.00)(1m)')
 })
