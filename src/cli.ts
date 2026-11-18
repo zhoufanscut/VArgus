@@ -2,6 +2,7 @@ const HELP = `Usage:
   vargus omo install|remove [--dir EXTENSIONS_DIRECTORY]
   vargus codex install|remove [--home CODEX_HOME]
   vargus antigravity install
+  vargus claude install
   vargus statusline [--theme NAME] [--config FILE]
   vargus on|off|status|reload [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
   vargus hook session-start|prompt [--config FILE] [--pane %ID] [--socket PATH]
@@ -9,6 +10,7 @@ const HELP = `Usage:
 
 Antigravity install sets \`statusLine.command\` in ~/.gemini/antigravity-cli/settings.json.
 Antigravity CLI runs \`vargus statusline\` from PATH and pipes session JSON on stdin.
+Claude install sets up the VArgus plugin and inline status line at user scope.
 
 The tmux row is opt-in for Codex. Standalone on/off hide/restore Codex's saved footer
 through tmux /statusline commands. Off removes the row; inactive views restore
@@ -31,6 +33,10 @@ export async function main(argv: string[]): Promise<number> {
     }
     return (await import('./cli/antigravity-setup.ts')).installAntigravity()
   }
+  if (argv[0] === 'claude' && argv[1] === 'install') {
+    if (argv.length !== 2) throw new Error('Usage: vargus claude install')
+    return (await import('./cli/claude-setup.ts')).installClaude()
+  }
   if (argv[0] === 'omo') return (await import('./cli/omo.ts')).omo(argv.slice(1))
   if (argv[0] === 'codex' && (argv[1] === 'install' || argv[1] === 'remove')) {
     return (await import('./cli/codex-setup.ts')).codexSetup(argv.slice(1))
@@ -41,7 +47,7 @@ export async function main(argv: string[]): Promise<number> {
   if (argv[0] === '__row') return (await import('./cli/codex.ts')).rowWorker(JSON.parse(argv[1]!))
   if (argv[0] === 'tmux-reset') { await (await import('./outputs/tmux/client.ts')).TmuxOutput.environment().reset(); return 0 }
   if (argv[0] === 'codex') throw new Error('Start Codex normally in tmux and run !vargus on. The Codex transport launcher was removed.')
-  if (argv[0] === 'claude') throw new Error('Start Claude normally and use the VArgus inline plugin. The Claude tmux launcher was removed.')
+  if (argv[0] === 'claude') throw new Error('Start Claude normally and use the VArgus inline plugin. Set it up with vargus claude install.')
   throw new Error(HELP)
 }
 

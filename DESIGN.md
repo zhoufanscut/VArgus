@@ -65,8 +65,9 @@ Remove each integration before checking shared files. Codex controls and Antigra
 extension loader and a Claude directory marketplace. Those references survive
 removing just the launcher. Codex removal finishes footer restoration or exits
 the TUI while shared source is still available.
-Plugin installation and `/config` belong to Claude. CLI options use the shared
-defaults, and Codex resolves its extra options at its CLI entry points.
+The Claude installer delegates plugin registration to Claude Code. The plugin's
+`/config` options belong to Claude. CLI options use the shared defaults, and
+Codex resolves its extra options at its CLI entry points.
 For Codex startup hooks, removal edits only VArgus's callback entries, including
 untrusted or modified entries without a trust step, then closes affected TUIs.
 In the isolated 0.167.0 check, reopening `/hooks` after the file edit retained the
@@ -1248,7 +1249,7 @@ the status-line payload and teammates running in their own tmux pane.
 | 0.1.0's options are the fragment switches and a theme picker (default `graphite`); VantageHUD's other options are built in at their defaults | The maintainer's own VantageHUD config changes only the theme; fewer options to build and test. Custom themes, bar gauges and label overrides come later ([Config](#config)) |
 | Feature defaults follow AGENTS.md | The maintainer chose default-on feature work across hosts; existing option defaults are documented under Config |
 | The mod only observes: a hook on an engine event passes it on unchanged with `next(e)` | A status line has no reason to change or block what the engine and other mods do |
-| Setup is done by the agent: the plugin ships a `vargus-setup` skill; README.md has the manual steps | A plugin cannot set `statusLine`, so the person's settings must be edited once; the agent does it from the skill's steps |
+| Set up from the terminal with `vargus claude install`, or through the plugin's `vargus-setup` skill | A plugin cannot set `statusLine`, so setup writes the reader entry in Claude's settings |
 | The mod sits at the repo root, and the repo is its own marketplace; plugin name `vargus` | One repo to install from |
 
 ## Terms
@@ -1548,6 +1549,23 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 
 ## Setup
 
+- `vargus claude install` installs the plugin and inline reader at user scope. It
+  uses Claude Code's [plugin CLI](https://code.claude.com/docs/en/plugins/cli-reference)
+  to register the current checkout as a local directory marketplace or reuse the
+  registered `vargus` marketplace. Claude Code 2.1.323 rejected adding a second
+  checkout with the same marketplace name. The installer stops on a different
+  user `statusLine` before invoking the plugin CLI. It reads settings again after
+  plugin installation to include the keys Claude Code saved, selects the reader
+  using `blankStopped` and the mod's data path, and writes under the same settings
+  lock and atomic replacement used by Antigravity CLI.
+- Claude Code 2.1.323 ran `npm ci` in the plugin cache when the checkout included
+  `package-lock.json`. The lockfile is for development tools, so the installer
+  sets `NPM_CONFIG_OMIT=dev` in the Claude CLI subprocess. With an empty npm cache,
+  this let Claude finish caching the plugin offline.
+- On Linux with Claude Code 2.1.323, the installer registered a checkout with
+  spaces in its path, preserved a symlinked settings file and its permissions,
+  and kept the registered checkout when run from a second one. With a custom
+  `CLAUDE_CONFIG_DIR` and a mock reply, the native row matched the mod's line file.
 - The plugin ships a `vargus-setup` skill. Asked to set up the VArgus status line, the agent
   follows it: show the current `statusLine` entry, if any, and ask before replacing it; write the
   reader with `refreshInterval: 1`; tell the person the line shows from the next status-line run.
@@ -1567,7 +1585,7 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
   `.claude/settings.local.json`, where a session already running switched to the project's entry;
   project settings outrank user settings, so `.claude/settings.json` does too. When it writes the
   user settings, the skill checks both and says so when it finds one.
-- README.md holds the same steps for doing it by hand.
+- README.md documents the installer and manual setup.
 
 ## The host
 

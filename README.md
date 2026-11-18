@@ -34,7 +34,7 @@ VArgus replaces [VantageHUD](https://github.com/zhoufanscut/VantageHUD).
 
 | Host | Display | Start here |
 |---|---|---|
-| Claude Code | Inline row under the prompt | [Install the Claude plugin](#set-up-claude) |
+| Claude Code | Inline row under the prompt | [Install the plugin and status line](#set-up-claude) |
 | OmO Native | Native widget under the editor | [Install the native extension](#omo-native) |
 | Antigravity CLI (`agy`) | Native inline `statusLine` under the prompt | [Install from a terminal](#set-up-antigravity-cli) or [set it up inside `agy`](#set-up-in-an-open-agy-session) |
 | Codex CLI | tmux row | [Ask an agent to set it up](#set-up-codex-with-an-agent), or [set it up by hand](#set-up-codex) |
@@ -81,8 +81,8 @@ the source directly without an npm install or build.
 
 ### Put vargus on PATH
 
-Codex and Antigravity CLI can share a single launcher. On Linux or macOS, use a
-symlink in a directory on your PATH, for example:
+The host installers and the Codex and Antigravity CLI commands share a single
+launcher. On Linux or macOS, use a symlink in a directory on your PATH, for example:
 
 ```sh
 mkdir -p "$HOME/.local/bin"
@@ -799,9 +799,7 @@ that saved layout; it does not remove your `thread-id` preference.
 
 ## Claude Code
 
-The plugin uses Claude's native status-line row. Its `vargus-setup` skill handles
-the integration. The `vargus claude --tmux` launcher is removed; start `claude`
-normally and use the inline setup below.
+The plugin uses Claude's native status-line row. Start `claude` normally after setup.
 
 ### Inline requirements
 
@@ -816,7 +814,30 @@ normally and use the inline setup below.
 
 ### Set up Claude
 
-#### 1. Install the plugin
+With `vargus` on your PATH:
+
+```sh
+vargus claude install
+```
+
+From the [shared checkout](#shared-checkout-and-launcher), use
+`./bin/vargus claude install`. On Windows use `bin\vargus.cmd claude install` with
+`claude.exe` on your PATH. The installer uses Node.js 24.12 or later, like the
+other `vargus` commands.
+
+The command installs the plugin at user scope and configures the inline reader in
+`~/.claude/settings.json` or in `CLAUDE_CONFIG_DIR/settings.json` if you use an absolute
+custom config directory. It registers the checkout as a directory marketplace for
+a fresh install and reuses an existing `vargus` marketplace. If your user settings
+contain a different status line, the installer stops before installing the plugin.
+Back up that entry and remove it before retrying if you want to switch. A project
+or project-local status line takes precedence within that project.
+
+Run `/reload-plugins` in an open session or start a new Claude Code session.
+
+#### Manual setup without Node.js
+
+##### Install the plugin
 
 In Claude Code:
 
@@ -848,11 +869,11 @@ instead, fetch tags with `git -C "$HOME/.local/share/VArgus" fetch --tags` and c
 release tag you want (`pull` doesn't update a checked-out tag). Add only one of
 the two marketplaces: both are named `vargus`.
 
-#### 2. Load it
+##### Load it
 
 Run `/reload-plugins`, or start a new session, so the mod and its setup skill are loaded.
 
-#### 3. Set up the status line
+##### Set up the status line
 
 A plugin can't change your status line, so this step edits your settings once. Ask Claude:
 
@@ -861,7 +882,7 @@ A plugin can't change your status line, so this step edits your settings once. A
 The plugin's `vargus-setup` skill tells Claude what to do: it shows your current `statusLine`
 entry if you have one, asks before replacing it, and adds the VArgus one.
 
-##### By hand
+**By hand**
 
 Add this to `~/.claude/settings.json` (or, for a plugin installed for one project only, to that
 project's `.claude/settings.local.json`), replacing any `statusLine` entry you have. It assumes the
@@ -914,8 +935,8 @@ reported. Other models' weekly limits use the same threshold when enabled.
 - **Blank a stopped line** (off by default): if the plugin stops mid-session (its module fails
   to load at `/reload-plugins`; turning it off is expected to do the same, not tested), the row
   goes blank within about two minutes instead of showing frozen numbers. After turning it on or
-  off in `/config`, ask Claude to set up the VArgus status line again: the status-line command
-  changes to one that checks the file's age, or back. The
+  off in `/config`, rerun `vargus claude install` for a user-scope install or ask Claude to
+  set up the VArgus status line again. This selects the reader that matches the option. The
   plugin rewrites the line every 30 s while it is on. Left with that command after turning the
   option off, the row goes blank whenever the line has not changed for two minutes.
 - **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.

@@ -8,7 +8,8 @@ test('removed Codex launcher directs users to standalone controls', async () => 
 })
 
 test('removed Claude launcher directs users to the inline plugin and ignores its old option', async () => {
-  await assert.rejects(main(['claude', '--tmux']), /Start Claude normally and use the VArgus inline plugin/)
+  await assert.rejects(main(['claude', '--tmux']), /Start Claude normally.*vargus claude install/)
+  await assert.rejects(main(['claude', 'install', '--extra']), /Usage: vargus claude install/)
   assert.deepEqual(resolveOptions({ tmuxOutput: true }), DEFAULTS)
 })
 

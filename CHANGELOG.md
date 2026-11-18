@@ -10,6 +10,8 @@ Notable changes to this project. The format follows
 
 - `vargus antigravity install` configures the native status line from a terminal
   and preserves any existing custom status line.
+- `vargus claude install` installs the plugin at user scope and configures the
+  inline status line from a terminal.
 
 ### Removed
 
