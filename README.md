@@ -806,11 +806,11 @@ The plugin uses Claude's native status-line row. Start `claude` normally after s
 - Claude Code 2.1.299 or later, in a terminal. The status line is not shown in the VS Code chat
   panel or under `claude -p`.
 - Linux or macOS: the status-line command is POSIX `sh`.
-- Windows: only with [Git for Windows](https://git-scm.com/downloads/win) installed. Claude Code
-  runs the status-line command through Git Bash when it finds it, else through PowerShell, where
-  the VArgus command fails and the row stays blank. The setup skill checks this first and stops
-  if the session has no Bash tool (no Git Bash). Tested on one Windows 11 machine (Git 2.56.0,
-  Claude Code 2.1.300).
+- Windows requires Git for Windows. Claude Code runs the reader in Git Bash. Before setup, run
+  `command -v cat find` in Git Bash and check that it finds both commands. Running `bash` from
+  PowerShell can open WSL instead. If Git Bash is missing, install Git for Windows and restart
+  Claude Code. Tested on one Windows 11 machine (Git 2.56.0, Claude Code 2.1.300).
+  [Git for Windows](https://git-scm.com/downloads/win)
 
 ### Set up Claude
 
@@ -835,22 +835,26 @@ or project-local status line takes precedence within that project.
 
 Run `/reload-plugins` in an open session or start a new Claude Code session.
 
+From a VArgus checkout, you can ask your coding agent to set it up.
+
+> Read the Claude Code section of this repository's README.md and set up VArgus for Claude Code.
+
 #### Manual setup without Node.js
+
+Use this path for a marketplace install without Node.js or for an install scoped to one project.
+If the plugin is already installed, continue to [Set up the status line](#set-up-the-status-line).
 
 ##### Install the plugin
 
-In Claude Code:
+For a fresh marketplace install, run this in Claude Code.
 
 ```
 /plugin install vargus --marketplace zhoufanscut/VArgus
 ```
 
-Answer `y` to add the marketplace, then pick the **user** scope, so the line shows in every
-project. From a shell instead: `claude plugin install vargus --marketplace zhoufanscut/VArgus`
-(user scope is the default). Installed for one project only, the mod runs only there: the setup
-skill then offers a user-scope install, or puts the status-line command in that project's
-`.claude/settings.local.json`, since in your user settings it would leave the row blank in every
-other project.
+Answer `y` to add the marketplace. Pick **user** to show the line in every project, or
+**project** or **local** for a single project. From a shell you can run
+`claude plugin install vargus --marketplace zhoufanscut/VArgus`, which defaults to user scope.
 
 ##### Or from a clone, updated with `git pull`
 
@@ -861,6 +865,9 @@ claude plugin marketplace add "$HOME/.local/share/VArgus"
 claude plugin install vargus@vargus
 ```
 
+For a single project, run the install command from that project with `--scope project` or
+`--scope local`.
+
 Claude Code reads a plugin from a folder marketplace straight from that folder (`claude plugin
 list` shows `Read from: <folder>`), so `git -C "$HOME/.local/share/VArgus" pull` updates it:
 a new session runs the pulled code, also across a version change, and `/reload-plugins` brings it
@@ -869,25 +876,29 @@ instead, fetch tags with `git -C "$HOME/.local/share/VArgus" fetch --tags` and c
 release tag you want (`pull` doesn't update a checked-out tag). Add only one of
 the two marketplaces: both are named `vargus`.
 
-##### Load it
-
-Run `/reload-plugins`, or start a new session, so the mod and its setup skill are loaded.
-
 ##### Set up the status line
 
-A plugin can't change your status line, so this step edits your settings once. Ask Claude:
+The plugin writes the status line to a file. Configure Claude's `statusLine` command to read it.
 
-> set up the VArgus status line
+1. From the target project, run `claude plugin list --json` and check the scope of the enabled
+   `vargus@vargus` entry. The reader uses the data folder for VArgus's own marketplace. If the
+   plugin came from another marketplace, use one of the install methods above.
+2. Find your Claude config directory. Use the absolute `CLAUDE_CONFIG_DIR` if set. The defaults are
+   `~/.claude` on Linux and macOS and `%USERPROFILE%\.claude` on Windows. For a user-scope install,
+   edit `settings.json` in that directory. For a project- or local-scope install, use the entry's
+   `projectPath` and edit `<projectPath>/.claude/settings.local.json`.
+3. Update an existing VArgus reader in place. Its `statusLine` command points to
+   `vargus-vargus/$CLAUDE_CODE_SESSION_ID/line`. If you are switching to VArgus from another
+   status line, save the original entry beside the settings file as
+   `statusLine.before-vargus.json`. Pick an unused filename if a backup exists. An agent
+   following these steps should ask before replacing another status line.
 
-The plugin's `vargus-setup` skill tells Claude what to do: it shows your current `statusLine`
-entry if you have one, asks before replacing it, and adds the VArgus one.
-
-**By hand**
-
-Add this to `~/.claude/settings.json` (or, for a plugin installed for one project only, to that
-project's `.claude/settings.local.json`), replacing any `statusLine` entry you have. It assumes the
-default config folder (`~/.claude`); with `CLAUDE_CONFIG_DIR` set, or on Windows, let the skill
-do it.
+Add the `statusLine` entry to the settings object. If the file is new, wrap the entry in `{}`.
+For a custom config directory or Windows, replace `$HOME/.claude` in `command` with the absolute
+config directory from step 2. Use forward slashes on Windows, for example `C:/Users/you/.claude`.
+In a literal path, escape backslashes, double quotes, dollar signs and backticks with a
+backslash for the shell, then JSON-escape the command. For example, a literal dollar sign in
+the path appears as `\\$` in JSON. Leave `$CLAUDE_CODE_SESSION_ID` and `$f` as written.
 
 ```json
 "statusLine": {
@@ -897,7 +908,8 @@ do it.
 }
 ```
 
-With the **Blank a stopped line** option on ([Configure Claude](#configure-claude)), use this entry instead:
+Use this entry when **Blank a stopped line** is enabled. The option is stored in
+`pluginConfigs["vargus@vargus"].options.blankStopped` in the user settings.
 
 ```json
 "statusLine": {
@@ -907,14 +919,19 @@ With the **Blank a stopped line** option on ([Configure Claude](#configure-claud
 }
 ```
 
+Run `/reload-plugins` or start a new session. If you moved from a user-wide install to a
+project-only install, remove any leftover VArgus `statusLine` from your user settings or restore
+the entry you backed up before switching to VArgus.
+
 ### Verify Claude works
 
 Start a session and send one prompt. The line shows under the prompt within about two seconds
 of the reply. If the row stays empty:
 
-- the mod hasn't written the line yet: check that the plugin is enabled in `/plugin`;
-- the folder isn't trusted yet: the status line stays blank until you accept the workspace trust
-  dialog (statusline docs).
+- Check that the plugin is enabled in `/plugin`.
+- Accept the workspace trust dialog if this folder is awaiting trust.
+- Check the project's `.claude/settings.json` and `.claude/settings.local.json`. A `statusLine`
+  in either file can override the user setting.
 
 ### Configure Claude
 
@@ -935,10 +952,10 @@ reported. Other models' weekly limits use the same threshold when enabled.
 - **Blank a stopped line** (off by default): if the plugin stops mid-session (its module fails
   to load at `/reload-plugins`; turning it off is expected to do the same, not tested), the row
   goes blank within about two minutes instead of showing frozen numbers. After turning it on or
-  off in `/config`, rerun `vargus claude install` for a user-scope install or ask Claude to
-  set up the VArgus status line again. This selects the reader that matches the option. The
-  plugin rewrites the line every 30 s while it is on. Left with that command after turning the
-  option off, the row goes blank whenever the line has not changed for two minutes.
+  off in `/config`, rerun `vargus claude install` for a user-scope install or use the matching
+  entry in [Set up the status line](#set-up-the-status-line). The plugin rewrites the line every
+  30 s while it is on. If that reader stays configured after you turn the option off, the row
+  goes blank whenever the line has not changed for two minutes.
 - **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.
   Other programs Claude Code starts see it too.
 
@@ -953,13 +970,17 @@ from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-
 
 ### Uninstall Claude
 
-1. Remove the `statusLine` entry from `~/.claude/settings.json` (or, for a one-project install,
-   that project's `.claude/settings.local.json`), or ask Claude to. Do this first:
-   uninstalling deletes the plugin's data folder, and a status-line command left behind shows a
-   blank row.
-2. `claude plugin uninstall vargus@vargus --scope <scope>` from a shell (the scope you installed
-   at; `user` is the default), or remove it in `/plugin` under **Installed**. From a clone, also
-   run `claude plugin marketplace remove vargus` and reload plugins or close affected sessions.
+1. Run `claude plugin list --json` from the project to check the installed scopes. Before
+   uninstalling, check `settings.json` in your Claude config directory and the affected project's
+   `.claude/settings.local.json` and `.claude/settings.json`. Remove the VArgus `statusLine` entry
+   that applies to the install you're removing. A VArgus reader points to
+   `vargus-vargus/$CLAUDE_CODE_SESSION_ID/line`. Confirm before editing shared project settings.
+   If you saved a status line before switching to VArgus, restore that entry. Uninstalling deletes
+   the plugin's data folder, so a VArgus reader left in settings shows a blank row.
+2. Run `claude plugin uninstall vargus@vargus --scope <scope>` from a shell, or remove it in
+   `/plugin` under **Installed**. If removing the directory marketplace too, run
+   `claude plugin marketplace remove vargus`.
+   Reload plugins or close affected sessions.
 3. For a directory install, follow [Remove shared files](#remove-shared-files).
 
 ### Claude limits

@@ -17,6 +17,8 @@ Notable changes to this project. The format follows
 
 - Claude Code's optional Detail view and its `/vargus` command. VArgus ignores
   the old `detailView` setting and keeps the saved status-line options.
+- The bundled `vargus-setup` skill. Use `vargus claude install` for user-scope
+  setup or follow the manual Claude setup and uninstall instructions in README.md.
 
 ## [0.6.0] - 2026-11-14
 

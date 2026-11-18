@@ -1163,10 +1163,9 @@ Data sources and caching in `src/hosts/antigravity/`:
   (`read_file` of `SKILL.md` under `/.gemini/antigravity(-cli)?/builtin/skills`,
   `~/.gemini/config/(plugins/*/)?skills`, `(.agents?|_agents?)/(plugins/*/)?skills`, or
   directories declared in `skills.json`, deduplicated once per path per `USER_INPUT` turn).
-  Bare `SKILL.md` basename matching was ruled out because reading this repo's Claude
-  `skills/vargus-setup/SKILL.md` during inspection matched by basename without loading an
-  Antigravity skill. Subagent conversations are separate trajectories and are not summed
-  into the displayed conversation's `token:`.
+  Bare `SKILL.md` basename matching was ruled out because inspecting VArgus's former Claude setup
+  skill matched by basename without loading an Antigravity skill. Subagent conversations are
+  separate trajectories and are not summed into the displayed conversation's `token:`.
 - **Cached Git collector (`vcs.ts`)**: `readCachedGit` persists VArgus's 5 s poll and
   `10 × lastMs` slow-walk hold-off per `(cwd, detachedHead)` under
   `/tmp/vargus-antigravity-<uid>`, so 300 ms streaming bursts spawn zero `git` processes
@@ -1219,8 +1218,8 @@ output are specified in [Hosts and outputs](#hosts-and-outputs).
   2.56.0, Claude Code 2.1.300, 2026-10-17): Claude
   Code "runs status line commands through Git Bash when Git Bash is installed, or through
   PowerShell when Git Bash is absent" (statusline docs, read 2026-10-17), so the POSIX `sh`
-  reader runs there and fails under PowerShell. The setup skill checks for Git Bash before it
-  writes the reader, and writes the data folder with `/`. The mod takes the home from
+  reader runs there and fails under PowerShell. The README covers the Git Bash check and how to
+  write the reader's data path with `/`. The mod takes the home from
   `USERPROFILE` and treats `C:\...` or `C:/...` as absolute (written with `/`). `$.process.run`
   has no shell (types: "by its argument vector (no shell)"), so `mv` and `rm` run only when Git's
   `usr\bin` is on Claude Code's `PATH`. Measured on that machine: started from PowerShell it was
@@ -1249,7 +1248,7 @@ the status-line payload and teammates running in their own tmux pane.
 | 0.1.0's options are the fragment switches and a theme picker (default `graphite`); VantageHUD's other options are built in at their defaults | The maintainer's own VantageHUD config changes only the theme; fewer options to build and test. Custom themes, bar gauges and label overrides come later ([Config](#config)) |
 | Feature defaults follow AGENTS.md | The maintainer chose default-on feature work across hosts; existing option defaults are documented under Config |
 | The mod only observes: a hook on an engine event passes it on unchanged with `next(e)` | A status line has no reason to change or block what the engine and other mods do |
-| Set up from the terminal with `vargus claude install`, or through the plugin's `vargus-setup` skill | A plugin cannot set `statusLine`, so setup writes the reader entry in Claude's settings |
+| Set up from the terminal with `vargus claude install` or follow the README's manual setup | A plugin cannot set `statusLine`, so setup writes the reader entry in Claude's settings |
 | The mod sits at the repo root, and the repo is its own marketplace; plugin name `vargus` | One repo to install from |
 
 ## Terms
@@ -1294,7 +1293,6 @@ bin/vargus.cmd                  Windows batch entry for the TypeScript CLI
 types/index.d.ts                self-contained Claude $.state contract
 tests/*.test.ts                 Claude engine and shared rendering tests
 tests/node/*.test.mts            Node boundaries, Antigravity, Codex and tmux integration
-skills/vargus-setup/SKILL.md     existing Claude inline setup
 ```
 
 Collectors hear events and update values; the renderer turns them into text; the writer puts the
@@ -1416,14 +1414,12 @@ language touches no fragment.
   `HOME=D:\h` set, Claude Code kept its config and plugin data under `C:\Users\<name>\.claude`,
   and a mod that took `HOME` wrote `D:\h\.claude\...`, so the row stayed blank. Started from
   PowerShell `HOME` is unset; Git Bash hands it on as `C:\Users\...`. A drive path (`C:\...`,
-  `C:/...`) counts as absolute and is written with `/` (measured: the line landed where the
-  skill's `${CLAUDE_PLUGIN_DATA}` named, started from PowerShell and from Git Bash). Measured
-  (2.1.300, a throwaway plugin installed from a local directory marketplace): the skill's
-  `${CLAUDE_PLUGIN_DATA}` named the path the mod built, with and without `CLAUDE_CONFIG_DIR` set;
-  the folder did not exist until the mod's first `$.fs.write`, which created it and the session
-  folder beneath; uninstalling deleted it. Under `--plugin-dir` the skill's
-  `${CLAUDE_PLUGIN_DATA}` named `<plugin>-inline` (measured, 2.1.300), so a reader set up for the
-  installed plugin shows nothing while developing against the folder.
+  `C:/...`) counts as absolute and is written with `/`. On that Windows machine, the line landed
+  in the assigned data folder when started from PowerShell and from Git Bash. In a local
+  directory marketplace probe (2.1.300), the assigned data path matched the path the mod built
+  with and without `CLAUDE_CONFIG_DIR`. The first `$.fs.write` created the data and session folders.
+  Uninstalling deleted the data folder. Under `--plugin-dir`, the assigned data folder was
+  `<plugin>-inline` (measured on 2.1.300).
 - The session id is re-read with `$.session.id()` on every write, never kept from the start. Why:
   `/clear` and an in-session resume go on under a new session id with no `session.start` (types,
   `SessionEndInput`). At `session.end` with reason `clear` or `resume` ("another took its place")
@@ -1511,9 +1507,8 @@ The `statusLine` entry in the person's settings, with `refreshInterval: 1`:
 cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 ```
 
-- `<data>` is written in by the setup skill as an absolute path: the plugin's path variables,
-  `${CLAUDE_PLUGIN_DATA}` among them, are substituted in a skill's content (plugins/components
-  docs), so the skill hands the agent the real folder.
+- The installer writes `<data>` as an absolute path using the mod's path rules.
+  The README's manual setup shows how to point the reader at the same data folder.
 - One `cat`: 2-3 ms a run as Claude Code runs it, in a shell.
 - The mod replaces the file whole ([The line file](#the-line-file)), so a read shows a whole line,
   except in the direct-write fallback there. When the file is missing `cat` exits 1 and the row is
@@ -1541,9 +1536,9 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
   for the plain `cat`; bash 5.00 against 2.66 ms. The flag on with the plain reader still installed
   costs one `mv` every 30 s and blanks nothing; the reverse, the option off with this reader left,
   blanks a live line once it has not changed for two minutes (with `session:` and the countdowns
-  hidden), so turning it off also means setting up again. The skill picks the reader from
-  `pluginConfigs["vargus@vargus"].options.blankStopped` in the user settings, where Claude Code
-  stores the option (an option set in managed settings is not seen there).
+  hidden), so turning it off also means setting up again. The installer and manual setup use
+  `pluginConfigs["vargus@vargus"].options.blankStopped` in the user settings to choose the reader.
+  An option set in managed settings is not seen there.
 - It never reads stdin: the payload is not used ([The line file](#the-line-file) measured
   `CLAUDE_CODE_SESSION_ID` against it).
 
@@ -1566,26 +1561,18 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
   spaces in its path, preserved a symlinked settings file and its permissions,
   and kept the registered checkout when run from a second one. With a custom
   `CLAUDE_CONFIG_DIR` and a mock reply, the native row matched the mod's line file.
-- The plugin ships a `vargus-setup` skill. Asked to set up the VArgus status line, the agent
-  follows it: show the current `statusLine` entry, if any, and ask before replacing it; write the
-  reader with `refreshInterval: 1`; tell the person the line shows from the next status-line run.
-  The same skill removes the entry before an uninstall.
-- The reader goes where the plugin runs. Installed at user scope, the skill writes it into the user
-  settings. Installed only at project or local scope (scope and project from `claude plugin list
-  --json`), the mod writes no line elsewhere, so a reader in the user settings would leave the row
-  blank in every other project (the same mechanism as on 2026-10-15, when a project-local reader
-  blanked a session that hadn't loaded the plugin): the skill offers a user-scope install or the
-  reader in that project's `.claude/settings.local.json`, never the committed
-  `.claude/settings.json`, since the reader names a folder in one person's home. The mod's folder is
-  fixed at `vargus-vargus`, so installed from a marketplace with another name the reader would name
-  a folder the mod never writes: the skill says so and stops.
+- The [manual setup](README.md#manual-setup-without-nodejs) covers marketplace installs
+  without Node.js and project- or local-scope installs. A reader in user settings runs across
+  projects, while a project-only mod writes its line in the project where it is installed.
+  On 2026-10-15 a project-local reader blanked a session that had not loaded the plugin.
+  For a project-only install, the reader goes in `.claude/settings.local.json` because it names
+  a path in one person's config directory.
 - Uninstalling deletes the plugin's data folder by default (plugins/manifest-reference), so a
-  reader left in settings shows a blank row from then on: the `statusLine` entry goes first.
+  reader left in settings shows a blank row from then on. The README covers clearing the
+  reader and restoring a previous `statusLine` before uninstalling.
 - A project's `statusLine` replaces the person's: measured on 2.1.300 for
   `.claude/settings.local.json`, where a session already running switched to the project's entry;
-  project settings outrank user settings, so `.claude/settings.json` does too. When it writes the
-  user settings, the skill checks both and says so when it finds one.
-- README.md documents the installer and manual setup.
+  project settings outrank user settings, so `.claude/settings.json` does too.
 
 ## The host
 
@@ -1788,9 +1775,9 @@ the Claude mod. A throwaway mod run in a live session settles each.
   `{ value }`, and end it through `$.session.end` with a `session.end` hook beneath.
 - `sh tests/manifest.test.sh` checks the Claude picker against the shared and
   Claude-specific keys and defaults in `src/options.ts`.
-- `sh tests/reader.test.sh` runs the reader as `sh -c` and `bash -c` against line files it
-  writes (present, missing, empty id), and checks that the setup skill and README.md carry the
-  same command.
+- `sh tests/reader.test.sh` checks the README's two reader commands and runs them with `sh`
+  and `bash` against a present line file, a missing file and an empty session id. It also checks
+  a stale line with `blankStopped`.
 - Development loop: install from the working copy (`claude plugin marketplace add --scope local
   .`, `claude plugin install --scope local vargus@vargus`); a directory marketplace runs from the
   folder, so `/reload-plugins` picks up edits, and the data folder is the real `vargus-vargus`.
