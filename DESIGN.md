@@ -491,12 +491,22 @@ behavior preserves unknown identity and retains a frozen historical snapshot.
 
 #### Codex startup hooks
 
-`codexAutoStart` defaults to true in the Codex options. Installed,
-trusted SessionStart and UserPromptSubmit commands use those defaults without
-an options file. Hook installation is still required; this changes no Claude behavior.
+`codexAutoStart` defaults to true in the Codex options. `vargus codex install`
+creates the startup state directory and adds missing SessionStart and
+UserPromptSubmit callbacks to the selected home's `hooks.json`. It preserves
+existing callbacks and their arguments. Generated callbacks invoke the checkout
+entry by absolute path. `vargus codex remove` removes the direct VArgus callbacks.
+If a legacy mixed group would shift a retained callback, removal leaves the file
+intact. In Codex 0.169.1, a shifted callback with an unchanged command and hash
+was marked modified. Thread ID selection and callback trust are set in Codex's UI.
+An isolated Linux run on Codex 0.169.1 used the generated callbacks with
+`--no-daemon` and a localhost fixture provider. The startup dialog trusted the
+callbacks, the `/statusline` picker saved Thread ID, and the first prompt
+produced the tmux row. Repeat install and removal preserved an unrelated
+callback and the existing `config.toml` bytes. Native Windows setup needs a live check.
 The [official hook documentation](https://learn.chatgpt.com/docs/hooks#sessionstart)
-provides stdin JSON and startup/resume/clear/fork source matching. The shipped
-example excludes compact: ordinary turns and compaction must not undo manual off.
+provides stdin JSON and startup/resume/clear/fork source matching. The generated
+SessionStart matcher excludes compact. Ordinary turns and compaction preserve manual off.
 A UserPromptSubmit fallback handles loaded-thread resumes. No Stop, SubagentStart
 or SessionEnd handler is installed; existing view polling and TUI-process cleanup
 remain responsible for those cases.

@@ -461,43 +461,16 @@ Search phrases for this workflow: `set up VArgus for Codex`, `VArgus Codex setup
 
 When the user requests this setup, the agent should:
 
-1. Check the [requirements](#requirements). Reuse the current VArgus checkout or
-   an existing installation; report missing prerequisites before continuing.
-2. Create or verify the [shared PATH launcher](#put-vargus-on-path):
-   `~/.local/bin/vargus` points to the chosen checkout's absolute `bin/vargus` path.
-   Inspect an existing entry before changing it; preserve an unrelated command.
-   Ensure the chosen directory is on the user's PATH and `vargus --help` resolves
-   through that entry. A different PATH directory works too; use its quoted
-   entrypoint in both hook commands below.
-3. Resolve the Codex home from `CODEX_HOME`, or `~/.codex` when unset. Read its
-   existing `hooks.json` and `config.toml` before editing, then create the
-   `vargus/autostart` directory shown under [automatic startup](#automatic-startup-in-codex).
-4. Merge the shown **SessionStart** and **UserPromptSubmit** callbacks into
-   `hooks.json`, preserving unrelated hooks and settings. Update existing VArgus
-   callbacks in place so repeating setup does not add duplicates. Verify that the
-   effective `codexAutoStart` setting is true; the default setup needs no options
-   file or `--config` argument.
-5. Ensure the saved `[tui].status_line` selection in `config.toml` has exactly one
-   **Thread ID** item. Keep the first existing `thread-id` or legacy `session-id`
-   entry and remove extra identity entries; append `thread-id` only when neither
-   spelling exists. Retain all other items and their order. Use the example below
-   when no selection exists, and keep the full ID visible according to the
-   [terminal-width notes](#narrow-terminals-and-ssh). Preserve other TOML settings.
-6. Validate the edited configuration and the symlink, then report the actual
-   checkout, PATH entry, Codex home and files changed. Runtime commands use the
-   source directly; this setup needs no npm install or build.
-7. Hand back the normal trust step: the user reopens Codex in tmux, reviews and
-   trusts both VArgus callbacks through `/hooks` or the startup dialog, and sends
-   a normal prompt. In checked Codex 0.167.0, activation waits for that first
-   prompt. Confirm with `!vargus status` in the intended Codex TUI. Report prepared
-   files separately from confirmed activation; leave hook trust to Codex's UI.
-
-The following sections provide the exact symlink command, hook JSON and footer
-TOML for this workflow.
-
-On native Windows, follow [Windows setup](#native-windows-setup): use a `.cmd`
-PATH entry and Windows hooks instead of the Bash symlink. Preserve an existing
-unrelated command, hooks and saved footer items in the same way.
+1. Check the [requirements](#requirements) and reuse an existing
+   [checkout and PATH launcher](#shared-checkout-and-launcher) when possible.
+   Verify `vargus --help` through the launcher.
+2. Run `vargus codex install` for the user's Codex home, or pass
+   `--home /absolute/path` for another home. Report the checkout, launcher
+   and hook file used.
+3. Have the user select **Thread ID** in the `/statusline` picker, review and trust
+   the callbacks through Codex, then send a normal prompt. See
+   [Automatic startup in Codex](#automatic-startup-in-codex).
+   Confirm activation with `!vargus status` in the intended TUI.
 
 ### Set up Codex
 
@@ -536,22 +509,8 @@ Run Codex in native **psmux**, with Windows Node and PowerShell. Use this checko
 A forwarding file keeps the repository-relative entry intact and needs no
 symlink privileges.
 
-Use the [automatic startup](#automatic-startup-in-codex) JSON structure, replacing
-the two command strings with PowerShell commands for your actual user path:
-
-```json
-"command": "& 'C:\\Users\\you\\.local\\bin\\vargus.cmd' hook session-start"
-```
-
-```json
-"command": "& 'C:\\Users\\you\\.local\\bin\\vargus.cmd' hook prompt"
-```
-
-Keep `async: true`, `timeout: 30` and the SessionStart matcher. Use Windows
-`CODEX_HOME` when set, otherwise `%USERPROFILE%\.codex`; create
-`vargus\autostart` there and include one full `thread-id` in the saved footer.
-Preserve existing callbacks and settings. Reopen Codex in psmux, trust both
-callbacks through `/hooks`, send a normal prompt and check `!vargus status`.
+Run `vargus codex install` and follow [Automatic startup in Codex](#automatic-startup-in-codex)
+inside psmux. The setup command writes PowerShell callbacks on Windows.
 
 Windows background child processes use hidden windows. Windows process lookup
 uses CIM rather than Unix `ps`. With psmux's built-in bar, VArgus appears above
@@ -696,105 +655,43 @@ the pending restore before relying on a shorter layout for a new `on`/`off` cycl
 
 ### Automatic startup in Codex
 
-`codexAutoStart` defaults to true. Installed, trusted hooks use the defaults;
-an options file or `--config` argument is not needed.
-
-Create the startup state directory before your first session. This lets
-`!vargus off` remember your choice before any startup callback has run:
+With the [PATH launcher](#put-vargus-on-path) in place, run:
 
 ```sh
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/vargus/autostart"
+vargus codex install
 ```
 
-Add these entries to Codex's `hooks.json` in `${CODEX_HOME:-$HOME/.codex}`,
-preserving any existing hooks:
+The command prepares `vargus/autostart` and adds the VArgus **SessionStart** and
+**UserPromptSubmit** callbacks to `hooks.json`, preserving existing callbacks,
+including direct VArgus callbacks and their options. It uses `CODEX_HOME` or `~/.codex`
+(`%USERPROFILE%\.codex` on Windows). Pass `--home /absolute/path` to prepare
+another home, then launch Codex with that home.
 
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "^(startup|resume|clear|fork)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$HOME/.local/bin/vargus\" hook session-start",
-            "async": true,
-            "timeout": 30
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$HOME/.local/bin/vargus\" hook prompt",
-            "async": true,
-            "timeout": 30
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+1. Open or reopen Codex in tmux (psmux on Windows) and review and trust the
+   VArgus callbacks through the startup dialog or `/hooks`.
+2. Run `/statusline` with no arguments and select **Thread ID** in the picker.
+   Confirm the selection and keep the whole ID visible. In a narrow terminal,
+   [put Thread ID first](#narrow-terminals-and-ssh).
+3. Send a normal prompt to start the row, then run `!vargus status`.
 
-Include **Thread ID** (`thread-id`) in your saved Codex footer selection; the older
-`session-id` alias also works. It can go at the tail
-when the entire footer fits. See [Narrow terminals and SSH](#narrow-terminals-and-ssh).
-For example, merge this into the existing `[tui]` table in the same home's
-`config.toml`, retaining any other footer items you want restored by `!vargus off`:
+`codexAutoStart` defaults to true. To use a custom tmux socket, restrict activation
+to a pane, or supply a VArgus options file, add `--socket PATH`, `--pane %ID`
+or `--config FILE` to both VArgus commands in `hooks.json`. After moving the checkout, repoint the
+[PATH launcher](#put-vargus-on-path). If a callback names the old checkout
+directly, update its executable path in `hooks.json` and keep its arguments.
+Reopen Codex and review any changed callbacks.
 
-```toml
-[tui]
-status_line = ["model-with-reasoning", "current-dir", "thread-name", "thread-id"]
-```
+Automatic startup looks for one visible matching thread with a saved log.
+The saved footer selection should match the one on screen. If the ID is clipped,
+the composer has a draft, or more than one pane matches, use `!vargus on` when
+ready. A resumed thread already loaded in a shared daemon may activate on a
+prompt through the UserPromptSubmit fallback.
 
-Start ordinary `codex` in tmux, then review and trust the hook
-through `/hooks`. When removing an older `--config` argument, update both VArgus
-commands and review their changed definitions in a reopened TUI before deleting
-the old options file. Trust both entries, including the prompt fallback when upgrading
-from a SessionStart-only setup. Shared-daemon mode is supported. In checked Codex 0.167.0,
-SessionStart runs with the first prompt: the native footer displays the thread ID
-until then. Reopening a thread already loaded in the shared daemon can omit
-SessionStart; the UserPromptSubmit fallback covers that case on a normal prompt.
-SessionStart scans foreground Codex panes on the selected tmux server,
-with an eight-second retry deadline. It requires one full ID below a recognizably
-empty composer that matches the event's saved transcript. It then uses the normal helper to
-hide the native footer and attach the tmux row. `!vargus off` restores the saved
-selection, including its ID. The [terminal-width notes](#narrow-terminals-and-ssh)
-explain when to shorten the footer or put the ID first. Avoid invocation or
-session-only footer overrides: automatic matching uses the saved layout.
-Restart Codex after changing the saved item order so its displayed layout matches.
-
-Prompt fallback makes one activation attempt. When the native ID is hidden
-(already using VArgus), missing or explicitly suppressed by off, it returns before
-starting a Codex config reader. It does not add an eight-second scan on every turn.
-
-Missing/clipped IDs, drafts, unknown layouts and duplicate visible matches skip
-automatic activation; use `!vargus on` when ready. Inherited `CODEX_THREAD_ID`,
-terminal variables, directory names and transcript creation sources do not choose
-a pane. Events for other displayed threads do not activate it. Matching identifies
-the displayed conversation, not which frontend emitted the event. An ephemeral
-session with no saved transcript is skipped. Custom tmux servers need
-`--socket /path/to/socket`; `--pane %ID` restricts the match without bypassing the
-full-ID and uniqueness checks. The callback scans panes itself and exits; no
-permanent listener or launcher is required. Hook stdout adds no model context.
-
-The prompt fallback respects manual off; later turns do not reactivate that row.
-Compaction has no separate handler. Off also
-records suppression before the first row attaches. Unbound controls on a custom
-server need `--socket`; ambiguous panes can require `--pane`. Manual off is remembered per thread and TUI process under `~/.codex/vargus/autostart` (or your
-`CODEX_HOME`), so delayed duplicate callbacks cannot undo it. Explicit
-`!vargus on` clears that thread's suppression; another thread or a new Codex process
-has its own state. `/new` and resume can activate through SessionStart or the
-prompt fallback when the full ID is visible. Disable automatic startup by setting
-`codexAutoStart` to false in an explicit `--config` file, or disabling the hook
-through `/hooks`; use
-`!vargus off` to remove an active row. Saved footer settings are changed only by
-the setup step above; on/off still use session-only commands.
+`!vargus off` restores the saved footer and suppresses startup callbacks for
+the displayed thread in that TUI process. `!vargus on` clears suppression.
+The state directory lets off take effect before the first prompt as well.
+Disable automatic startup through `/hooks`, by setting `codexAutoStart` to false
+in the options file used by both callbacks, or by [removing the callbacks](#uninstall-codex).
 
 ### Configure Codex
 
@@ -870,10 +767,11 @@ does not build or install anything.
 
 ### Uninstall Codex
 
-1. If you installed automatic startup, remove only VArgus's command entries for
-   `SessionStart` and `UserPromptSubmit` from `hooks.json` in your Codex home.
-   Preserve other hooks and settings. Untrusted or modified entries can be removed
-   from the file without trusting them first.
+1. If you installed automatic startup, run `vargus codex remove` with the
+   same Codex home. If VArgus uses a custom shell wrapper or appears before
+   another callback in its group, remove the VArgus callbacks from `hooks.json`
+   by hand. Keep the other callbacks and review the affected groups in
+   `/hooks` after reopening Codex.
 2. In each Codex TUI using VArgus, run `!vargus off`, then `!vargus status` while
    the clone and PATH entry still exist. If restoration is pending, visit the
    affected conversations with an empty composer and follow the
