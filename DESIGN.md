@@ -127,6 +127,7 @@ Windows psmux; the native mechanism and rendering limits are below.
 SIGTERM and SIGHUP stop the helper through its cleanup path; an uncatchable exit can leave
 the row. A later attachment
 or `bin/vargus tmux-reset` prunes dead owners. Reset refuses while an owner is still running.
+On Linux the owner and lock checks treat a zombie as exited while its PID is still present.
 State is under the OS temporary directory, keyed by tmux socket and session; credentials and
 conversation messages are not persisted there. PID reuse and loss of the OS temporary files
 while a helper is alive are not recovered automatically.
@@ -846,6 +847,11 @@ increases after a
 user prompt through the same provider as a positive control. This establishes the
 checked 0.167.0 behavior; other composer layouts, macOS and billed endpoints remain
 unverified.
+
+In a Linux crash-recovery probe with Codex 0.169.1 and tmux 3.5a, `off` restored the
+original status formats and removed the stale reading from an attached client
+while the killed helper was still unreaped. The native footer was restored after
+the saved transcript became available again.
 
 ### Codex saved-log collector
 
@@ -1791,6 +1797,11 @@ the Claude mod. A throwaway mod run in a live session settles each.
   `node_modules`; legacy-worker and reload probes change the copied `.ts` files.
   Standalone and sibling-view command helpers require the current shell marker's
   native completion footer and an idle activity indicator before sending another control.
+  POSIX Codex engine fixtures disable plugin sync in their scratch config and switch off the
+  separate updater before starting a managed daemon.
+  Teardown checks the process list for the fixture's environment marker or a path
+  inside its scratch directory. It retains the directory if the scan fails or a
+  matching process stays alive.
   Daemon-heavy Node cases run serially to bound resource use.
   On Windows, `tests/run-node.mjs` reports and excludes POSIX executable-shim and
   Linux engine rigs, runs the shared checks and `windows.test.mts`, and skips

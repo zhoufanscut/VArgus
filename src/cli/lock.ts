@@ -1,8 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readdir, rename, rm, rmdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-
-const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
+import { processIsRunning } from '../node/process.ts'
 
 async function release(directory: string, owner: string): Promise<void> {
   try { await unlink(join(directory, owner)) } catch (error) {
@@ -35,7 +34,7 @@ export async function withControlLock<T>(lock: string, action: () => Promise<T>,
       }
       if (owners.length !== 1 || !/^\d+-[a-f0-9]{32}$/.test(owners[0]!)) throw new Error(busyMessage)
       const previous = owners[0]!
-      if (alive(Number(previous.split('-')[0]))) throw new Error(busyMessage)
+      if (await processIsRunning(Number(previous.split('-')[0]))) throw new Error(busyMessage)
       await release(lock, previous)
     }
     try { return await action() } finally { await release(lock, owner) }

@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
+import { nativeFixtureEnv, removeNativeFixture, startTestDaemon } from './native-fixture.mts'
 
 const exec = promisify(execFile)
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
@@ -44,8 +45,8 @@ for (const { identity, migration, idItem } of [
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hooks-test-'))
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
   for (const folder of [cfg, project, temporary]) await mkdir(folder)
-  const env = { ...process.env, CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
-    TMUX_TMPDIR: dir, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', TMUX: '', TMUX_PANE: '', CODEX_THREAD_ID: 'stale-parent-thread' }
+  const env = nativeFixtureEnv(dir, { CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
+    TMUX_TMPDIR: dir, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', TMUX: '', TMUX_PANE: '', CODEX_THREAD_ID: 'stale-parent-thread' })
   let posts = 0
   const requests: any[] = []
   const provider = createServer(async (req, res) => {
@@ -72,6 +73,8 @@ model_provider = "local_mock"
 model_reasoning_effort = "low"
 model_context_window = 200000
 check_for_update_on_startup = false
+[features]
+plugins = false
 [tui]
 status_line = ${JSON.stringify(identity ? ['model-with-reasoning', 'current-dir', idItem] : ['model-with-reasoning', 'current-dir'])}
 screen_reader_detection_done = true
@@ -173,7 +176,7 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     }
     const beforeInitialPrompt = posts
     // This daemon starts outside tmux: !command must not rely on inherited pane variables.
-    await exec('codex', ['app-server', 'daemon', 'start'], { env })
+    await startTestDaemon(cfg, env)
     await tmux('-f', '/dev/null', 'new-session', '-d', '-s', 'test', '-x', '157', '-y', '40', 'sleep 120')
     pane = await tmux('display-message', '-p', '#{pane_id}')
     await tmux('set-window-option', 'remain-on-exit', 'on')
@@ -411,8 +414,8 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
 
   } finally {
     await tmux('kill-server').catch(() => {})
-    await exec('codex', ['app-server', 'daemon', 'stop'], { env }).catch(() => {})
+    await exec('codex', ['app-server', 'daemon', 'stop'], { env, timeout: 10000 }).catch(() => {})
     provider.closeAllConnections(); await new Promise<void>(done => provider.close(() => done()))
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    await removeNativeFixture(dir)
   }
 })

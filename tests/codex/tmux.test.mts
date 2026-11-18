@@ -1,24 +1,26 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { promisify } from 'node:util'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { TmuxOutput } from '../../src/outputs/tmux/client.ts'
+import { nativeFixtureEnv, removeNativeFixture } from './native-fixture.mts'
 
 const exec = promisify(execFile)
 async function rig() {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-tmux-test-'))
   const socket = join(dir, 'server')
   const run = async (...args: string[]) => (await exec('tmux', ['-S', socket, ...args], {
-    env: { ...process.env, TMUX: '' },
+    env: nativeFixtureEnv(dir, { TMUX: '' }),
   })).stdout.replace(/\n$/, '')
   await run('-f', '/dev/null', 'new-session', '-d', '-s', 'test', '-x', '157', '-y', '50', 'sleep 120')
   const pane = await run('display-message', '-p', '#{pane_id}')
   return { dir, socket, run, pane, root: join(dir, 'state'), async close() {
     await run('kill-server')
-    await rm(dir, { recursive: true, force: true })
+    await removeNativeFixture(dir)
   } }
 }
 
@@ -90,6 +92,39 @@ test('real tmux: reset refuses a live owner and restores an abandoned row after 
     await new TmuxOutput(r.socket, r.pane, r.root).reset()
     assert.equal(await r.run('show-options', '-t', 'test'), before)
   } finally { await output.detach(); await r.close() }
+})
+
+test('real tmux: clear an abandoned row before the helper PID is reaped', { skip: process.platform !== 'linux', timeout: 15000 }, async () => {
+  const r = await rig()
+  const module = new URL('../../src/outputs/tmux/client.ts', import.meta.url).href
+  const code = `import { TmuxOutput } from ${JSON.stringify(module)};
+    const output = new TmuxOutput(${JSON.stringify(r.socket)}, ${JSON.stringify(r.pane)}, ${JSON.stringify(r.root)});
+    await output.attach(); await output.update('exited helper reading');`
+  const parent = spawn('python3', ['-c', `
+import os, subprocess, sys
+helper = subprocess.Popen(sys.argv[1:])
+os.waitid(os.P_PID, helper.pid, os.WEXITED | os.WNOWAIT)
+print(helper.pid, flush=True)
+sys.stdin.read()
+sys.exit(helper.wait())
+`, process.execPath, '--input-type=module', '-e', code], { env: nativeFixtureEnv(r.dir, {}) })
+  const exit = once(parent, 'exit')
+  try {
+    const pid = await Promise.race([
+      once(parent.stdout, 'data').then(([data]) => Number(String(data).trim())),
+      exit.then(([code]) => { throw new Error(`Helper parent exited before reporting the PID (${code})`) }),
+    ])
+    assert.match(await readFile(`/proc/${pid}/stat`, 'utf8'), /\) Z /)
+    assert.equal(await r.run('show-options', '-v', '-t', 'test', 'status'), '2')
+    const line = () => r.run('display-message', '-p', '-t', r.pane, '#{@vargus_line}')
+    assert.match(await line(), /exited helper reading/)
+    await new TmuxOutput(r.socket, r.pane, r.root).cleanupAbandoned()
+    assert.equal(await line(), '')
+    assert.equal(await r.run('show-options', '-A', '-v', '-t', 'test', 'status'), 'on')
+  } finally {
+    parent.stdin.end()
+    try { assert.equal((await exit)[0], 0) } finally { await r.close() }
+  }
 })
 
 test('real tmux: explicit local formats and a hidden bar restore byte-for-byte', { timeout: 15000 }, async () => {

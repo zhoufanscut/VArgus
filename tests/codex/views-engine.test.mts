@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rename } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { once } from 'node:events'
@@ -11,6 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { PaneInput } from '../../src/outputs/tmux/input.ts'
 import { codexComposer } from '../../src/hosts/codex/footer.ts'
 import { selectedView } from '../../src/hosts/codex/views.ts'
+import { nativeFixtureEnv, removeNativeFixture, startTestDaemon } from './native-fixture.mts'
 
 const exec = promisify(execFile)
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
@@ -28,8 +29,8 @@ for (const fixture of [
   const dir = await mkdtemp(join(tmpdir(), 'vargus-standalone-test-'))
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
   for (const folder of [cfg, project, temporary]) await mkdir(folder)
-  const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
-    NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', TMUX: '', TMUX_PANE: '' }
+  const env = nativeFixtureEnv(dir, { CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
+    NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', TMUX: '', TMUX_PANE: '' })
   const configReads = join(dir, 'config-reads.log')
   const gitStatusReads = join(dir, 'git-status-reads.log')
   if (crowded) {
@@ -106,6 +107,8 @@ model_provider = "local_mock"
 model_reasoning_effort = "${crowded ? 'xhigh' : 'low'}"
 model_context_window = 200000
 check_for_update_on_startup = false
+[features]
+plugins = false
 [tui]
 ${selection === null ? '' : 'status_line = ' + JSON.stringify(selection)}
 screen_reader_detection_done = true
@@ -165,7 +168,7 @@ trust_level = "trusted"
   const command = (action: string, extra = '') => '!' + (crowded ? 'PATH=' + quote(env.PATH!) + ' ' : '') + 'COLUMNS=80 ' + quote(resolve('bin/vargus')) + ' ' + action + (extra ? ' ' + extra : '')
   try {
     // This daemon starts outside tmux: !command must not rely on inherited pane variables.
-    await exec('codex', ['app-server', 'daemon', 'start'], { env })
+    await startTestDaemon(cfg, env)
     await tmux('-f', '/dev/null', 'new-session', '-d', '-s', 'test', '-x', String(columns), '-y', '53', 'sleep 120')
     pane = await tmux('display-message', '-p', '#{pane_id}')
     await tmux('set-window-option', 'remain-on-exit', 'on')
@@ -449,17 +452,8 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
   } finally {
     await tmux('kill-server').catch(() => {})
     client?.kill('SIGTERM')
-    await exec('codex', ['app-server', 'daemon', 'stop'], { env }).catch(() => {})
+    await exec('codex', ['app-server', 'daemon', 'stop'], { env, timeout: 10000 }).catch(() => {})
     provider.closeAllConnections(); await new Promise<void>(done => provider.close(() => done()))
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
-    for (const pid of (await readdir('/proc')).filter(p => /^\d+$/.test(p))) {
-      try {
-        const fs = await import('node:fs/promises')
-        const exe = await fs.readlink('/proc/' + pid + '/exe')
-        const args = (await fs.readFile('/proc/' + pid + '/cmdline', 'utf8')).split('\0')
-        if (exe.startsWith(cfg + '/packages/') && exe.endsWith(' (deleted)') && args.slice(1,4).join(' ') === 'app-server daemon pid-update-loop') process.kill(Number(pid),'SIGTERM')
-      } catch {}
-    }
-
+    await removeNativeFixture(dir)
   }
 })

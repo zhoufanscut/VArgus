@@ -11,6 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { PaneInput } from '../../src/outputs/tmux/input.ts'
 import { startupDirectory, startupSuppressed, startupControl } from '../../src/cli/startup.ts'
 import { codexComposer } from '../../src/hosts/codex/footer.ts'
+import { nativeFixtureEnv, removeNativeFixture, startTestDaemon } from './native-fixture.mts'
 
 const exec = promisify(execFile)
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
@@ -28,8 +29,8 @@ for (const fixture of [
   const install = join(dir, 'install')
   for (const name of ['src', 'bin', 'package.json']) await cp(resolve(name), join(install, name), { recursive: true })
   const entry = join(install, 'bin/vargus')
-  const env = { ...process.env, CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
-    NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', TMUX: '', TMUX_PANE: '' }
+  const env = nativeFixtureEnv(dir, { CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
+    NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', TMUX: '', TMUX_PANE: '' })
   let posts = 0
   const provider = createServer(async (req, res) => {
     if (req.method !== 'POST') { res.end('{}'); return }
@@ -55,6 +56,8 @@ model_provider = "local_mock"
 model_reasoning_effort = "low"
 model_context_window = 200000
 check_for_update_on_startup = false
+[features]
+plugins = false
 [tui]
 ${selection === null ? '' : 'status_line = ' + JSON.stringify(selection)}
 screen_reader_detection_done = true
@@ -121,7 +124,7 @@ trust_level = "trusted"
   const command = (action: string, extra = '') => '!COLUMNS=80 ' + quote(entry) + ' ' + action + (extra ? ' ' + extra : '')
   try {
     // This daemon starts outside tmux: !command must not rely on inherited pane variables.
-    await exec('codex', ['app-server', 'daemon', 'start'], { env })
+    await startTestDaemon(cfg, env)
     await tmux('-f', '/dev/null', 'new-session', '-d', '-s', 'test', '-x', '157', '-y', '40', 'sleep 120')
     pane = await tmux('display-message', '-p', '#{pane_id}')
     await tmux('set-window-option', 'remain-on-exit', 'on')
@@ -613,16 +616,8 @@ sys.exit(result.returncode)
     console.log(JSON.stringify({ postsBeforeControls: beforeControls, postsAfterTurn: afterTurn, finalPosts: posts, metrics }))
   } finally {
     await tmux('kill-server').catch(() => {})
-    await exec('codex', ['app-server', 'daemon', 'stop'], { env }).catch(() => {})
+    await exec('codex', ['app-server', 'daemon', 'stop'], { env, timeout: 10000 }).catch(() => {})
     provider.closeAllConnections(); await new Promise<void>(done => provider.close(() => done()))
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
-    for (const pid of (await readdir('/proc')).filter(p => /^\d+$/.test(p))) {
-      try {
-        const fs = await import('node:fs/promises')
-        const exe = await fs.readlink('/proc/' + pid + '/exe')
-        const args = (await fs.readFile('/proc/' + pid + '/cmdline', 'utf8')).split('\0')
-        if (exe.startsWith(cfg + '/packages/') && exe.endsWith(' (deleted)') && args.slice(1,4).join(' ') === 'app-server daemon pid-update-loop') process.kill(Number(pid),'SIGTERM')
-      } catch {}
-    }
+    await removeNativeFixture(dir)
   }
 })

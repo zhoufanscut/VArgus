@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
@@ -14,6 +14,7 @@ import { codexDisplay } from '../../src/hosts/codex/display.ts'
 import { resolveCodexOptions } from '../../src/hosts/codex/options.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 import { en } from '../../src/i18n/en.ts'
+import { nativeFixtureEnv, removeNativeFixture } from './native-fixture.mts'
 
 // Official engine and real shell reads; only the Responses provider is mocked.
 // This verifies recorded signals, not a model deciding when to use a skill.
@@ -65,6 +66,8 @@ test('official Codex skill loads deduplicate injections and reads within each tu
 model_provider = "local_mock"
 model_reasoning_effort = "low"
 check_for_update_on_startup = false
+[features]
+plugins = false
 [model_providers.local_mock]
 name = "Local test"
 base_url = "http://127.0.0.1:${port}/v1"
@@ -76,8 +79,8 @@ requires_openai_auth = false
 trust_level = "trusted"
 `)
   const child = spawn('codex', ['app-server', '--stdio'], {
-    cwd: project, env: { ...process.env, CODEX_HOME: cfg, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
-      NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' }, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: project, env: nativeFixtureEnv(dir, { CODEX_HOME: cfg, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
+      NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' }), stdio: ['pipe', 'pipe', 'pipe'],
   })
   const lines = createInterface({ input: child.stdout })
   let errors = '', sequence = 0
@@ -183,6 +186,6 @@ trust_level = "trusted"
     const kill = setTimeout(() => child.kill('SIGKILL'), 2000)
     try { await exit } finally { clearTimeout(kill) }
     provider.closeAllConnections(); await new Promise<void>(done => provider.close(() => done()))
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    await removeNativeFixture(dir)
   }
 })

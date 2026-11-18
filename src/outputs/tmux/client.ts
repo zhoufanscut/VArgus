@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
+import { processIsRunning } from '../../node/process.ts'
 import { tmuxLine, TMUX_PADDING } from './format.ts'
 import { ansiRuns } from '../ansi.ts'
 import { stringWidth } from '../../render/width.ts'
@@ -26,10 +27,6 @@ const NATIVE_LEFT_LENGTH = '65535'
 const NATIVE_PRESENT = '#{m/r:[^ ],#{P:#{@vargus_owner}}}'
 const nativeQuote = (value: string) => '"' + value.replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"'
 const powershellQuote = (value: string) => "'" + value.replaceAll("'", "''") + "'"
-
-function alive(pid: number): boolean {
-  try { process.kill(pid, 0); return true } catch { return false }
-}
 
 // Session options are shared, but content belongs to the active pane. A short
 // filesystem lock serializes launches/exits from separate VArgus processes.
@@ -116,7 +113,7 @@ export class TmuxOutput {
           }
           if (holders?.length === 1 && /^\d+-[0-9a-f-]+$/.test(holders[0]!)) {
             const owner = holders[0]!
-            if (!alive(Number(owner.split('-')[0]))) await release(lock, owner)
+            if (!await processIsRunning(Number(owner.split('-')[0]))) await release(lock, owner)
           }
           if (Date.now() > until) throw new Error('Timed out waiting for the VArgus tmux lock.')
           await delay(25)
@@ -254,8 +251,12 @@ export class TmuxOutput {
   }
 
   private async prune(state: State): Promise<void> {
-    for (const owner of state.owners) if (!alive(owner.pid)) await this.clearOwner(owner)
-    state.owners = state.owners.filter(owner => alive(owner.pid))
+    const live: Owner[] = []
+    for (const owner of state.owners) {
+      if (await processIsRunning(owner.pid)) live.push(owner)
+      else await this.clearOwner(owner)
+    }
+    state.owners = live
   }
 
   // Reconcile the selected window without shifting raw native custom formats.
