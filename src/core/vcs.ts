@@ -20,18 +20,6 @@ export type VcsCounts = {
 }
 
 
-// A changed path for the detail view: its kinds (staged and modified can go
-// together) and the path as git or svn prints it, relative to the repository
-// root (git) or the working folder (svn).
-export type VcsFileKind = 'conflicted' | 'staged' | 'modified' | 'untracked'
-
-export type VcsFile = { kinds: VcsFileKind[]; path: string }
-
-
-// The detail view lists this many changed paths; the counts give the rest.
-export const MAX_FILES = 8
-
-
 export type VcsValues = {
   // Chosen once per refresh, and every field below assigned together, so the
   // three fragments never mix git and svn (VantageHUD's render.js rule).
@@ -47,17 +35,12 @@ export type VcsValues = {
   revision: string | null
   // null until read, or when the read failed
   counts: VcsCounts | null
-  // the first MAX_FILES changed paths in git's or svn's order and how many
-  // there are, for the detail view; read beside the counts, never changing them
-  files: VcsFile[]
-  fileCount: number
 }
 
 
 export function initialVcs(): VcsValues {
   return {
-    kind: null, repo: null, branch: null, detached: null, worktree: null, revision: null, counts: null, files: [],
-    fileCount: 0,
+    kind: null, repo: null, branch: null, detached: null, worktree: null, revision: null, counts: null,
   }
 }
 
@@ -103,33 +86,4 @@ export function parseGitStatus(output: string): { head: string | null; counts: V
     }
   }
   return { head, counts }
-}
-
-
-// The first MAX_FILES changed paths of the same output, with parseGitStatus's
-// kinds. The path is the line's last field (`1`: after 8 fields, `2`: after 9,
-// the new path before the tab, `u`: after 10, `?`: after 1), as git prints it:
-// a path with unusual characters stays in git's C-style quotes.
-export function parseGitFiles(output: string): { files: VcsFile[]; fileCount: number } {
-  const files: VcsFile[] = []
-  let fileCount = 0
-  for (const line of output.split('\n')) {
-    const kind = line[0]
-    if (line[1] !== ' ') continue
-    const fields = kind === '1' ? 8 : kind === '2' ? 9 : kind === 'u' ? 10 : kind === '?' ? 1 : 0
-    if (fields === 0) continue
-    const path = line.split(' ').slice(fields).join(' ').split('\t')[0]!
-    if (path === '') continue
-    fileCount += 1
-    if (files.length >= MAX_FILES) continue
-    const kinds: VcsFileKind[] = []
-    if (kind === '?') kinds.push('untracked')
-    else if (kind === 'u') kinds.push('conflicted')
-    else {
-      if (line[2] !== '.') kinds.push('staged')
-      if (line[3] !== '.') kinds.push('modified')
-    }
-    files.push({ kinds, path })
-  }
-  return { files, fileCount }
 }

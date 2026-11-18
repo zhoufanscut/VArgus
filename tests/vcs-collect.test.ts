@@ -389,7 +389,7 @@ describe('vcs refresh policy', () => {
     ['repo only', { repo: true, branch: false, status: false }, true],
     ['branch only', { repo: false, branch: true, status: false }, true],
     ['status only', { repo: false, branch: false, status: true }, true],
-    ['detail view', { repo: false, branch: false, status: false, detailView: true }, true],
+    ['disabled with a legacy detail view setting', { repo: false, branch: false, status: false, detailView: true }, false],
   ] as const) {
     test(`collection admission: ${name}`, { options }, async ($, on) => {
       const clock = mock.clock(on, { now: 0 })

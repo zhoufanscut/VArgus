@@ -28,24 +28,12 @@ export function resolvePalette(name: string): { name: string; rgb: Record<TokenN
   return { name: found, rgb }
 }
 
-// RGB lerp, t clamped to 0..1 and each channel rounded (VantageHUD's lerpRgb):
-// the palettes' stops are close in luminance, so plain RGB stays smooth.
-export function lerp(a: Rgb, b: Rgb, t: number): Rgb {
-  const k = Math.min(1, Math.max(0, t))
-  return [
-    Math.round(a[0] + (b[0] - a[0]) * k),
-    Math.round(a[1] + (b[1] - a[1]) * k),
-    Math.round(a[2] + (b[2] - a[2]) * k),
-  ]
-}
-
 export function makeTheme(name: string, noColor: boolean): Theme {
   const palette = resolvePalette(name)
   const rgb = palette.rgb
   const stops = [rgb.gradLow, rgb.gradMid, rgb.gradHigh] as const
   return {
     name: palette.name,
-    noColor,
     rgb,
     // NO_COLOR: the text unchanged, no escape at all (no-color.org).
     paint: (color, text) => {
@@ -65,6 +53,5 @@ export function makeTheme(name: string, noColor: boolean): Theme {
       // more bounds than two (outside the type) still give the alert tier
       return stops[Math.min(tier, stops.length - 1)]!
     },
-    lerp,
   }
 }

@@ -6,6 +6,11 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+### Removed
+
+- Claude Code's optional Detail view and its `/vargus` command. VArgus ignores
+  the old `detailView` setting and keeps the saved status-line options.
+
 ## [0.6.0] - 2026-11-14
 
 ### Added

@@ -48,8 +48,6 @@ test('cwd changes clear the previous Git readings before rendering or pausing', 
     assert.match(await line(500), /repo:second.*branch:second.*\?1/)
     const vcs = collector.snapshot()!.vcs
     assert.equal(vcs.counts!.untracked, 1)
-    assert.deepEqual(vcs.files, [], 'the Codex row needs aggregate counts, not detail-pane paths')
-    assert.equal(vcs.fileCount, 0)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 

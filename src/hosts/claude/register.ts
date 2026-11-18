@@ -1,6 +1,5 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import { agentSpawned, agentStep, agentsEnding, initialAgents, startAgents } from './collect/agents'
 import { initialLimits, measuredLimits, startLimits } from './collect/limits'
 import {
   compacted, initialSession, measured, sessionEnding, startSession, stepDone, stepStarting, toolCalled,
@@ -12,8 +11,6 @@ import { resolveOptions, type Options } from '../../options'
 import { render } from '../../render'
 import { claudeDisplay } from './display'
 import { makeTheme } from '../../theme'
-import { viewModel } from './view/model'
-import { drawView } from './view/pane'
 import { createWriter, endSession, homeDir, pruneOld, writeLine, type Writer } from './write'
 
 // Wiring only. Module values start over on a hot reload, which runs register
@@ -30,10 +27,6 @@ const values: Values = {
   limits: initialLimits(),
   vcs: initialVcs(),
 }
-// The detail view (DESIGN, "The detail view"), with the detailView option on.
-const PANE = 'vargus'
-const agents = initialAgents()
-let paneOpen = false
 
 async function refresh($: EngineInterface): Promise<void> {
   if (!writer || !theme || !options) return
@@ -59,7 +52,6 @@ async function isWsl($: EngineInterface): Promise<boolean> {
 export const register: Register = (on, given) => {
   options = resolveOptions(given)
 
-
   on('session.start', async ($, e, next) => {
     await startSession($, values.session)
     // Only an interactive session shows a status line (DESIGN, "When the line is written").
@@ -67,33 +59,22 @@ export const register: Register = (on, given) => {
       writer = await createWriter($)
       // DESIGN, "The reader": the file's age tells the reader the mod stopped
       writer.heartbeatMs = options?.blankStopped ? 30_000 : null
-      // The detail pane also consumes readings hidden from the inline row.
-      if (options?.repo || options?.branch || options?.status || options?.detailView) {
+      if (options?.repo || options?.branch || options?.status) {
         startVcs($, values.vcs, e, options?.detachedHead ?? false)
       }
-      if (options?.rateLimits || options?.detailView) startLimits($, values.limits, e)
+      if (options?.rateLimits) startLimits($, values.limits, e)
       values.core.home = homeDir(await $.env.get('HOME'), await $.env.get('USERPROFILE'))
       values.core.isWsl = await isWsl($)
       theme = makeTheme(options?.theme ?? 'graphite', !!(await $.env.get('NO_COLOR')))
-      if (options?.detailView) {
-        // A refused call costs the view, never the line: the tick below
-        // must still start.
-        await startAgents($, agents, values.session.counts.tokens)
-        // the name a literal, as the matcher's: the validator then knows the
-        // command.run hook answers its own command
-        await $.command.register({ name: 'vargus', description: labels.viewCommand }).catch(() => {})
-        // a hot reload keeps the pane up: the engine's record says so
-        paneOpen = (await $.ui.panes().catch(() => [])).some(p => p.id === PANE)
-      }
       tick?.cancel()
       tick = $.clock.every(1000, () => {
         refresh($).catch(() => {})
-        // the open pane redraws with the line, once a second
-        if (paneOpen) $.ui.invalidate('ui.render')
       })
       // Not awaited: the first session.start is awaited before the first
       // prompt, and a slow or refused write must not hold it.
       refresh($).catch(() => {})
+      // A live plugin reload can leave the old detail pane open in Claude.
+      $.ui.close({ id: 'vargus' }).catch(() => {})
       const w = writer
       $.clock.now().then(now => pruneOld($, w, now)).catch(() => {})
     }
@@ -120,7 +101,6 @@ export const register: Register = (on, given) => {
     stepStarting(e, values.session)
     const r = yield* next(e)
     await stepDone($, e, r, values.session)
-    if (options?.detailView) agentStep($, agents, e, r, values.session.counts.tokens)
     return r
   })
 
@@ -134,48 +114,10 @@ export const register: Register = (on, given) => {
 
   on('session.end', async ($, e, next) => {
     sessionEnding($, e, values.session)
-    if (options?.detailView) agentsEnding($, agents, e, values.session.counts.tokens)
     // a failed removal leaves the folder, as before
     if (writer) await endSession($, writer, e.sessionId).catch(() => {})
     return next(e)
   })
-
-  if (options.detailView) {
-    // Names for the tokens by agent; observes, as every hook here.
-    on('agent.spawn', async ($, e, next) => {
-      const r = await next(e)
-      agentSpawned($, agents, e, r, values.session.counts.tokens)
-      return r
-    })
-
-    // /vargus opens the pane, or closes it when it is up. No text: the pane
-    // is the answer, and a text row would also reach the model.
-    on('command.run', { command: 'vargus' }, async $ => {
-      if ((await $.ui.panes()).some(p => p.id === PANE)) {
-        await $.ui.close({ id: PANE })
-      } else {
-        // an unplaced pane waits for room and is drawn once it has it, so
-        // the redraws start either way
-        await $.ui.open({ id: PANE, title: labels.viewTitle, closeOnEscape: true })
-        paneOpen = true
-      }
-      return {}
-    })
-
-    // Every close (this call, Esc, the close mark, an unload) ends the redraws.
-    on('ui.close', { id: PANE }, async ($, e, next) => {
-      paneOpen = false
-      return next(e)
-    })
-
-    on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-      if (!theme || !options) return next(e)
-      const now = await $.clock.now()
-      const m = viewModel({ v: values, display: claudeDisplay(values.session),
-        o: options, l: labels, t: theme, now, agents, columns: e.props.bodyColumns })
-      return drawView($.ui.resolve(e), m)
-    })
-  }
 
   // The width: observe the prompt-hint row's viewport, draw nothing
   // (DESIGN, "When the line is written").

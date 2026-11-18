@@ -11,8 +11,7 @@ export type SessionValues = {
   fast: boolean | undefined
   // Host context percent, 0-100; undefined before a reading.
   contextPercent: number | undefined
-  // the same reading's tokens in use and window size, for the detail view;
-  // undefined before a reading (tokens also before the first response)
+  // Tokens in use and window size, where provided by the host collector.
   contextTokens: number | undefined
   contextWindow: number | undefined
   // Session start as Unix milliseconds; undefined until read.

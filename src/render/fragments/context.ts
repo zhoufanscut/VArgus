@@ -4,10 +4,9 @@ import type { Fragment } from '../../core/types.ts'
 // with its default thresholds, built in per DESIGN "Config").
 // The colour moves at WARNING and CRITICAL (gradLow / gradMid / gradHigh), so
 // it flips in step with the CRITICAL word; COMPRESS? shows from COMPACT.
-// Shared with the detail view's Context card (src/hosts/claude/view/model.ts).
-export const WARNING = 70
-export const COMPACT = 80
-export const CRITICAL = 85
+const WARNING = 70
+const COMPACT = 80
+const CRITICAL = 85
 
 export const context: Fragment = ({ display, l, t }) => {
   if (display.contextPercent === undefined) return null

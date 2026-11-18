@@ -183,9 +183,8 @@ Each fragment has a switch: [Claude's `/config`](#configure-claude),
 [Codex's CLI options](#configure-codex). Claude can also show per-model weekly
 limits and a gateway spend limit; Antigravity CLI shows the active model group's
 `5h:` and `7d:` windows (plus the other quota group's weekly bucket from 80% when
-`otherModelWeekly` is on); Codex uses its recorded quota windows. The
-Claude detail pane belongs to Claude; workflow counts (`🔀`) are available in Claude
-and Antigravity CLI when `workflowRuns` is on.
+`otherModelWeekly` is on); Codex uses its recorded quota windows. Workflow counts
+(`🔀`) are available in Claude and Antigravity CLI when `workflowRuns` is on.
 
 ## How it works
 
@@ -890,9 +889,8 @@ Options are shown in `/config` under the plugin. Existing option defaults are
 documented below. The Codex model/counter defaults are described [above](#configure-codex);
 their switches have no effect on the Claude line.
 
-Rate-limit API reads stop when `rateLimits` and `detailView` are both off. Git/svn
-polling stops when `repo`, `branch`, `status` and `detailView` are all off. Keeping
-the detail view enabled preserves its readings even with those inline fragments hidden.
+Rate-limit API reads stop when `rateLimits` is off. Git/svn polling stops when
+`repo`, `branch` and `status` are all off.
 
 The spend limit (`spendLimit`), other models' weekly limits (`otherModelWeekly`),
 workflow runs (`workflowRuns`) and detached-HEAD naming (`detachedHead`) default
@@ -908,11 +906,6 @@ reported. Other models' weekly limits use the same threshold when enabled.
   changes to one that checks the file's age, or back. The
   plugin rewrites the line every 30 s while it is on. Left with that command after turning the
   option off, the row goes blank whenever the line has not changed for two minutes.
-- **Detail view** (off by default): turn on `detailView` in `/config`, then run `/vargus` to open
-  a live pane (beside the conversation in the fullscreen layout from 110 columns, else above the
-  prompt) with every rate limit and its reset time, the context window in tokens, tokens by agent
-  (main conversation and each subagent: input, output, cache read and write) and the branch with
-  the changed files. `/vargus` again or Esc closes it.
 - **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.
   Other programs Claude Code starts see it too.
 

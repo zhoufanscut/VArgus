@@ -3,8 +3,8 @@
 // carried over from VantageHUD", git and svn). Reads run off the render path,
 // on the policy under "When to refresh" below; the 1 s tick only renders.
 
-import { initialVcs, repoNameFromUrl, parseGitStatus, parseGitFiles, MAX_FILES, type Operation, type DetachedHead, type VcsCounts, type VcsFileKind, type VcsFile, type VcsValues } from '../../../core/vcs'
-export { initialVcs, repoNameFromUrl, parseGitStatus, parseGitFiles, MAX_FILES, type Operation, type DetachedHead, type VcsCounts, type VcsFileKind, type VcsFile, type VcsValues } from '../../../core/vcs'
+import { initialVcs, repoNameFromUrl, parseGitStatus, type Operation, type DetachedHead, type VcsCounts, type VcsValues } from '../../../core/vcs'
+export { initialVcs, repoNameFromUrl, parseGitStatus, type Operation, type DetachedHead, type VcsCounts, type VcsValues } from '../../../core/vcs'
 import type { EngineInterface, SessionStartInput, ToolCallInput } from 'claude-code'
 
 // ---------------------------------------------------------------------------
@@ -161,7 +161,6 @@ async function readGit($: EngineInterface, remote: string | null, detachedHead: 
   // bound (the branch headers come first, so ahead/behind stay whole).
   const status = parseGitStatus(run.stdout)
   out.counts = status.counts
-  Object.assign(out, parseGitFiles(run.stdout))
   if (status.head === '(detached)') {
     out.detached = gitDir && detachedHead ? await readDetachedHead($, gitDir) : null
   } else {
@@ -336,10 +335,7 @@ async function readSvn($: EngineInterface): Promise<VcsValues> {
   const status = await $.process.run([...SVN, 'status', '--xml'])
   // Past 4 MiB (`isStdoutTruncated`, ~90 bytes an unversioned path) the
   // counts are those of the entries read whole, a lower bound.
-  if (status.exitCode === 0) {
-    out.counts = parseSvnStatusXml(status.stdout)
-    Object.assign(out, parseSvnFiles(status.stdout))
-  }
+  if (status.exitCode === 0) out.counts = parseSvnStatusXml(status.stdout)
   return out
 }
 
@@ -427,23 +423,6 @@ export function parseSvnStatusXml(xml: string): VcsCounts {
 }
 
 type SvnBucket = 'conflicted' | 'staged' | 'modified' | 'untracked'
-
-// The first MAX_FILES changed entries of the same XML, each in
-// parseSvnStatusXml's bucket: `<entry path="…">` and the `<wc-status>` inside
-// it, the path's five entities read once.
-export function parseSvnFiles(xml: string): { files: VcsFile[]; fileCount: number } {
-  const files: VcsFile[] = []
-  let fileCount = 0
-  for (const [, rawPath, attrs] of xml.matchAll(/<entry\b[^>]*\bpath="([^"]*)"[^>]*>\s*<wc-status\b([^>]*)>/g)) {
-    const bucket = svnBucket(attrs!)
-    if (!bucket) continue
-    fileCount += 1
-    if (files.length >= MAX_FILES) continue
-    const path = rawPath!.replace(/&(lt|gt|quot|apos|amp);/g, (_, name: string) => XML_ENTITIES.get(name)!)
-    files.push({ kinds: [bucket], path })
-  }
-  return { files, fileCount }
-}
 
 // The `item` values that place an entry, whatever its props say.
 const SVN_ITEM_BUCKET = new Map<string, SvnBucket>([

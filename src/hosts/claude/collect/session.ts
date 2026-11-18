@@ -80,11 +80,9 @@ export async function startSession($: EngineInterface, values: SessionValues): P
   readSession($, values, true).catch(() => {})
 }
 
-// The context as the host gives it: percent, tokens and window together.
+// The context percentage as the host gives it.
 export function setContext(values: SessionValues, context: SessionContextUsage): void {
   values.contextPercent = context.percent
-  values.contextTokens = context.tokens
-  values.contextWindow = context.window
 }
 
 // One function per event, so another collector hooking the same event can be
@@ -140,8 +138,6 @@ export function sessionEnding($: EngineInterface, e: SessionEndInput, values: Se
   sessionGeneration += 1
   values.counts = zero()
   values.contextPercent = undefined
-  values.contextTokens = undefined
-  values.contextWindow = undefined
   values.startedAt = undefined
   values.compactPending = false
   save($, values)
@@ -156,6 +152,5 @@ export function sessionEnding($: EngineInterface, e: SessionEndInput, values: Se
 export function compacted(e: SessionCompactInput, r: SessionCompactResult, values: SessionValues): void {
   if (e.agentId !== undefined || e.trigger === 'precompute' || r.skip !== undefined) return
   values.contextPercent = undefined
-  values.contextTokens = undefined
   values.compactPending = true
 }

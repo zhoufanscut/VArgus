@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { DEFAULT_THEME, lerp, makeTheme, resolvePalette } from '../src/theme'
+import { DEFAULT_THEME, makeTheme, resolvePalette } from '../src/theme'
 import { PALETTES } from '../src/theme/palettes'
 
 // Themes (DESIGN, "Colours", "Rules carried over from VantageHUD", Themes).
@@ -61,11 +61,5 @@ describe('theme', () => {
     expect(t.gradient(50, [40, 60])).toEqual(gradMid)
     // the tier index is clamped: three bounds passed all give the alert tier
     expect(t.gradient(90, [10, 20, 30] as unknown as [number, number])).toEqual(gradHigh)
-  })
-
-  test('lerp: RGB, t clamped to 0..1, channels rounded', async () => {
-    expect(lerp([0, 0, 0], [255, 100, 11], 0.5)).toEqual([128, 50, 6])
-    expect(lerp([0, 0, 0], [10, 10, 10], 2)).toEqual([10, 10, 10])
-    expect(lerp([0, 0, 0], [10, 10, 10], -1)).toEqual([0, 0, 0])
   })
 })

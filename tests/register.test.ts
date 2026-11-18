@@ -109,13 +109,26 @@ describe('register: the line as the host sets it up', () => {
     expect(await line(clock, w)).toContain('\x1b[38;2;63;63;63m | \x1b[0m')
   })
 
-  test('the theme option picks the palette: ember', { options: { ...NO_VCS.options, theme: 'ember' } }, async ($, on) => {
-    const clock = mock.clock(on, { now: 0 })
-    const w = world(on, clock, { HOME: '/home/u' })
-    await $.session.start(start)
-    // ember's sep #665c54
-    expect(await line(clock, w)).toContain('\x1b[38;2;102;92;84m | \x1b[0m')
-  })
+  test('startup requests closure of the old detail pane and applies the saved theme',
+    { options: { ...NO_VCS.options, theme: 'ember', detailView: true } }, async ($, on) => {
+      const clock = mock.clock(on, { now: 0 })
+      const w = world(on, clock, { HOME: '/home/u' })
+      const commands: string[] = []
+      const closedPanes: string[] = []
+      on('command.register', async ($, e, next) => {
+        commands.push(e.name)
+        return next(e)
+      })
+      on('ui.close', async ($, e) => {
+        closedPanes.push(e.id)
+        return { value: undefined }
+      })
+      await $.session.start(start)
+      // ember's sep #665c54
+      expect(await line(clock, w)).toContain('\x1b[38;2;102;92;84m | \x1b[0m')
+      expect(closedPanes).toEqual(['vargus'])
+      expect(commands).not.toContain('vargus')
+    })
 
   test('WSLENV set: call counts as text', NO_VCS, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })

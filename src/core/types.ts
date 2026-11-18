@@ -16,14 +16,11 @@ export type TokenName =
 // (DESIGN, "Colours"): with NO_COLOR every call returns its text unchanged.
 export type Theme = {
   name: string
-  // NO_COLOR: the detail view then gives its elements no colour either
-  noColor: boolean
   rgb: Record<TokenName, Rgb>
   paint: (color: TokenName | Rgb, text: string) => string
   bold: (text: string) => string
   // the three-stop gauge colour for a percent; bounds default to [70, 85]
   gradient: (percent: number, bounds?: readonly [number, number]) => Rgb
-  lerp: (a: Rgb, b: Rgb, t: number) => Rgb
 }
 
 export type CoreValues = {

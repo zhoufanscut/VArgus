@@ -23,7 +23,7 @@ DESIGN.md "Unsettled" with a throwaway mod before building on it.
 
 - `src/core`, `src/render`, `src/theme`, `src/i18n` and `src/options.ts` hold shared values and
   presentation. They import no host API, host module or output adapter.
-- `src/hosts/claude` owns the mod, its collectors, state contract integration and detail pane.
+- `src/hosts/claude` owns the mod, its collectors and state contract integration.
   The mod imports no Node code.
 - `src/hosts/codex` owns Codex saved-session collection and metadata reads; `src/hosts/antigravity`
   owns Antigravity CLI `statusLine` payload collection, incremental transcript reads and cached Git

@@ -25,7 +25,7 @@ Code comments cite this file by section name: `(DESIGN, "The line file")`.
 
 - [Hosts and outputs](#hosts-and-outputs), [Scope](#scope), [Decisions](#decisions), [Terms](#terms)
 - [How it works](#how-it-works): layout, data sources, when the line is written
-- [Fragments](#fragments), [Languages](#languages), [The detail view](#the-detail-view)
+- [Fragments](#fragments), [Languages](#languages)
 - [The line file](#the-line-file), [The reader](#the-reader), [Setup](#setup)
 - [The host](#the-host): what the mod API gives and what it holds VArgus to
 - [Config](#config), [Colours](#colours)
@@ -849,10 +849,9 @@ controls are the supported Codex path. The live engine and footer limits above a
 The Codex row polls Git when `repo`, `branch` or `status` is enabled. Its host
 poller passes the `detachedHead` option and its 30-second command timeout to
 `src/node/git.ts`, the reader shared with Antigravity and OmO. The reader returns
-the repository, branch, linked worktree and aggregate counts. Changed-file
-paths belong to the Claude detail pane. A recorded cwd change clears the
-previous Git readings before rendering or saving a paused snapshot. An asynchronous
-result is applied only while its cwd still matches the view.
+the repository, branch, linked worktree and aggregate counts. A recorded cwd
+change clears the previous Git readings before rendering or saving a paused
+snapshot. An asynchronous result is applied only while its cwd still matches the view.
 
 ### Codex model names and call counts
 
@@ -1219,10 +1218,9 @@ output are specified in [Hosts and outputs](#hosts-and-outputs).
   left beside it, and session folders stayed after exit; started from Git Bash both worked. So
   on Windows the mod moves and removes through cmd.exe ([The line file](#the-line-file)).
 
-Not in scope: the band above the prompt and other mod-drawn UI (the `/vargus` pane, opened only
-when asked, aside), data that only the status-line
-payload carries ([What VArgus cannot show](#what-vargus-cannot-show)), teammates running in their
-own tmux pane, code shared with VantageHUD.
+The Claude integration displays its readings in the native status line.
+[What VArgus cannot show](#what-vargus-cannot-show) covers data available only in
+the status-line payload and teammates running in their own tmux pane.
 
 ## Decisions
 
@@ -1270,7 +1268,6 @@ src/hosts/claude/register.ts      Claude mod lifecycle and wiring
 src/hosts/claude/collect/         Claude collectors, authentication and polling
 src/hosts/claude/write.ts         Claude native line file
 src/hosts/claude/paths.ts         pure Claude config/data path rules
-src/hosts/claude/view/            existing /vargus pane
 src/hosts/antigravity/            Antigravity CLI payload, incremental transcript and Git cache
 src/hosts/codex/                 Codex saved-log collection, view recognition, footer policy
 src/cli/                        Node-side host/output wiring, statusline CLI and standalone controller
@@ -1298,7 +1295,7 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
 | Data | Source | Basis |
 |---|---|---|
 | Tokens per request, per agent (subagents, in-process teammates and workflow agents), counted from when this process loaded the mod or from the last clear/resume; a resumed session's earlier history is not in them, while `$.session.usage()` counts from its first launch | `turn.step` result `usage` ("as the API reported it"), `e.agentId`; `token:` sums `input_tokens + output_tokens`, main loop and subagents, as VantageHUD did (cache reads and writes left out: `ctx:` is the cache-inclusive gauge; `input_tokens` is the part neither read from nor written to the cache, so nothing counts twice) | types; measured (2.1.300): a subagent's steps, and an in-process teammate's (`agent.spawn` `isTeammate`) on both its first turn and one after a `SendMessage`, the line's `token:` equal to the sum; a workflow agent's two steps (`agent.spawn` `workflow`), main loop 1,850 + agent 298 = the line's `token:2.1k` |
-| Context %, cost, session start, `five_hour`/`seven_day`/`spend_limit` | `$.session.usage()`; pushed by `session.measure` after each main-thread turn and when a limit window moves a whole point, and read after every main-loop `turn.step` (`e.agentId` absent) to set the context, plus the session start when it is unknown. A subagent's step does not read the main window. `/clear` and an in-session resume clear the context and start; a compaction that stands (`session.compact` with no `skip`, the main conversation, not `precompute`) clears the context alone. Until the next main step, `compactPending` keeps `session.measure` from restoring the old fill: the interactive probes still returned the pre-compact tokens when the compact hook resolved. Without a reading the line shows `ctx:0%`; each main response then supplies the latest fill, and there is no usage read on the tick. The session-start read stays, so a long conversation resumed with `claude --resume <id>` in a new process has its context and start before the first message (an in-session `/resume` not measured). The step timing is measured on 2.1.312, 2026-11-02, with a throwaway probe: in interactive and `-p` runs, immediately after every main `next(e)` in two-response turns, `usage().context.tokens` equalled that result's uncached + cache-read + cache-written input tokens (interactive 24,134 → 24,569 before compaction; headless 19,740 → 19,904). The interactive `/compact` emitted no `turn.step`; the next step's pre-request read had the window alone, and its two responses gave 27,907 → 28,075 tokens. Other surfaces are unchecked. VantageHUD avoided `ctx:0%` on a resumed conversation by working the percent out from the transcript | types; measured (2.1.301, 2026-10-16): the person resumed a long session and found `ctx:`, `session:` and the detail view's Context card right before the first message |
+| Context %, cost, session start, `five_hour`/`seven_day`/`spend_limit` | `$.session.usage()`; pushed by `session.measure` after each main-thread turn and when a limit window moves a whole point, and read after every main-loop `turn.step` (`e.agentId` absent) to set the context, plus the session start when it is unknown. A subagent's step does not read the main window. `/clear` and an in-session resume clear the context and start; a compaction that stands (`session.compact` with no `skip`, the main conversation, not `precompute`) clears the context alone. Until the next main step, `compactPending` keeps `session.measure` from restoring the old fill: the interactive probes still returned the pre-compact tokens when the compact hook resolved. Without a reading the line shows `ctx:0%`; each main response then supplies the latest fill, and there is no usage read on the tick. The session-start read stays, so a long conversation resumed with `claude --resume <id>` in a new process has its context and start before the first message (an in-session `/resume` not measured). The step timing is measured on 2.1.312, 2026-11-02, with a throwaway probe: in interactive and `-p` runs, immediately after every main `next(e)` in two-response turns, `usage().context.tokens` equalled that result's uncached + cache-read + cache-written input tokens (interactive 24,134 → 24,569 before compaction; headless 19,740 → 19,904). The interactive `/compact` emitted no `turn.step`; the next step's pre-request read had the window alone, and its two responses gave 27,907 → 28,075 tokens. Other surfaces are unchecked. VantageHUD avoided `ctx:0%` on a resumed conversation by working the percent out from the transcript | types; measured (2.1.301, 2026-10-16): the person resumed a long session and found `ctx:` and `session:` right before the first message |
 | Folder, model, effort | `$.session.cwd()` and `$.session.model()` on each tick (a `/model` switch raises no event but the classic `PostModelSwitch`, and classic hooks don't run where an organization manages Claude Code), `effort` on the main loop's `turn.step` input, so none shows before a session's first request. Not filled in earlier from settings and the model's default: the engine's order (model-config docs) also takes `--effort`, a session-only `/effort`, an organization default and caps, which a mod can't read | types, docs |
 | Tool / agent / skill / workflow counts | the main loop's `tool.call` (no `e.agentId`): every call, `Agent`, `Skill`, and `Workflow` other than a resume; counted when the call is asked for, a refused one included, as VantageHUD counted the transcript's tool_use blocks. Not `agent.spawn`: it fires for each workflow agent too | types |
 | Per-model weekly (`sn:`/`op:`/others), `extra:` | OAuth usage API via `$.http.fetch` + `$.session.authorize()`, cached in `$.store` per config folder (`CLAUDE_CONFIG_DIR`, which picks the login); the store is checked every 15 s and the API read when the cache's retry time has passed (90 s after a success, 2 min after a network or auth failure, the larger of the backoff and `Retry-After` after a 429). No read, and no cached numbers shown, when `authorize()` gives null or an API key (the endpoint is OAuth-only; checked before the cache, so another login's numbers can't show), or with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` set (the engine refuses a plugin's request carrying `auth`). Another process's `$.store.set` is seen here on the next check. Each `authorize()` mints a new handle and only the newest few stay valid, so the 15 s calls pile nothing up; the handle is spent at once | measured: HTTP 200 on the dev machine, where the API answers only through `HTTPS_PROXY` (2.1.300); two sessions writing one key each to `$.store` every second and reading the other's: 52 of 52 writes seen, 0.33-0.75 s later, then after a hot reload 77 of 79 (0.79-0.95 s; the two missed were overwritten before the next read) and 78 of 78 (0.07-0.22 s); 70 `authorize()` calls gave 70 distinct handles, of which the newest 4 still worked and the 5th-newest and older were refused ("unknown auth handle"), and the process's `VmRSS` (`/proc`) moved 337 to 339 MB over a 100-call burst (2.1.301) |
@@ -1310,10 +1307,9 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
 ### When the line is written
 
 - Periodic collectors start only when an enabled display needs them. Claude's
-  limits collector needs `rateLimits` or `detailView`; its VCS collector needs
-  `repo`, `branch`, `status` or `detailView`. The detail pane keeps its full readings
-  even when those fragments are hidden from the inline row. These checks sit at
-  collector startup, so disabled collectors add no poll timers or VCS tool refreshes.
+  limits collector needs `rateLimits`, and its VCS collector needs at least one
+  of `repo`, `branch` and `status`. These checks sit at collector startup, so
+  disabled collectors add no poll timers or VCS tool refreshes.
 - `/clear` and an in-session resume advance a session generation. A `session.measure`
   or session-start usage response from an earlier generation is discarded rather than
   restoring the old context or session start.
@@ -1396,84 +1392,6 @@ language touches no fragment.
   VantageHUD](#rules-carried-over-from-vantagehud), Width).
 - Test: every fragment rendered with a test table whose labels are `⟦<key>⟧` must show only those
   for its words, which catches a word written straight into a fragment.
-
-## The detail view
-
-`/vargus` opens a pane with what does not fit the line, and closes it again. Off by default: the
-`detailView` option registers the command and every hook below.
-
-- **A pane, opened by the person.** `$.ui.open({ id: 'vargus', closeOnEscape: true })` from the
-  command; `/vargus` again, Esc (with the pane focused, or at an idle empty prompt) or the
-  engine's close mark closes it. The engine places it: docked beside the transcript in the
-  fullscreen layout from 110 columns, else inline above the prompt (measured, 2.1.301: docked at
-  160 columns with 71 body columns, inline at 80). Why on request only: the band above the prompt
-  was turned down as always-on UI (2026-10-14); a pane opened by a command shows only while
-  wanted. The command answers no text: a text row would also reach the model.
-- **Live.** While the pane is open, the mod's 1 s tick calls `$.ui.invalidate('ui.render')`; a
-  `ui.close` hook (every close passes it: the command's, Esc, the mark, an unload) stops that.
-  Measured (a throwaway pane, 2.1.301): its render counter rose about once a second (4, then 13
-  at a capture about 9 s later). A hot reload finds the pane in
-  `$.ui.panes()` and keeps redrawing it.
-- **Cards.** Round-bordered boxes in the theme's `sep` colour, each row one `Text` of coloured
-  runs, sized to the pane's `bodyColumns`. Every row and title is cut to its card by the model
-  (the run that crosses the edge ends in `…`), so none relies on the surface's own truncation:
-  - header (no card): folder, model and effort, session time, call counts, as on the line;
-    whole parts dropped from the end when it is too wide, as the line drops fragments, then the
-    folder cut;
-  - **Limits**: every window the engine and the usage API give, without the line's thresholds
-    and switches (`sn:` under 80 %, other models' weekly, the spend limit unclamped, `extra:`
-    with its dollars); a gauge, the percent in its tier colour, the reset as local clock time
-    (`14:20` today, `Sat 21:00` within six days, so a weekday never names the day a week out, `10-30
-    00:00` beyond; the mod's `Date` is the
-    machine's local time, measured UTC+8 on the dev machine, 2.1.301) and the countdown. Narrow,
-    the reset column drops `resets`, then the clock, before the gauge goes under 12 cells. A
-    stale API read: `*` and a note with its age; past 15 min the line's error mark;
-  - **Context**: a gauge whose track is tinted from 80 % (`COMPRESS?`) and 85 % (`CRITICAL`), so
-    the thresholds show before the fill reaches them; the tokens in use over the window (the host's
-    `context.tokens` and `window`); before the first response 0 % over the window, as the line's
-    `ctx:0%`;
-  - **Tokens**: one row per agent, the main loop first, then by input + output, largest first,
-    six at most and `+n more`; uncached in, out, cache read, cache write (the last two dropped
-    in a card under 66 columns); a total row. The same `turn.step` usage as `token:`, so while
-    the option has been on for the whole span the total's in + out is the line's count; turned
-    on mid-session, the list starts then and the total is lower. Names from `agent.spawn`: the
-    call's `name`, the teammate's name, else the agent type, with the call's description dimmed;
-    an agent started before the mod loaded shows as `?`. Past 64 agents the rest sum into one
-    `others` row, which keeps the last shown place. The row contract holds its id, name,
-    description and four token totals; the view needs no agent-kind or request-count fields.
-    Kept in `$.state` beside the counts, so a hot
-    reload keeps it; `/clear` and a resume start it over. Each save of the list carries the counts'
-    token count of that moment, and at `session.start` the list is taken back only when that
-    equals the restored count: with the option off the list is neither kept nor cleared, so after
-    a `/clear` with the option off it would be an earlier conversation's. A list started
-    mid-session is kept across reloads; a reload between the two saves of one step drops it,
-    rarely;
-  - **Git** or **SVN**: ahead/behind first, then the branch (worktree and detached-HEAD naming
-    as on the line), so a long branch is cut at the row's end and never them; the counts in words
-    (`clean` when none), wrapped onto a second row rather than cut; the first 8 changed paths with their marks
-    (the path's end kept when it is cut) and `+n more`. Read from the same `git status` and `svn
-    status --xml` output as the counts, by a second pass that never changes them; git prints a
-    path with unusual characters in C-style quotes, and it is shown so.
-  - Side by side, Context and Tokens from 100 body columns, Tokens at least 66 wide (its four
-    columns) and Context the rest. The docked pane does not reach it: it stayed 89 body columns
-    wide at 240, 280 and 320 terminal columns (measured, 2.1.301); an inline pane at 100-109
-    columns or the main screen gets it (seen inline at 109).
-  - An inline pane is held to a height by the engine: at 80x48 only Limits and Context showed,
-    at 80x30 Limits and the top of Context (measured, 2.1.301); the cards' order decides what is
-    left out.
-- **Colours** from the theme as `#rrggbb`, which the terminal converts (`tmux-256color` gave
-  256-colour codes); with `NO_COLOR` no colour prop at all. Every word comes from the labels.
-- **The hooks**: `agent.spawn` and `ui.close` only observe; `command.run` answers its own command
-  (registered and matched by the literal name `vargus`, which `claude plugin validate` needs to
-  report "answers its own command" rather than a gating hook); the `Pane` render hook draws only
-  its own pane. Validate lists `agent.spawn` and `ui.close` as gating hooks without `.catch`:
-  neither guards anything, and a throwing one is skipped, which leaves the engine's own behaviour
-  (the spawn's answer stands, the close goes ahead).
-- `$.command.register` and `$.ui.panes()` at `session.start` are caught: a refusal costs the view,
-  never the line's tick started after them.
-- Turning the option on or off in `/config` reloads the module (reference.md: "a change there
-  reloads the module with the new `options`"); what a reload does to an open pane is not
-  measured.
 
 ## The line file
 
@@ -1686,6 +1604,9 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 
 - The Claude picker exposes the shared and Claude-specific `userConfig` fields
   from `.claude-plugin/plugin.json` in `/config` and stores them under `pluginConfigs`.
+  The option resolver ignores unknown keys, including a saved `detailView`.
+  Interactive startup requests a close for the retired pane. Claude Code 2.1.323
+  kept its empty dock open when a plugin reload removed the renderer.
   Codex-only JSON keys are resolved in `src/hosts/codex/options.ts`. AGENTS.md defines the feature-default
   policy for every host and shared feature; the defaults below describe existing options.
 - 0.1.0's options: one boolean per fragment and sub-option ([Fragments](#fragments)), and
@@ -1693,7 +1614,6 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
   `graphite`, `daylight`), default `graphite`.
 - `blankStopped` (0.1.3, off): the heartbeat write and the second reader
   ([The reader](#the-reader)).
-- `detailView` (0.2.0, off): the `/vargus` pane ([The detail view](#the-detail-view)).
 - Built in at VantageHUD's defaults: the short model name (`opus`); call counts as emoji (`🔧73`), as
   text (`T:73`) on WSL, as VantageHUD's `auto` did (WSL: `WSLENV` set, or `/proc/version` containing
   "microsoft", read with `$.env.get` and `$.fs.read`); the context thresholds 70 / 80 / 85 % and the
@@ -1849,12 +1769,6 @@ the Claude mod. A throwaway mod run in a live session settles each.
   folder, so `/reload-plugins` picks up edits, and the data folder is the real `vargus-vargus`.
   The reader goes in `.claude/settings.local.json` (gitignored).
 - The fragment order and each fragment's default match [Fragments](#fragments).
-- The detail view: `tests/view.test.ts` checks the cards from given values (every row, title and
-  the header within its box at 20, 40, 71, 76 and 140 columns, long branch, worktree and folder
-  included; no colour with `NO_COLOR`; every word from the labels), the changed-path parsers and
-  the agents list's restore rule; `tests/view-register.test.ts` drives the wiring (off: no command; on:
-  `/vargus` opens and closes the pane, redraws each second while open, and checks the main,
-  subagent and total token columns, including the main row after a reload).
 - The labels test in [Languages](#languages).
 
 ## Rules for the code
@@ -1885,8 +1799,7 @@ Later:
 - Languages other than English (VantageHUD had zh-CN), and per-label overrides (VantageHUD's
   `labels` config).
 
-Not planned for the Claude integration: payload-only data in the line; additional UI
-beyond the inline status line and `/vargus` pane; seeing
+Not planned for the Claude integration: payload-only data in the line; seeing
 teammates that run in their own tmux pane; a live-agents row (`agents: reviewer running 1m17s
 8.2k | Explore done 9.2k`), since Claude Code lists each running agent under the prompt with what
 it is doing, its time and its tokens (seen on 2.1.300: `◯ Explore  Grepping labels.test.ts for

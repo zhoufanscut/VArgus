@@ -18,7 +18,6 @@ export const DEFAULTS = {
   status: true,
   theme: 'graphite',
   blankStopped: false,
-  detailView: false,
 }
 
 export type Options = typeof DEFAULTS

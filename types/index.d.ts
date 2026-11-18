@@ -10,24 +10,8 @@ export type VargusCounts = {
   workflows: number
 }
 
-// One row of the detail view's tokens by agent (src/hosts/claude/collect/agents.ts), over
-// the same span as the counts; the list is saved with the counts' token count
-// of the same moment.
-export type VargusAgent = {
-  // the engine's agentId; '' for the main loop, '*others' for the sum past the cap
-  id: string
-  // the call's name, the teammate's name or the agent type; '?' until a spawn names it
-  name: string
-  // the Agent call's short description, '' when none
-  detail: string
-  input: number
-  output: number
-  cacheRead: number
-  cacheWrite: number
-}
-
 declare module 'claude-code' {
   interface PluginState {
-    vargus: { counts: VargusCounts | null; agents: { list: VargusAgent[]; tokens: number } | null }
+    vargus: { counts: VargusCounts | null }
   }
 }
