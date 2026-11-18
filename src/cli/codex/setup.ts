@@ -3,7 +3,7 @@ import { lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'n
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { withControlLock } from './lock.ts'
+import { withControlLock } from '../lock.ts'
 import { startupDirectory } from './startup.ts'
 
 type Callback = { type: string; command?: string; commandWindows?: string; command_windows?: string }
@@ -36,7 +36,7 @@ function isVargus(callback: Callback, hook: string): boolean {
 
 function hookCommand(hook: string): string {
   const windows = process.platform === 'win32'
-  const entry = fileURLToPath(new URL(windows ? '../../bin/vargus.cmd' : '../../bin/vargus', import.meta.url))
+  const entry = fileURLToPath(new URL(windows ? '../../../bin/vargus.cmd' : '../../../bin/vargus', import.meta.url))
   const launcher = windows ? `& '${entry.replaceAll("'", "''")}'` : `"${entry.replace(/["\\$`]/g, '\\$&')}"`
   return `${launcher} hook ${hook}`
 }

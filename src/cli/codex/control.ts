@@ -1,52 +1,26 @@
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { readFile, rm, mkdir, writeFile, readdir, rename } from 'node:fs/promises'
-import { tmpdir, homedir } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { randomBytes, createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
-import { TmuxOutput } from '../outputs/tmux/client.ts'
-import { findRollout, RolloutReader } from '../hosts/codex/rollout.ts'
-import { Views, canHoldReadings, selectedView, type View, type ViewScreen } from '../hosts/codex/views.ts'
-import { applicationTarget, type Target } from '../outputs/tmux/target.ts'
-import { PaneInput } from '../outputs/tmux/input.ts'
-import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, FooterSettings, type FooterSelection } from '../hosts/codex/footer.ts'
-import { resolveCodexOptions } from '../hosts/codex/options.ts'
-import { makeTheme } from '../theme/index.ts'
-import { codexLine } from './line.ts'
-import { withControlLock } from './lock.ts'
+import { fileURLToPath } from 'node:url'
+import { savedFooter, restoreFooter, footerIdentity } from '../../hosts/codex/footer.ts'
+import { resolveCodexOptions } from '../../hosts/codex/options.ts'
+import { findRollout, RolloutReader } from '../../hosts/codex/rollout.ts'
+import { TmuxOutput } from '../../outputs/tmux/client.ts'
+import { applicationArguments } from '../../outputs/tmux/process.ts'
+import { applicationTarget, type Target } from '../../outputs/tmux/target.ts'
+import { withControlLock } from '../lock.ts'
 import { startupControl, startupTarget, hasStartupState, startupSuppressed } from './startup.ts'
-import { cleanText } from '../render/text.ts'
-import { applicationArguments } from '../outputs/tmux/process.ts'
+import {
+  backups, controlRoot, footerPath, footerRoot, json, recordPath, replyPath, requestPath, running,
+  sameTarget, save, workerVersion, type FooterBackup, type Running, type Spec,
+} from './state.ts'
 
-type Running = { pid: number; thread: string; transcript?: string; target: Target; token: string; version?: number;
-  mode?: 'on' | 'restore'; selected?: string; pending?: number; error?: string;
-  paused?: { thread: string; label: string };
-  reload?: { version: 1; home: string; options: Record<string, unknown> } }
-type FooterBackup = { thread: string; target: Target; selection: FooterSelection }
-type Spec = { target: Target; thread: string; transcript: string; home: string;
-  options: Record<string, unknown>; token: string; mode: 'on' | 'restore' }
 type Recovery = { version: 1; spec: Spec }
-type Request = { id: string; action: 'on' | 'off' }
-const workerVersion = 7
-const controlRoot = () => join(tmpdir(), `vargus-control-${process.getuid?.() ?? 'user'}`)
-const running = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
-const recordPath = (target: Target) => join(controlRoot(), createHash('sha256').update(target.socket + '\0' + target.pane).digest('hex') + '.json')
-const footerRoot = () => join(controlRoot(), 'footers')
-const footerPath = (target: Target, thread: string) => join(footerRoot(), createHash('sha256').update(JSON.stringify([target.socket, target.pane, target.pid, thread])).digest('hex') + '.json')
-const requestPath = (r: { token: string }) => join(controlRoot(), r.token + '.request')
 const recoveryPath = (target: Target) => recordPath(target) + '.reload'
-const replyPath = (id: string) => join(controlRoot(), id + '.reply')
-const sameTarget = (a: Target, b: Target) => a.socket === b.socket && a.pane === b.pane && a.pid === b.pid
-async function json<T>(file: string): Promise<T | undefined> {
-  try { return JSON.parse(await readFile(file, 'utf8')) as T }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error }
-}
-async function save(file: string, value: unknown): Promise<void> {
-  const temporary = file + '.' + process.pid + '.tmp'
-  await writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
-  await rename(temporary, file)
-}
+
 async function readRunning(file: string): Promise<Running | undefined> {
   const r = await json<Running>(file)
   if (!r || !running(r.pid)) return
@@ -56,15 +30,7 @@ async function readRunning(file: string): Promise<Running | undefined> {
     return args.includes('__row') && args.includes(`"token":"${r.token}"`) ? r : undefined
   } catch (error) { if ((error as any).code !== 1) throw error }
 }
-async function backups(target: Target): Promise<FooterBackup[]> {
-  const result: FooterBackup[] = []
-  for (const name of await readdir(footerRoot())) {
-    if (!name.endsWith('.json')) continue
-    const b = await json<FooterBackup>(join(footerRoot(), name))
-    if (b && sameTarget(b.target, target)) result.push(b)
-  }
-  return result
-}
+
 async function stopWorker(current: Running): Promise<void> {
   const live = await readRunning(recordPath(current.target))
   if (!live) return
@@ -256,7 +222,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
 }
 
 async function startWorker(spec: Spec): Promise<Running> {
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../cli.ts', import.meta.url)), '__row', JSON.stringify(spec)], {
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../../cli.ts', import.meta.url)), '__row', JSON.stringify(spec)], {
     detached: true, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'], env: { ...process.env, VARGUS_CLI_MAIN: '1' },
   })
   let errors = '', attached = false
@@ -280,160 +246,4 @@ async function startWorker(spec: Spec): Promise<Running> {
     ;(error as Error & { attached?: boolean }).attached = attached
     throw error
   } finally { child.stderr!.destroy(); if (child.connected) child.disconnect(); child.unref() }
-}
-
-export async function rowWorker(spec: Spec): Promise<number> {
-  const { target, thread } = spec
-  const file = recordPath(target), views = new Views(spec.home, thread, spec.transcript), input = new PaneInput(target)
-  const output = new TmuxOutput(target.socket, target.pane)
-  const options = resolveCodexOptions(spec.options), theme = makeTheme(options.theme, !!process.env.NO_COLOR)
-  const readers = new Map<string, { reader: RolloutReader; line: ReturnType<typeof codexLine> }>()
-  const suppressed = new Set<string>(), footerSettings = new FooterSettings()
-  let mode = spec.mode, selected: string | undefined, error: string | undefined
-  let stopping = false, attached = false, refreshAt = 0, renderAt = 0
-  let lastConfirmed: string | undefined, readingError: string | undefined, published = ''
-  let lastReadings: { thread: string; label: string; line: ReturnType<typeof codexLine> } | undefined
-  let paused: Running['paused']
-  let identity: 'first' | 'whole' | 'none' = 'none'
-  let candidates: View[] = []
-  const select = (screen: ViewScreen) => selectedView(screen, candidates, thread, identity)
-  const stop = () => { stopping = true }
-  process.on('SIGTERM', stop); process.on('SIGHUP', stop)
-  const state = async (): Promise<Running> => ({ pid: process.pid, thread, transcript: spec.transcript, target, token: spec.token, version: workerVersion,
-    reload: { version: 1, home: spec.home, options },
-    mode, selected, paused, pending: (await backups(target)).length, error })
-  const step = async () => {
-    if (Date.now() >= refreshAt) {
-      await views.refresh()
-      if (mode === 'on') await footerSettings.preload(views.family().map(view => view.cwd))
-      refreshAt = Date.now() + 1000
-    }
-    const saved = mode === 'restore' ? new Map((await backups(target)).map(backup => [backup.thread, backup.selection])) : undefined
-    // A new root replaces the reader, but earlier footer backups still belong
-    // to this TUI. Restore those views too; on-mode readings stay in one family.
-    candidates = saved ? views.restoreCandidates(saved.keys()) : views.family()
-    const layouts = saved ? [...saved.values()] : candidates.map(view => {
-      try { return footerSettings.get(view.cwd) } catch { return undefined }
-    })
-    const identities = layouts.map(footerIdentity)
-    identity = identities.length && identities.every(value => value !== 'none')
-      ? identities.every(value => value === 'first') ? 'first' : 'whole' : 'none'
-    const screen = await input.snapshot(), view = select(screen)
-    const changed = selected !== view?.thread
-    selected = view?.thread
-    if (changed) readingError = undefined
-    error = undefined
-    if (view) {
-      try {
-        const backupFile = footerPath(target, view.thread)
-        let backup = await json<FooterBackup>(backupFile)
-        if ((mode === 'restore' && backup || mode === 'on' && !suppressed.has(view.thread)) && footerCommandError(screen.lines)) {
-          throw new Error('Footer command completion is inconclusive: a native statusline error remains visible. Resolve it and move it out of view before retrying.')
-        }
-        if (mode === 'on' && !suppressed.has(view.thread) && codexComposer(screen, '')) {
-          if (!backup) {
-            const selection = footerSettings.get(view.cwd)
-            restoreFooter(selection)
-            backup = { target, thread: view.thread, selection }
-            await save(backupFile, backup)
-          }
-          await change(clearFooter, view.thread)
-          suppressed.add(view.thread)
-        } else if (mode === 'restore' && backup && codexComposer(screen, '')) {
-          await change(restoreFooter(backup.selection), view.thread)
-          await rm(backupFile, { force: true })
-          suppressed.delete(view.thread)
-        } else if (mode === 'restore' && backup) {
-          error = 'Footer restoration paused: leave the composer empty.'
-        }
-      } catch (e) { error = (e as Error).message }
-    }
-    if (!view) error = 'View identity is unknown; widen the pane or close the popup and leave the composer empty.'
-    const hold = !!(lastReadings && !view && canHoldReadings(screen))
-    if (mode !== 'on') paused = undefined
-    if (mode === 'on' && (changed || Date.now() >= renderAt || hold !== !!paused)) {
-      renderAt = Date.now() + 1000
-      let line = ''
-      paused = undefined
-      if (view) {
-        readingError = undefined
-        try {
-          let value = readers.get(view.thread)
-          if (!value) {
-            const reader = new RolloutReader(view.file, view.thread, view.cwd, homedir())
-            value = { reader, line: codexLine(reader.collector, options, theme) }; readers.set(view.thread, value)
-          }
-          await value.reader.poll()
-          line = await value.line(await output.width())
-          if (line) lastReadings = { thread: view.thread, label: cleanText(view.path ?? 'main'), line: value.line }
-        } catch (e) { readingError = (e as Error).message }
-      } else if (hold) {
-        const frozen = lastReadings!.line.paused(await output.width())
-        if (frozen) {
-          line = frozen
-          paused = { thread: lastReadings!.thread, label: lastReadings!.label }
-        }
-      }
-      // Release the row when there are no readings and the composer is empty.
-      // Transient shell/popup frames must not discard a draft's saved readings.
-      if (line) {
-        if (!attached) { await output.attach(); attached = true }
-        await output.update(line)
-      } else if (attached && codexComposer(screen, '')) {
-        await output.detach(); attached = false; lastReadings = undefined
-      } else if (attached) await output.update('')
-      // Thread switches rebuild the terminal surface. Redraw once at a confirmed
-      // identity transition, rather than repainting the full client every poll.
-      if (view && lastConfirmed !== view.thread) {
-        await output.redraw()
-        lastConfirmed = view.thread
-      }
-    }
-    if (paused) error = `Readings paused from ${paused.label} (${paused.thread}); the current view is unknown.`
-    error ??= readingError
-    const value = await state(), serialized = JSON.stringify(value)
-    if (serialized !== published) { await save(file, value); published = serialized }
-  }
-  const change = async (command: string, expected: string) => {
-    const live = await applicationTarget('codex', target.socket, target.pane)
-    if (live.pid !== target.pid) throw new Error('Footer automation stopped: the Codex process in this pane changed.')
-    // Inserting a slash command can hide the contextual agent label. Its exact
-    // draft and cursor must still match before Enter; empty-prompt checks bind
-    // the operation to the selected view before insertion and after completion.
-    const after = await input.submit(command, (screen, text) => codexComposer(screen, text) && (text !== '' || select(screen)?.thread === expected))
-    if (footerCommandError(after.lines)) throw new Error('Footer command completion is inconclusive: a native statusline error remains visible. Saved restoration state is retained. Resolve the error and move it out of view before retrying.')
-  }
-  try {
-    if (mode === 'on') { await output.attach(); attached = true }
-    else await output.cleanupAbandoned()
-    process.send?.({ stage: 'attached' })
-    await step()
-    process.send?.(await state())
-    while (!stopping && running(target.pid)) {
-      const request = await json<Request>(requestPath(spec))
-      if (request) {
-        await rm(requestPath(spec), { force: true })
-        try {
-          mode = request.action === 'on' ? 'on' : 'restore'
-          readingError = undefined
-          if (mode === 'on') {
-            footerSettings.reset(); refreshAt = 0
-            suppressed.clear(); renderAt = 0
-            if (!attached) { await output.attach(); attached = true }
-          } else if (attached) { await output.detach(); attached = false }
-          await step()
-          await save(replyPath(request.id), await state())
-        } catch (e) { await save(replyPath(request.id), { ...await state(), failed: (e as Error).message }) }
-      } else await step()
-      if (mode === 'restore' && !(await backups(target)).length) break
-      await delay(250)
-    }
-    return 0
-  } finally {
-    try { if (attached) await output.detach() } finally {
-      await rm(file, { force: true }); await rm(requestPath(spec), { force: true })
-      if (!running(target.pid)) for (const b of await backups(target)) await rm(footerPath(target, b.thread), { force: true })
-    }
-    process.off('SIGTERM', stop); process.off('SIGHUP', stop)
-  }
 }

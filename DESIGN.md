@@ -1313,7 +1313,8 @@ src/hosts/claude/write.ts         Claude native line file
 src/hosts/claude/paths.ts         pure Claude config/data path rules
 src/hosts/antigravity/            Antigravity CLI payload, incremental transcript and Git cache
 src/hosts/codex/                 Codex saved-log collection, view recognition, footer policy
-src/cli/                        Node-side host/output wiring, statusline CLI and standalone controller
+src/cli/                        Node command entries, installers and settings helpers
+src/cli/codex/                  Codex controls, row worker, hooks and startup wiring
 src/core/                       shared readings, defaults and pure git parsers
 src/options.ts                  shared options (defaults match userConfig)
 src/render/                     shared fragment composition, text and width

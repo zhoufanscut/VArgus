@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 import { PaneInput } from '../../src/outputs/tmux/input.ts'
-import { startupDirectory, startupSuppressed, startupControl } from '../../src/cli/startup.ts'
+import { startupDirectory, startupSuppressed, startupControl } from '../../src/cli/codex/startup.ts'
 import { codexComposer } from '../../src/hosts/codex/footer.ts'
 import { nativeFixtureEnv, removeNativeFixture, startTestDaemon } from './native-fixture.mts'
 
@@ -242,9 +242,9 @@ trust_level = "trusted"
       await cp(install, legacyRoot, { recursive: true })
       const oldPath = join(legacyRoot, 'src/cli.ts')
       for (const [file, from, to] of [
-        ['src/cli/codex.ts', 'const workerVersion = 7', 'const workerVersion = 5'],
+        ['src/cli/codex/state.ts', 'const workerVersion = 7', 'const workerVersion = 5'],
         ['src/options.ts', 'export const DEFAULTS = {', 'export const DEFAULTS = { codexDraftHold: false,'],
-        ['src/cli/codex.ts', 'const hold = !!(lastReadings', 'const hold = !!(options.codexDraftHold && lastReadings'],
+        ['src/cli/codex/worker.ts', 'const hold = !!(lastReadings', 'const hold = !!(options.codexDraftHold && lastReadings'],
       ] as const) {
         const path = join(legacyRoot, file), old = await readFile(path, 'utf8')
         assert.equal(old.split(from).length, 2, from)
@@ -325,7 +325,7 @@ trust_level = "trusted"
       const replacement = join(dir, 'replacement')
       await cp(install, replacement, { recursive: true })
       const entryPath = join(replacement, 'src/cli.ts')
-      const sourcePath = join(replacement, 'src/cli/codex.ts')
+      const sourcePath = join(replacement, 'src/cli/codex/worker.ts')
       const source = await readFile(sourcePath, 'utf8'), entrySource = await readFile(entryPath, 'utf8')
       assert.equal(source.split('await output.update(line)').length, 2)
       const changed = source.replace('await output.update(line)', 'await output.update(line + " RELOAD_SOURCE_B")')

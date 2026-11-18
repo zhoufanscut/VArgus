@@ -80,7 +80,7 @@ test('startup identity requires the complete ID below a live empty composer', ()
 test('broadcast matches one exact pane, rejects duplicates and preserves manual off', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hook-broadcast-'))
   const path = process.env.PATH
-  const { startupTarget, startupControl, startupDirectory } = await import('../../src/cli/startup.ts')
+  const { startupTarget, startupControl, startupDirectory } = await import('../../src/cli/codex/startup.ts')
   try {
     const screens = join(dir, 'screens.json')
     const set = async (ids: string[]) => writeFile(screens, JSON.stringify(ids.map(id => fixtureScreen(id).lines)))
@@ -130,8 +130,8 @@ test('ordinary off before first attachment suppresses a delayed automatic start'
   const previous = { PATH: process.env.PATH, CODEX_HOME: process.env.CODEX_HOME,
     TMPDIR: process.env.TMPDIR, CODEX_THREAD_ID: process.env.CODEX_THREAD_ID }
   const home = join(dir, 'codex')
-  const { standalone } = await import('../../src/cli/codex.ts')
-  const { startupTarget, startupDirectory, startupControl } = await import('../../src/cli/startup.ts')
+  const { standalone } = await import('../../src/cli/codex/control.ts')
+  const { startupTarget, startupDirectory, startupControl } = await import('../../src/cli/codex/startup.ts')
   try {
     await mkdir(startupDirectory(home), { recursive: true })
     await writeFile(join(dir, 'tmux'), `#!${process.execPath}
@@ -159,7 +159,7 @@ const a=process.argv;if(a.includes('list-panes'))console.log('/scratch/socket\\t
 test('prompt fallback skips config reads when the native ID is hidden or off is remembered', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hook-fast-'))
   const home = join(dir, 'home'), marker = join(dir, 'config-read'), display = join(dir, 'display.json')
-  const { startupDirectory, startupControl } = await import('../../src/cli/startup.ts')
+  const { startupDirectory, startupControl } = await import('../../src/cli/codex/startup.ts')
   try {
     await mkdir(join(home, 'sessions'), { recursive: true })
     await mkdir(startupDirectory(home), { recursive: true })

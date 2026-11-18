@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { CodexCollector } from '../../src/hosts/codex/collect.ts'
-import { codexLine } from '../../src/cli/line.ts'
+import { codexLine } from '../../src/cli/codex/line.ts'
 import { resolveCodexOptions } from '../../src/hosts/codex/options.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 import { stringWidth } from '../../src/render/width.ts'

@@ -42,7 +42,7 @@ export async function main(argv: string[]): Promise<number> {
       console.log(command === 'install' ? `${usage}\n\n${INSTALL_DETAILS}` : usage)
       return 0
     }
-    if (host === 'codex') return (await import('./cli/codex-setup.ts')).codexSetup([command, ...argv.slice(2)])
+    if (host === 'codex') return (await import('./cli/codex/setup.ts')).codexSetup([command, ...argv.slice(2)])
     if (host === 'omo') return (await import('./cli/omo.ts')).omo([command, ...argv.slice(2)])
     if (command === 'install' && argv.length === 2) {
       if (host === 'antigravity') return (await import('./cli/antigravity-setup.ts')).installAntigravity()
@@ -50,10 +50,10 @@ export async function main(argv: string[]): Promise<number> {
     }
     throw new Error(usage)
   }
-  if (['on', 'off', 'status', 'reload'].includes(command)) return (await import('./cli/codex.ts')).standalone(argv)
-  if (command === '__hook-on') return (await import('./cli/codex.ts')).standalone(['on', ...argv.slice(1)], true)
-  if (command === 'hook') return (await import('./cli/hooks.ts')).hook(argv.slice(1))
-  if (command === '__row') return (await import('./cli/codex.ts')).rowWorker(JSON.parse(argv[1]!))
+  if (['on', 'off', 'status', 'reload'].includes(command)) return (await import('./cli/codex/control.ts')).standalone(argv)
+  if (command === '__hook-on') return (await import('./cli/codex/control.ts')).standalone(['on', ...argv.slice(1)], true)
+  if (command === 'hook') return (await import('./cli/codex/hooks.ts')).hook(argv.slice(1))
+  if (command === '__row') return (await import('./cli/codex/worker.ts')).rowWorker(JSON.parse(argv[1]!))
   if (command === 'tmux-reset') { await (await import('./outputs/tmux/client.ts')).TmuxOutput.environment().reset(); return 0 }
   if (command === 'antigravity') throw new Error('Usage: vargus install antigravity. In an open Antigravity CLI session, use /statusline.')
   if (command === 'codex') throw new Error('Start Codex normally in tmux and run !vargus on. The Codex transport launcher was removed. Use vargus install codex or vargus remove codex to manage startup hooks.')
