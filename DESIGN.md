@@ -49,6 +49,13 @@ The boundaries are enforced by `tests/node/boundaries.test.mts`:
   Claude Code 2.1.319 validation rejects a re-exported `register` entry point.
 - The Node TypeScript project includes new host directories under `src`. The
   Claude project starts at the mod and its tests and follows their imports.
+- Entry points supply the displayed model name, speed, context and visible call
+  counts. The renderer applies fragment settings, order and styling. Collectors
+  retain host model identifiers for quota matching and recorded readings.
+- The Claude plugin, Antigravity CLI `statusLine` command and standalone Codex helper need no npm
+  install or `node_modules` folder. npm supplies development/test tools only; `ws` is used
+  by the hook regression rig to inspect Codex's daemon. `.test.mts` keeps Node tests outside
+  the Claude engine's `.test.ts` runner.
 
 ### User-facing setup paths
 
@@ -58,8 +65,8 @@ Remove each integration before checking shared files. Codex controls and Antigra
 extension loader and a Claude directory marketplace. Those references survive
 removing just the launcher. Codex removal finishes footer restoration or exits
 the TUI while shared source is still available.
-Plugin installation and `/config` belong to Claude. Codex and Antigravity CLI
-resolve CLI options against `src/options.ts`.
+Plugin installation and `/config` belong to Claude. CLI options use the shared
+defaults, and Codex resolves its extra options at its CLI entry points.
 For Codex startup hooks, removal edits only VArgus's callback entries, including
 untrusted or modified entries without a trust step, then closes affected TUIs.
 In the isolated 0.167.0 check, reopening `/hooks` after the file edit retained the
@@ -484,7 +491,7 @@ behavior preserves unknown identity and retains a frozen historical snapshot.
 
 #### Codex startup hooks
 
-`codexAutoStart` defaults to true in shared options and userConfig. Installed,
+`codexAutoStart` defaults to true in the Codex options. Installed,
 trusted SessionStart and UserPromptSubmit commands use those defaults without
 an options file. Hook installation is still required; this changes no Claude behavior.
 The [official hook documentation](https://learn.chatgpt.com/docs/hooks#sessionstart)
@@ -829,20 +836,21 @@ The read-only stdio requests for `thread/read` and `config/read` remain under
 VArgus does not launch or proxy the user's Codex TUI. Ordinary Codex and standalone
 controls are the supported Codex path. The live engine and footer limits above apply.
 
-The Codex row polls Git when `repo`, `branch` or `status` is enabled. It reads the
-repository name, branch and aggregate counts; changed-file paths belong to the
-Claude detail pane and are not parsed by this adapter. A recorded cwd change
-clears the previous Git readings before rendering or saving a paused snapshot.
-An asynchronous Git result is applied only while its cwd still matches the view.
+The Codex row polls Git when `repo`, `branch` or `status` is enabled. Its host
+poller passes the `detachedHead` option and its 30-second command timeout to
+`src/node/git.ts`, the reader shared with Antigravity and OmO. The reader returns
+the repository, branch, linked worktree and aggregate counts. Changed-file
+paths belong to the Claude detail pane. A recorded cwd change clears the
+previous Git readings before rendering or saving a paused snapshot. An asynchronous
+result is applied only while its cwd still matches the view.
 
 ### Codex model names and call counts
 
 The maintainer chose short family names without a full-name display switch, as
-on Claude. The former `codexShortModel` userConfig key is removed; existing JSON
-options containing it are ignored by `resolveOptions`. The separate
-`codexAgentCounts` and `codexSkillCounts` userConfig switches default to true and
-have no effect on Claude. The existing `model` and `callCounts` switches still
-gate their whole fragments. Names shorten only GPT
+on Claude. The Codex resolver ignores the former `codexShortModel` key in existing
+JSON files. `codexAgentCounts` and `codexSkillCounts` default to true. The Codex
+entry applies those switches to the display copy of the counts. The `model` and
+`callCounts` switches gate their whole fragments. Names shorten only GPT
 version IDs ending in the checked families `astra`, `sol`, `terra` or `luna`;
 unknown IDs remain whole. Both `gpt-6-sol` and `gpt-6.1-sol` become `sol`. This is
 presentation only: the collector retains the full ID for quota matching and
@@ -1102,7 +1110,7 @@ Data sources and caching in `src/hosts/antigravity/`:
   `input_tokens` in `transcript.jsonl` were `10,703` and `2,669` (`cache_read_tokens: 8,113`
   on turn 2). That rules out `context_window.total_input_tokens` for `token:`: it is the
   current context fill numerator, not cumulative uncached session tokens.
-- **Model names and startup effort (`model.ts`, `collect.ts`)**: `agy` sends display labels
+- **Model names and startup effort (`display.ts`, `collect.ts`)**: `agy` sends display labels
   in both `model.id` and `model.display_name`. Checked `agy models` on 1.5.8 lists 22
   entries: `Gemini 4 Carbon|Argon (Low|Medium|High)`, `Gemini 4 Hydrogen (Low|Medium|High|XHigh)`,
   `Orchestrator (Carbon|Argon)`, `Gemini 3.8 Flash (Low|Medium|High)`,
@@ -1666,8 +1674,9 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 
 ## Config
 
-- Flags and simple values are `userConfig` fields in `.claude-plugin/plugin.json`: shown in
-  `/config`, stored under `pluginConfigs`. AGENTS.md defines the feature-default
+- The Claude picker exposes the shared and Claude-specific `userConfig` fields
+  from `.claude-plugin/plugin.json` in `/config` and stores them under `pluginConfigs`.
+  Codex-only JSON keys are resolved in `src/hosts/codex/options.ts`. AGENTS.md defines the feature-default
   policy for every host and shared feature; the defaults below describe existing options.
 - 0.1.0's options: one boolean per fragment and sub-option ([Fragments](#fragments)), and
   `theme`, a picker (`options`) of VantageHUD's five palettes (`aurora`, `ember`, `nebula`,
@@ -1820,8 +1829,8 @@ the Claude mod. A throwaway mod run in a live session settles each.
   writer's tests drive the mod through `$.session.start` and answer its calls with hooks of their
   own beneath it (`fs.write`, `fs.list`, `fs.stat`, `process.run`, `session.id`), each returning
   `{ value }`, and end it through `$.session.end` with a `session.end` hook beneath.
-- `sh tests/manifest.test.sh` checks that `userConfig` in plugin.json has the keys and defaults of
-  `src/options.ts`.
+- `sh tests/manifest.test.sh` checks the Claude picker against the shared and
+  Claude-specific keys and defaults in `src/options.ts`.
 - `sh tests/reader.test.sh` runs the reader as `sh -c` and `bash -c` against line files it
   writes (present, missing, empty id), and checks that the setup skill and README.md carry the
   same command.

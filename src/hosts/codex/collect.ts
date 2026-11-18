@@ -18,7 +18,7 @@ export class CodexCollector {
 
   constructor(cwd: string, home: string | undefined) {
     this.values = {
-      core: { cwd, home, columns: undefined, isWsl: false, host: 'codex' },
+      core: { cwd, home, columns: undefined, isWsl: false },
       session: initialSession(), limits: initialLimits(), vcs: initialVcs(),
     }
   }

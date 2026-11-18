@@ -123,24 +123,6 @@
       "title": "Detail view",
       "description": "The /vargus command: a live pane with every rate limit, the context window, tokens by agent and git or svn detail",
       "default": false
-    },
-    "codexAgentCounts": {
-      "type": "boolean",
-      "title": "Codex: subagent count",
-      "description": "Show agents started by the displayed Codex conversation; has no effect in Claude",
-      "default": true
-    },
-    "codexSkillCounts": {
-      "type": "boolean",
-      "title": "Codex: skill count",
-      "description": "Show observed skill loads in standalone Codex, once per skill per user turn; has no effect in Claude",
-      "default": true
-    },
-    "codexAutoStart": {
-      "type": "boolean",
-      "title": "Codex: automatic tmux startup",
-      "description": "Allow installed SessionStart and UserPromptSubmit hooks to enable VArgus; requires separate Codex hook setup and has no effect in Claude",
-      "default": true
     }
   }
 }

@@ -210,7 +210,6 @@ export function collectAntigravityPayload(payload: AntigravityPayload, env: Anti
       home: env.home,
       columns,
       isWsl: env.isWsl ?? false,
-      host: 'antigravity',
     },
     session,
     limits: collectAntigravityLimits(payload.quota, model, now),

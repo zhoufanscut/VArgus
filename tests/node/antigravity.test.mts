@@ -16,7 +16,8 @@ import { POLL_MS, readCachedGit } from '../../src/hosts/antigravity/vcs.ts'
 import { en } from '../../src/i18n/en.ts'
 import { DEFAULTS } from '../../src/options.ts'
 import { limits } from '../../src/render/fragments/limits.ts'
-import { model, shortAntigravityModelName } from '../../src/render/fragments/model.ts'
+import { antigravityDisplay, shortAntigravityModelName } from '../../src/hosts/antigravity/display.ts'
+import { model } from '../../src/render/fragments/model.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 
 const exec = promisify(execFile)
@@ -55,7 +56,7 @@ test('Antigravity model catalog shortens Gemini/Claude families, keeps Orchestra
     // from `(Low|Medium|High|XHigh)` without mistaking `(Carbon)` or `(Argon)` for effort.
     const values = collectAntigravityPayload({ model: { id: label, display_name: label } })
     assert.equal(values.session.effort, expectedEffort, `inferred effort for ${label}`)
-    const rendered = model({ v: values, o: DEFAULTS, l: en, t: plain, now: 0 })
+    const rendered = model({ v: values, display: antigravityDisplay(values.session), o: DEFAULTS, l: en, t: plain, now: 0 })
     assert.equal(rendered, expectedEffort ? `${expectedName}:${expectedEffort}` : expectedName)
   }
 
@@ -64,6 +65,7 @@ test('Antigravity model catalog shortens Gemini/Claude families, keeps Orchestra
   assert.equal(shortAntigravityModelName('alibaba/qwen-3-max'), 'alibaba/qwen-3-max')
   assert.equal(shortAntigravityModelName('Gemini 2.5 Flash-Lite'), 'flash-lite')
   assert.equal(shortAntigravityModelName('Gemini 2.5 Flash Lite (Low)'), 'flash-lite')
+  assert.equal(shortAntigravityModelName('  '), null)
 })
 
 test('Antigravity quota maps active model group, skips disabled or expired windows, and supports otherModelWeekly', () => {
@@ -79,9 +81,9 @@ test('Antigravity quota maps active model group, skips disabled or expired windo
     model: { display_name: 'Gemini 4 Carbon (High)', effort: 'high' },
     quota,
   }, { now })
-  assert.equal(limits({ v: geminiValues, o: DEFAULTS, l: en, t: plain, now }), '5h:4%(4h37m) 7d:39%(6d6h)')
+  assert.equal(limits({ v: geminiValues, display: antigravityDisplay(geminiValues.session), o: DEFAULTS, l: en, t: plain, now }), '5h:4%(4h37m) 7d:39%(6d6h)')
   assert.equal(
-    limits({ v: geminiValues, o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
+    limits({ v: geminiValues, display: antigravityDisplay(geminiValues.session), o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
     '5h:4%(4h37m) 7d:39%(6d6h) 3p:85%(4d0h)',
   )
 
@@ -89,10 +91,10 @@ test('Antigravity quota maps active model group, skips disabled or expired windo
     model: { display_name: 'Claude Opus 5.5 (High)', effort: 'high' },
     quota,
   }, { now })
-  assert.equal(limits({ v: claudeValues, o: DEFAULTS, l: en, t: plain, now }), '5h:25%(3h0m) 7d:85%(4d0h)')
+  assert.equal(limits({ v: claudeValues, display: antigravityDisplay(claudeValues.session), o: DEFAULTS, l: en, t: plain, now }), '5h:25%(3h0m) 7d:85%(4d0h)')
   // Gemini weekly is 39% (< 80%), so `otherModelWeekly` leaves `gm` hidden until 80%.
   assert.equal(
-    limits({ v: claudeValues, o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
+    limits({ v: claudeValues, display: antigravityDisplay(claudeValues.session), o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
     '5h:25%(3h0m) 7d:85%(4d0h)',
   )
 
@@ -107,9 +109,9 @@ test('Antigravity quota maps active model group, skips disabled or expired windo
       '3p-weekly': { remaining_fraction: 0.5, disabled: true, reset_time: '2026-11-18T01:00:00Z' },
     },
   }, { now })
-  assert.equal(limits({ v: disabled3pValues, o: DEFAULTS, l: en, t: plain, now }), null)
+  assert.equal(limits({ v: disabled3pValues, display: antigravityDisplay(disabled3pValues.session), o: DEFAULTS, l: en, t: plain, now }), null)
   assert.equal(
-    limits({ v: disabled3pValues, o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
+    limits({ v: disabled3pValues, display: antigravityDisplay(disabled3pValues.session), o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
     'gm:90%(6d6h)',
   )
 
@@ -122,7 +124,7 @@ test('Antigravity quota maps active model group, skips disabled or expired windo
       'enterprise-weekly': { remaining_fraction: 0.2, disabled: true, reset_time: '2026-11-20T01:00:00Z' },
     },
   }, { now })
-  assert.equal(limits({ v: fallbackValues, o: DEFAULTS, l: en, t: plain, now }), '5h:50%(1h0m)')
+  assert.equal(limits({ v: fallbackValues, display: antigravityDisplay(fallbackValues.session), o: DEFAULTS, l: en, t: plain, now }), '5h:50%(1h0m)')
 
   const expiredAndHugeValues = collectAntigravityPayload({
     model: { display_name: 'Gemini 4 Carbon (High)', effort: 'high' },
@@ -133,7 +135,7 @@ test('Antigravity quota maps active model group, skips disabled or expired windo
     },
   }, { now })
   assert.equal(
-    limits({ v: expiredAndHugeValues, o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
+    limits({ v: expiredAndHugeValues, display: antigravityDisplay(expiredAndHugeValues.session), o: { ...DEFAULTS, otherModelWeekly: true }, l: en, t: plain, now }),
     '7d:70%',
   )
 })

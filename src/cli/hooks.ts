@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findRollout } from '../hosts/codex/rollout.ts'
-import { resolveOptions } from '../options.ts'
+import { resolveCodexOptions } from '../hosts/codex/options.ts'
 import { hookSession } from '../hosts/codex/hooks.ts'
 import { setTimeout as delay } from 'node:timers/promises'
 import { savedFooter, footerIdentity } from '../hosts/codex/footer.ts'
@@ -26,7 +26,7 @@ export async function hook(args: string[]): Promise<number> {
     else if (flag === '--pane') pane = value
     else if (flag !== '--theme') throw new Error(`Unknown VArgus hook option: ${flag}.`)
   }
-  if (!resolveOptions(given).codexAutoStart) return 0
+  if (!resolveCodexOptions(given).codexAutoStart) return 0
   let raw = ''
   for await (const part of process.stdin) raw += part
   const home = process.env.CODEX_HOME ?? join(homedir(), '.codex')

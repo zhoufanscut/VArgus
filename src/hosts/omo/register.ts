@@ -1,5 +1,6 @@
 import { homedir, release } from 'node:os'
 import { collectOmo, omoSettingsReducer, OMO_EDIT_ENTRY } from './collect.ts'
+import { omoDisplay } from './display.ts'
 import type { AccountLimits, NativeContext, SessionEntry } from './contracts.ts'
 import { OmoVcs } from './vcs.ts'
 import { OmoKimi, type ProviderAuth } from './kimi.ts'
@@ -61,6 +62,7 @@ export default function vargus(pi: OmoApi): void {
     let values = collectOmo(ctx, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
     const output = mountOmo(ctx.ui, width => render({
       v: { ...values, core: { ...values.core, columns: width, isWsl } },
+      display: omoDisplay(values.session),
       o: options, l: labels, t: theme, now: Date.now(),
     }))
     const instance = {

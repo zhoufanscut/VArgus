@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hookSession, footerThread } from '../../src/hosts/codex/hooks.ts'
-import { DEFAULTS } from '../../src/options.ts'
+import { resolveCodexOptions } from '../../src/hosts/codex/options.ts'
 
 test('SessionStart derives identity from the transcript independently of creation metadata', async () => {
   const home = await mkdtemp(join(tmpdir(), 'vargus-hook-input-'))
@@ -18,7 +18,7 @@ test('SessionStart derives identity from the transcript independently of creatio
     await writeFile(file, JSON.stringify(meta) + '\n')
     const event = { hook_event_name: 'SessionStart', source: 'startup', session_id: 'shared-session',
       transcript_path: file, cwd: '/current/workspace' }
-    assert.equal(DEFAULTS.codexAutoStart, true)
+    assert.equal(resolveCodexOptions({}).codexAutoStart, true)
     assert.deepEqual(await hookSession({ ...event, hook_event_name: 'UserPromptSubmit', source: undefined, prompt: 'unused' }, home, 'UserPromptSubmit'), { thread: 'current', cwd: '/current/workspace', transcript: await realpath(file) })
     for (const source of ['startup', 'resume', 'clear', 'fork']) {
       assert.deepEqual(await hookSession({ ...event, source }, home), { thread: 'current', cwd: '/current/workspace', transcript: await realpath(file) })

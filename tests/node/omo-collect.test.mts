@@ -49,7 +49,6 @@ test('main assistant input plus output excludes cache buckets and nested tool us
   assert.equal(v.session.model, 'gpt-6.1-sol')
   assert.equal(v.session.effort, 'high')
   assert.equal(v.session.startedAt, now - 60000)
-  assert.equal(v.core.host, 'omo')
   assert.equal(v.core.home, '/home/u')
   assert.equal(v.session.contextTokens, 100)
   assert.equal(v.session.contextPercent, 10)

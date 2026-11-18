@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { initialLimits } from '../src/hosts/claude/collect/limits'
 import { initialSession } from '../src/hosts/claude/collect/session'
+import { claudeDisplay } from '../src/hosts/claude/display'
 import {
   deriveRepoAndBranch, initialVcs, parseGitStatus, parseSvnInfoXml, parseSvnStatusXml, repoNameFromUrl,
   type VcsValues,
@@ -165,6 +166,7 @@ function input(vcs: Partial<VcsValues>, o: Partial<Options> = {}, l: Labels = en
       limits: initialLimits(),
       vcs: { ...initialVcs(), ...vcs },
     },
+    display: claudeDisplay(initialSession()),
     o: { ...DEFAULTS, ...o },
     l,
     t: t ?? makeTheme('graphite', true),

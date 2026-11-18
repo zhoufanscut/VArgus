@@ -10,7 +10,8 @@ import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 import { findRollout, RolloutReader } from '../../src/hosts/codex/rollout.ts'
 import { render } from '../../src/render/index.ts'
-import { DEFAULTS } from '../../src/options.ts'
+import { codexDisplay } from '../../src/hosts/codex/display.ts'
+import { resolveCodexOptions } from '../../src/hosts/codex/options.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 import { en } from '../../src/i18n/en.ts'
 
@@ -128,7 +129,8 @@ trust_level = "trusted"
       const v = reader.collector.snapshot()!
       counts.push(v.session.counts.skills)
       assert.equal(v.session.counts.skills, fixture.count)
-      const row = render({ v, o: DEFAULTS, l: en, t: makeTheme('graphite', true), now: Date.now() })
+      const o = resolveCodexOptions({})
+      const row = render({ v, display: codexDisplay(v.session, o), o, l: en, t: makeTheme('graphite', true), now: Date.now() })
       assert.match(row, new RegExp('⚡' + fixture.count + '(?: |$)'))
       assert.match(row, /sol:low/)
       assert.doesNotMatch(row, /⚡~/)

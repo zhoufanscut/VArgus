@@ -3,6 +3,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import { initialAgents, MAIN, OTHERS, startAgents, type AgentsValues } from '../src/hosts/claude/collect/agents'
 import { initialLimits } from '../src/hosts/claude/collect/limits'
 import { initialSession } from '../src/hosts/claude/collect/session'
+import { claudeDisplay } from '../src/hosts/claude/display'
 import { initialVcs, MAX_FILES, parseGitFiles, parseSvnFiles } from '../src/hosts/claude/collect/vcs'
 import type { Values } from '../src/core/types'
 import { en, type Labels } from '../src/i18n/en'
@@ -35,7 +36,7 @@ function input(over: {
     vcs: { ...initialVcs(), ...over.vcs },
   }
   return {
-    v, o: { ...DEFAULTS, detailView: true }, l: over.labels ?? en, t: makeTheme('graphite', over.noColor ?? false),
+    v, display: claudeDisplay(v.session), o: { ...DEFAULTS, detailView: true }, l: over.labels ?? en, t: makeTheme('graphite', over.noColor ?? false),
     now: NOW, agents: over.agents ?? initialAgents(), columns: over.columns ?? 76,
   }
 }

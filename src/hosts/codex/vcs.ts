@@ -1,21 +1,26 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { initialVcs, parseGitStatus, repoNameFromUrl } from '../../core/vcs.ts'
+import type { Values } from '../../core/types.ts'
+import { initialVcs } from '../../core/vcs.ts'
+import { readGit } from '../../node/git.ts'
 
-const exec = promisify(execFile)
+const GIT_TIMEOUT_MS = 30_000
 
-export async function readGit(cwd: string) {
-  const v = initialVcs()
-  const run = (args: string[]) => exec('git', ['-c', 'core.fsmonitor=false', ...args], {
-    cwd, windowsHide: true, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, timeout: 30000, maxBuffer: 4 * 1024 * 1024,
-  })
-  try {
-    const { stdout } = await run(['status', '--porcelain=v2', '--branch'])
-    const parsed = parseGitStatus(stdout)
-    v.kind = 'git'
-    v.branch = parsed.head === '(detached)' ? null : parsed.head
-    v.counts = parsed.counts
-    try { v.repo = repoNameFromUrl((await run(['remote', 'get-url', '--push', 'origin'])).stdout.trim()) } catch { /* local repository */ }
-  } catch { /* not a git worktree; no stale reading from another cwd */ }
-  return v
+export function pollGit(detachedHead: boolean): (values: Values) => void {
+  let gitAt = 0
+  let gitCwd = ''
+  let pending = false
+  return values => {
+    const cwd = values.core.cwd
+    // A render or paused snapshot must not pair a new folder with old Git data.
+    if (cwd !== gitCwd) values.vcs = initialVcs()
+    if (pending || (cwd === gitCwd && Date.now() < gitAt)) return
+    gitCwd = cwd
+    const start = Date.now()
+    pending = true
+    void readGit(cwd, detachedHead, GIT_TIMEOUT_MS).then(vcs => {
+      if (values.core.cwd === cwd) values.vcs = vcs
+    }).finally(() => {
+      gitAt = Date.now() + Math.max(5000, (Date.now() - start) * 10)
+      pending = false
+    })
+  }
 }

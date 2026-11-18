@@ -7,7 +7,7 @@ import type { FragmentInput, Rgb, Theme, TokenName } from '../../../core/types'
 import type { Labels } from '../../../i18n'
 import { formatDuration } from '../../../render/format'
 import { COMPACT, CRITICAL, WARNING } from '../../../render/fragments/context'
-import { effortColor, shortModelName } from '../../../render/fragments/model'
+import { effortColor } from '../../../render/fragments/model'
 import { formatTokenCount } from '../../../render/fragments/tokens'
 import { cleanText, shortenHome } from '../../../render/text'
 import { stringWidth } from '../../../render/width'
@@ -149,10 +149,10 @@ export function clockTime(l: Labels, at: number, now: number): string {
 // The header for `n` columns: whole parts dropped from the end, as the line
 // drops fragments, then the folder cut if it alone is too wide.
 function header(f: ViewInput, n: number): Row {
-  const { v, o, l, t, now } = f
+  const { v, display, o, l, t, now } = f
   const parts: Row[] = []
   if (v.core.cwd) parts.push([seg(t, cleanText(shortenHome(v.core.cwd, v.core.home)), 'text', true)])
-  const name = v.session.model === undefined ? null : shortModelName(cleanText(v.session.model))
+  const name = display.modelName
   if (name) {
     const effort = v.session.effort
     parts.push(effort === undefined || effort === ''

@@ -807,8 +807,8 @@ To change a running helper's options, use `reload` with those flags:
 !vargus reload --theme graphite
 ```
 
-An optional JSON config uses the same keys and defaults as
-[`src/options.ts`](src/options.ts). For example:
+An optional JSON config uses the [shared defaults](src/options.ts) and
+[Codex defaults](src/hosts/codex/options.ts). For example:
 
 ```json
 {
@@ -821,14 +821,14 @@ Pass it with `!vargus on --config /absolute/path/to/vargus.json`, or with
 `!vargus reload --config /absolute/path/to/vargus.json` for an existing helper.
 `NO_COLOR` disables colours in the environment that starts the helper.
 Setting `repo`, `branch` and `status` all to `false` stops the row's Git polling.
+Set `detachedHead` to `true` to show detached tags or commits and Git operations.
 
 Codex always displays known model families as `astra`, `sol`, `terra` or `luna`, for example
 `sol:xhigh`. Both `gpt-6-sol` and `gpt-6.1-sol` display `sol`; unfamiliar IDs remain
 whole. The former `codexShortModel` option is ignored in existing options files.
 Subagent counts and skill counts default to on for Codex; set `codexAgentCounts`
 or `codexSkillCounts` to `false` in a JSON options file passed with `--config` to
-disable either. These switches do not affect Claude. `model` and `callCounts`
-still control their whole fragments.
+disable either. `model` and `callCounts` control their whole fragments.
 
 Codex Fast mode adds `(fast)` beside the model and effort, such as `sol:max(fast)`.
 The suffix is on by default when the displayed thread's saved settings select

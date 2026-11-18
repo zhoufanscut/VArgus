@@ -1,6 +1,6 @@
 import type { Labels } from '../i18n/index.ts'
 import type { Options } from '../options.ts'
-import type { SessionValues } from './session.ts'
+import type { Counts, SessionValues } from './session.ts'
 import type { LimitsValues } from './limits.ts'
 import type { VcsValues } from './vcs.ts'
 
@@ -33,8 +33,6 @@ export type CoreValues = {
   columns: number | undefined
   // WSL: call counts as text (DESIGN, "Config")
   isWsl: boolean
-  // Host-specific naming and missing-value rules; absent preserves the Claude line.
-  host?: 'claude' | 'codex' | 'antigravity' | 'omo'
 }
 
 export type Values = {
@@ -44,8 +42,16 @@ export type Values = {
   vcs: VcsValues
 }
 
+export type SessionDisplay = {
+  modelName: string | null
+  speed: 'fast' | 'ultrafast' | undefined
+  contextPercent: number | undefined
+  counts: Counts
+}
+
 export type FragmentInput = {
   v: Values
+  display: SessionDisplay
   o: Options
   l: Labels
   t: Theme

@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { CodexCollector } from '../../src/hosts/codex/collect.ts'
 import { render } from '../../src/render/index.ts'
-import { DEFAULTS } from '../../src/options.ts'
+import { codexDisplay } from '../../src/hosts/codex/display.ts'
+import { resolveCodexOptions } from '../../src/hosts/codex/options.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 import { en } from '../../src/i18n/en.ts'
 
@@ -28,7 +29,8 @@ test('saved-log readings keep cumulative totals per view, short display and nati
   assert.equal(c.snapshot()!.session.counts.tokens, 4400)
   assert.equal(c.snapshot()!.session.contextPercent, 15)
   const v = c.snapshot()!
-  const text = render({ v, o: DEFAULTS, l: en, t: makeTheme('graphite', true), now: 60000 })
+  const o = resolveCodexOptions({})
+  const text = render({ v, display: codexDisplay(v.session, o), o, l: en, t: makeTheme('graphite', true), now: 60000 })
   assert.match(text, /sol:high/)
   assert.equal(v.session.model, 'gpt-6.1-sol')
   assert.match(text, /ctx:15%/)

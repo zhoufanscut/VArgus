@@ -3,6 +3,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { Fragment, FragmentInput, Values } from '../src/core/types'
 import { initialLimits } from '../src/hosts/claude/collect/limits'
 import { initialSession } from '../src/hosts/claude/collect/session'
+import { claudeDisplay } from '../src/hosts/claude/display'
 import { initialVcs } from '../src/hosts/claude/collect/vcs'
 import { en, type Labels } from '../src/i18n/en'
 import { DEFAULTS, type Options } from '../src/options'
@@ -29,7 +30,7 @@ function input(session: Partial<Values['session']>, o: Partial<Options> = {}, is
     limits: initialLimits(),
     vcs: initialVcs(),
   }
-  return { v, o: { ...DEFAULTS, ...o }, l: marked, t: makeTheme('graphite', false), now: 3 * 3_600_000 }
+  return { v, display: claudeDisplay(v.session), o: { ...DEFAULTS, ...o }, l: marked, t: makeTheme('graphite', false), now: 3 * 3_600_000 }
 }
 
 // What is left once the escapes, the marked labels, the data and the numbers

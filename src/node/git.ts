@@ -48,12 +48,12 @@ async function readTrimmed(path: string): Promise<string | null> {
 // still exits 0 and records its 10x hold-off rather than counting as a failure.
 const GIT_TIMEOUT_MS = 4000
 
-function runGit(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+function runGit(cwd: string, args: string[], timeout: number): Promise<{ stdout: string; stderr: string }> {
   return exec('git', ['-c', 'core.fsmonitor=false', ...args], {
     cwd,
     windowsHide: true,
     env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
-    timeout: GIT_TIMEOUT_MS,
+    timeout,
     maxBuffer: 4 * 1024 * 1024,
   })
 }
@@ -94,7 +94,7 @@ async function readDetachedRefName(gitDir: string, sha: string): Promise<string 
   return (await refExists(await commonGitDir(gitDir), name)) ? name : null
 }
 
-async function readDetachedHead(cwd: string, gitDir: string): Promise<DetachedHead | null> {
+async function readDetachedHead(cwd: string, gitDir: string, timeout: number): Promise<DetachedHead | null> {
   const head = await readTrimmed(join(gitDir, 'HEAD'))
   if (head?.startsWith('ref: ') && head !== REFTABLE_HEAD) return null
   let operation: Operation | null = null
@@ -119,7 +119,7 @@ async function readDetachedHead(cwd: string, gitDir: string): Promise<DetachedHe
     name = (!operation && (await readDetachedRefName(gitDir, head))) || head.slice(0, SHORT_SHA)
   } else {
     try {
-      name = (await runGit(cwd, ['rev-parse', '--short', 'HEAD'])).stdout.trim() || null
+      name = (await runGit(cwd, ['rev-parse', '--short', 'HEAD'], timeout)).stdout.trim() || null
     } catch {
       name = null
     }
@@ -127,14 +127,14 @@ async function readDetachedHead(cwd: string, gitDir: string): Promise<DetachedHe
   return name ? { name, onBranch: false, operation, progress } : null
 }
 
-export async function readGit(cwd: string, detachedHead = false): Promise<VcsValues> {
+export async function readGit(cwd: string, detachedHead = false, timeout = GIT_TIMEOUT_MS): Promise<VcsValues> {
   const out = initialVcs()
   if (!cwd) return out
   try {
     const [statusRun, dirRun, remoteRun] = await Promise.all([
-      runGit(cwd, ['status', '--porcelain=v2', '--branch']),
-      runGit(cwd, ['rev-parse', '--absolute-git-dir']).catch(() => null),
-      runGit(cwd, ['remote', 'get-url', '--push', 'origin']).catch(() => null),
+      runGit(cwd, ['status', '--porcelain=v2', '--branch'], timeout),
+      runGit(cwd, ['rev-parse', '--absolute-git-dir'], timeout).catch(() => null),
+      runGit(cwd, ['remote', 'get-url', '--push', 'origin'], timeout).catch(() => null),
     ])
     out.kind = 'git'
     out.repo = remoteRun ? repoNameFromUrl(remoteRun.stdout.trim()) : null
@@ -145,7 +145,7 @@ export async function readGit(cwd: string, detachedHead = false): Promise<VcsVal
     const parsed = parseGitStatus(statusRun.stdout)
     out.counts = parsed.counts
     if (parsed.head === '(detached)') {
-      out.detached = gitDir && detachedHead ? await readDetachedHead(cwd, gitDir) : null
+      out.detached = gitDir && detachedHead ? await readDetachedHead(cwd, gitDir, timeout) : null
     } else {
       out.branch = parsed.head
     }

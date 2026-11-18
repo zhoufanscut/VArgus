@@ -155,7 +155,7 @@ export function collectOmo(
     }
   }
   return {
-    core: { host: 'omo', cwd: ctx.cwd, home, columns: undefined, isWsl: false },
+    core: { cwd: ctx.cwd, home, columns: undefined, isWsl: false },
     session, limits, vcs: initialVcs(),
   }
 }

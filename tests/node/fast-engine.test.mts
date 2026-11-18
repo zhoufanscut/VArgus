@@ -10,7 +10,8 @@ import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 import { RolloutReader } from '../../src/hosts/codex/rollout.ts'
 import { render } from '../../src/render/index.ts'
-import { DEFAULTS } from '../../src/options.ts'
+import { codexDisplay } from '../../src/hosts/codex/display.ts'
+import { resolveCodexOptions } from '../../src/hosts/codex/options.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 import { en } from '../../src/i18n/en.ts'
 
@@ -93,7 +94,9 @@ trust_level = "trusted"
       let text = ''
       do {
         await reader.poll()
-        text = render({ v: reader.collector.snapshot()!, o: DEFAULTS, l: en, t: makeTheme('graphite', true), now: Date.now() })
+        const v = reader.collector.snapshot()!
+        const o = resolveCodexOptions({})
+        text = render({ v, display: codexDisplay(v.session, o), o, l: en, t: makeTheme('graphite', true), now: Date.now() })
         if (text.split(' | ').includes(expected)) break
         await delay(50)
       } while (Date.now() < until)

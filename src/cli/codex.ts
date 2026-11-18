@@ -11,7 +11,7 @@ import { Views, hiddenDraft, selectedView, type View, type ViewScreen } from '..
 import { applicationTarget, type Target } from '../outputs/tmux/target.ts'
 import { PaneInput } from '../outputs/tmux/input.ts'
 import { savedFooter, restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, FooterSettings, type FooterSelection } from '../hosts/codex/footer.ts'
-import { resolveOptions } from '../options.ts'
+import { resolveCodexOptions } from '../hosts/codex/options.ts'
 import { makeTheme } from '../theme/index.ts'
 import { codexLine } from './line.ts'
 import { withControlLock } from './lock.ts'
@@ -123,7 +123,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
     else if (flag === '--config') options = { ...options, ...JSON.parse(await readFile(value, 'utf8')) }
     else throw new Error(`Unknown VArgus option: ${flag}.`)
   }
-  if (automatic && !resolveOptions(options).codexAutoStart) return 0
+  if (automatic && !resolveCodexOptions(options).codexAutoStart) return 0
   const thread = process.env.CODEX_THREAD_ID
   const home = process.env.CODEX_HOME ?? join(homedir(), '.codex')
   if (action === 'on' && !thread) throw new Error('Inside Codex, run !vargus on. CODEX_THREAD_ID identifies the conversation.')
@@ -183,7 +183,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
     // Off admission records intent before delivery; cancellation can leave the
     // old helper on. Preserve that intent in both replacement and retry state.
     const mode = migrating ? 'on' : await startupSuppressed(home, target, retained.thread) ? 'restore' : retained.mode
-    const spec: Spec = { ...retained, mode, transcript, options: resolveOptions({ ...retained.options, ...options }), token: randomBytes(16).toString('hex') }
+    const spec: Spec = { ...retained, mode, transcript, options: resolveCodexOptions({ ...retained.options, ...options }), token: randomBytes(16).toString('hex') }
     await save(recoveryPath(target), { version: 1, spec } satisfies Recovery)
     if (current) await stopWorker(current)
     try {
@@ -240,7 +240,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
     await save(file, { target, thread: root, selection })
   }
   if (current) await stopWorker(current)
-  const spec: Spec = { target, thread: root, transcript, home, options: resolveOptions({ ...retainedOptions, ...options }), token: randomBytes(16).toString('hex'), mode: action === 'on' ? 'on' : 'restore' }
+  const spec: Spec = { target, thread: root, transcript, home, options: resolveCodexOptions({ ...retainedOptions, ...options }), token: randomBytes(16).toString('hex'), mode: action === 'on' ? 'on' : 'restore' }
   try {
     const reply = await startWorker(spec)
     console.log(action === 'on' ? `VArgus is on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))
@@ -286,7 +286,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const { target, thread } = spec
   const file = recordPath(target), views = new Views(spec.home, thread, spec.transcript), input = new PaneInput(target)
   const output = new TmuxOutput(target.socket, target.pane)
-  const options = resolveOptions(spec.options), theme = makeTheme(options.theme, !!process.env.NO_COLOR)
+  const options = resolveCodexOptions(spec.options), theme = makeTheme(options.theme, !!process.env.NO_COLOR)
   const readers = new Map<string, { reader: RolloutReader; line: ReturnType<typeof codexLine> }>()
   const suppressed = new Set<string>(), footerSettings = new FooterSettings()
   let mode = spec.mode, selected: string | undefined, error: string | undefined

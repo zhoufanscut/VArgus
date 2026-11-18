@@ -10,6 +10,7 @@ import type { Theme, Values } from '../../core/types'
 import { resolveLabels } from '../../i18n'
 import { resolveOptions, type Options } from '../../options'
 import { render } from '../../render'
+import { claudeDisplay } from './display'
 import { makeTheme } from '../../theme'
 import { viewModel } from './view/model'
 import { drawView } from './view/pane'
@@ -42,7 +43,7 @@ async function refresh($: EngineInterface): Promise<void> {
   // keeps the last model, never costs the line)
   values.session.model = await $.session.model().catch(() => values.session.model)
   const now = await $.clock.now()
-  const text = render({ v: values, o: options, l: labels, t: theme, now })
+  const text = render({ v: values, display: claudeDisplay(values.session), o: options, l: labels, t: theme, now })
   await writeLine($, writer, text)
 }
 
@@ -170,7 +171,8 @@ export const register: Register = (on, given) => {
     on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
       if (!theme || !options) return next(e)
       const now = await $.clock.now()
-      const m = viewModel({ v: values, o: options, l: labels, t: theme, now, agents, columns: e.props.bodyColumns })
+      const m = viewModel({ v: values, display: claudeDisplay(values.session),
+        o: options, l: labels, t: theme, now, agents, columns: e.props.bodyColumns })
       return drawView($.ui.resolve(e), m)
     })
   }

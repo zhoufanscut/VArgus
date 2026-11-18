@@ -7,6 +7,7 @@ import { DEFAULTS, resolveOptions, type Options } from '../src/options'
 import { ORDER, render } from '../src/render'
 import { initialLimits } from '../src/hosts/claude/collect/limits'
 import { initialSession } from '../src/hosts/claude/collect/session'
+import { claudeDisplay } from '../src/hosts/claude/display'
 import { initialVcs } from '../src/hosts/claude/collect/vcs'
 import { makeTheme } from '../src/theme'
 
@@ -19,7 +20,7 @@ function input(columns?: number, o: Partial<Options> = {}): FragmentInput {
     limits: initialLimits(),
     vcs: initialVcs(),
   }
-  return { v, o: { ...DEFAULTS, ...o }, l: en, t: makeTheme('graphite', true), now: 0 }
+  return { v, display: claudeDisplay(v.session), o: { ...DEFAULTS, ...o }, l: en, t: makeTheme('graphite', true), now: 0 }
 }
 
 const text = (s: string): Fragment => () => s

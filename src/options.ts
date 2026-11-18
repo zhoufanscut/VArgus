@@ -1,5 +1,5 @@
-// The options (DESIGN, "Config"): one boolean per fragment and sub-option, the
-// theme, blankStopped and detailView. Keys and defaults match `userConfig` in plugin.json.
+// Shared and Claude options (DESIGN, "Config"). Keys and defaults match
+// `userConfig` in plugin.json.
 export const DEFAULTS = {
   folder: true,
   model: true,
@@ -19,9 +19,6 @@ export const DEFAULTS = {
   theme: 'graphite',
   blankStopped: false,
   detailView: false,
-  codexAgentCounts: true,
-  codexSkillCounts: true,
-  codexAutoStart: true,
 }
 
 export type Options = typeof DEFAULTS

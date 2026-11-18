@@ -8,14 +8,14 @@ import type { Fragment } from '../../core/types.ts'
 // are labels. Numbers in the label tone, so they recede.
 const ICONS = { tool: '🔧', agent: '🤖', workflow: '🔀', skill: '⚡' } as const
 
-export const calls: Fragment = ({ v, o, l, t }) => {
-  const c = v.session.counts
+export const calls: Fragment = ({ v, display, o, l, t }) => {
+  const c = display.counts
   const text = v.core.isWsl
   const items: [keyof typeof ICONS, number][] = [
     ['tool', c.tools],
-    ['agent', v.core.host === 'codex' && !o.codexAgentCounts ? 0 : c.agents],
+    ['agent', c.agents],
     ['workflow', o.workflowRuns ? c.workflows : 0],
-    ['skill', v.core.host === 'codex' && !o.codexSkillCounts ? 0 : c.skills],
+    ['skill', c.skills],
   ]
   const parts = items
     .filter(([, n]) => n > 0)

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { homedir, release } from 'node:os'
 import { defaultCacheDir } from '../hosts/antigravity/cache.ts'
 import { collectAntigravityPayload, type AntigravityPayload } from '../hosts/antigravity/collect.ts'
+import { antigravityDisplay } from '../hosts/antigravity/display.ts'
 import { readTranscriptState, resolveTranscriptPath } from '../hosts/antigravity/transcript.ts'
 import { readCachedGit } from '../hosts/antigravity/vcs.ts'
 import { resolveLabels } from '../i18n/index.ts'
@@ -82,6 +83,7 @@ export async function renderAntigravityStatusLine(
 
   const rendered = render({
     v: values,
+    display: antigravityDisplay(values.session),
     o: options,
     l: resolveLabels('en'),
     t: theme,

@@ -11,13 +11,16 @@ import { makeTheme } from '../../src/theme/index.ts'
 import { limits } from '../../src/render/fragments/limits.ts'
 import { context } from '../../src/render/fragments/context.ts'
 import { model } from '../../src/render/fragments/model.ts'
+import { omoDisplay } from '../../src/hosts/omo/display.ts'
 
-function input(): FragmentInput {
+function input(reading: Partial<FragmentInput['v']['session']> = {}): FragmentInput {
+  const session = { ...initialSession(), ...reading }
   return {
     v: {
-      core: { cwd: '/repo', home: undefined, columns: 200, isWsl: false, host: 'omo' },
-      session: initialSession(), limits: initialLimits(), vcs: initialVcs(),
+      core: { cwd: '/repo', home: undefined, columns: 200, isWsl: false },
+      session, limits: initialLimits(), vcs: initialVcs(),
     },
+    display: omoDisplay(session),
     o: DEFAULTS, l: en, t: makeTheme('graphite', true), now: 0,
   }
 }
@@ -70,18 +73,14 @@ test('OmO row hides the footer, redraws and restores only its own widget on disp
 })
 
 test('OmO preserves unknown context and renders short model families', () => {
-  const f = input()
-  assert.equal(context(f), null)
-  f.v.session.contextPercent = 0
-  assert.equal(context(f), 'ctx:0%')
-  f.v.session.effort = 'high'
+  assert.equal(context(input()), null)
+  assert.equal(context(input({ contextPercent: 0 })), 'ctx:0%')
   for (const [id, expected] of [
     ['gpt-6.1-sol', 'sol:high'],
     ['claude-fable-5', 'fable:high'],
     ['custom/provider-model', 'provider:high'],
   ]) {
-    f.v.session.model = id
-    assert.equal(model(f), expected)
+    assert.equal(model(input({ model: id, effort: 'high' })), expected)
   }
 })
 

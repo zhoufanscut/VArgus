@@ -5,66 +5,6 @@ import { cleanText } from '../text.ts'
 // and the model has one (`opus:high`) (DESIGN, "Fragments"; VantageHUD's
 // elements/model.js, format `short`). Recorded Fast mode adds `(fast)`.
 
-// The short name (VantageHUD's modelFamilyKey), so a family that ships later
-// needs no change: a Claude id or name gives the word after `claude`
-// (`claude-opus-5-5[1m]` → opus), or for a legacy id (`claude-3-5-sonnet-…`)
-// the family named in it; an ARN (an inference profile names no model) its
-// service; anything else (a gateway's model) its first word (`gpt-4o` → gpt).
-// VantageHUD cut that last word to 14 columns with `...`; here a long name
-// is kept whole and the row drops whole fragments instead.
-export function shortModelName(model: string): string | null {
-  const id = model.trim().toLowerCase()
-  if (id === '') return null
-  const family = id.includes('claude') ? (AFTER_CLAUDE.exec(id)?.[1] ?? LEGACY_FAMILY.exec(id)?.[0]) : undefined
-  if (family) return family
-  if (id.startsWith('arn:')) return id.split(':')[2] || 'arn'
-  return id.split(/[\s\-_/]+/).find(word => word !== '') ?? id
-}
-
-// `claude-opus-5-5`, `claude opus 5.5`: the word after claude, from a letter.
-const AFTER_CLAUDE = /claude[-\s]+([a-z][a-z0-9.]*)/
-// A legacy id puts the version first: the leftmost family name in it.
-const LEGACY_FAMILY = /opus|sonnet|haiku|fable/
-
-// Only the named GPT families in the checked Codex catalog are shortened.
-// Preserve other providers and model IDs rather than guessing from a suffix.
-export function shortCodexModelName(model: string): string {
-  return /^gpt-\d+(?:\.\d+)*-(astra|sol|terra|luna)$/i.exec(model.trim())?.[1]?.toLowerCase() ?? model
-}
-
-// OmO supplies model IDs: named families omit versions, other IDs use their
-// model stem. Kimi's coding catalog also uses the bare `k3` family.
-function shortOmoModelName(model: string): string | null {
-  const id = model.trim().toLowerCase().split('/').pop() ?? ''
-  if (!id) return null
-  const family = /(?:^|[-_\s])(fable|opus|sonnet|haiku|sol|terra|luna|astra|argon)(?=$|[-_\s.\d])/.exec(id)?.[1]
-  if (family) return family
-  if (/^k\d+(?:[.-]|$)/.test(id)) return 'kimi'
-  return /^[a-z]+/.exec(id)?.[0] ?? shortModelName(id)
-}
-
-const EFFORT_TAIL = /\s*\((?:low|medium|high|xhigh|max)\)\s*$/i
-const KNOWN_EFFORT_SLUG = /^(?:gemini|claude|gpt-oss)-[a-z0-9.-]+-(low|medium|high|xhigh|max)$/i
-const GEMINI_FAMILY = /^gemini[\s-]+(?:\d+(?:\.\d+)*[\s-]+)?([a-z][a-z0-9]*(?:[\s-][a-z0-9]+)*)$/
-
-// Antigravity sends display labels (`Gemini 4 Carbon (High)`, `Orchestrator (Carbon)`,
-// `Claude Opus 5.5 (High)`, `GPT-OSS 120B (Medium)`). Strip any effort suffix so
-// `:effort` never repeats it, shorten Gemini and Claude to their family, keep
-// Orchestrator's variant, and preserve other provider identifiers whole.
-export function shortAntigravityModelName(model: string): string | null {
-  let id = model.trim().replace(EFFORT_TAIL, '').trim().toLowerCase()
-  if (id === '') return null
-  const slugEffort = KNOWN_EFFORT_SLUG.exec(id)?.[1]
-  if (slugEffort) id = id.slice(0, -(slugEffort.length + 1))
-  if (id.includes('claude')) return shortModelName(id)
-  const orchestrator = /^orchestrator\s*\(([a-z0-9.-]+)\)$/.exec(id)
-    ?? /^gemini-pro-orchestrator(?:-([a-z0-9.-]+))?$/.exec(id)
-  if (orchestrator) return `orchestrator(${orchestrator[1] ?? 'carbon'})`
-  const gemini = GEMINI_FAMILY.exec(id)?.[1]
-  if (gemini) return gemini.replace(/\s+/g, '-')
-  return id.replace(/\s+/g, '-')
-}
-
 // Effort uses three flat tiers: low → alert, medium → middle, high and
 // higher → calm. An unknown level or a numeric budget also uses calm.
 export function effortColor(t: Theme, effort: string | number | undefined): Rgb {
@@ -76,18 +16,12 @@ export function effortColor(t: Theme, effort: string | number | undefined): Rgb 
   }
 }
 
-export const model: Fragment = ({ v, o, t }) => {
-  const id = v.session.model === undefined ? '' : cleanText(v.session.model)
-  const name = v.core.host === 'codex' ? shortCodexModelName(id)
-    : v.core.host === 'omo' ? shortOmoModelName(id)
-    : v.core.host === 'antigravity' ? shortAntigravityModelName(id)
-    : shortModelName(id)
+export const model: Fragment = ({ v, display, o, t }) => {
+  const { modelName: name, speed } = display
   if (!name) return null
-  const speed = v.core.host === 'omo' ? /-(ultrafast|fast|highspeed)$/i.exec(id.trim())?.[1]?.toLowerCase() : undefined
-  const fast = speed ? t.paint('faint', speed === 'ultrafast' ? '(ultrafast)' : '(fast)')
-    : v.session.fast ? t.paint('faint', '(fast)') : ''
+  const suffix = speed ? t.paint('faint', `(${speed})`) : ''
   const effort = o.effort ? v.session.effort : undefined
-  if (effort === undefined || effort === '') return t.paint(effortColor(t, undefined), name) + fast
+  if (effort === undefined || effort === '') return t.paint(effortColor(t, undefined), name) + suffix
   const level = cleanText(String(effort)).toLowerCase()
-  return t.paint('label', `${name}:`) + t.paint(effortColor(t, effort), level) + fast
+  return t.paint('label', `${name}:`) + t.paint(effortColor(t, effort), level) + suffix
 }
