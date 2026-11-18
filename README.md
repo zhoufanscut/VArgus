@@ -1037,8 +1037,8 @@ and its tests; Codex's saved-log collection is described separately under
   checked.
 - [AGENTS.md](AGENTS.md): working rules for coding agents in this repo.
 - Run `npm ci` for development tools. `npm run test:local` type-checks the
-  Node source and runs the local checks with Node and Git. `npm test` adds native
-  Codex and tmux checks, or Codex and psmux checks on Windows.
+  Node source and runs the shared renderer and local host tests with Node and Git.
+  `npm test` adds native Codex and tmux checks, or Codex and psmux checks on Windows.
 - Claude checks: `npm run test:claude` runs plugin validation, type-checking, engine
   tests, and the reader/manifest checks. DESIGN.md "Tests" has the details.
 

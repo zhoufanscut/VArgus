@@ -8,7 +8,6 @@ import type { FragmentInput } from '../../src/core/types.ts'
 import { DEFAULTS } from '../../src/options.ts'
 import { en } from '../../src/i18n/en.ts'
 import { makeTheme } from '../../src/theme/index.ts'
-import { limits } from '../../src/render/fragments/limits.ts'
 import { context } from '../../src/render/fragments/context.ts'
 import { model } from '../../src/render/fragments/model.ts'
 import { omoDisplay } from '../../src/hosts/omo/display.ts'
@@ -82,15 +81,4 @@ test('OmO preserves unknown context and renders short model families', () => {
   ]) {
     assert.equal(model(input({ model: id, effort: 'high' })), expected)
   }
-})
-
-test('quota windows retain multiple labeled accounts, stale marks and unfamiliar durations', () => {
-  const f = input()
-  f.v.limits.engine = [
-    { kind: 'five_hour', label: 'account-a/5h', percentUsed: 10 },
-    { kind: 'five_hour', label: 'account-b/5h', percentUsed: 20, stale: true, resetsAt: new Date(3600000).toISOString() },
-    { kind: 'other', label: 'provider/day\n', percentUsed: 30 },
-    { kind: 'seven_day', label: 'expired', percentUsed: 99, resetsAt: new Date(0).toISOString() },
-  ]
-  assert.equal(limits(f), 'account-a/5h:10% account-b/5h:20%*(~1h0m) provider/day?:30%')
 })

@@ -1,19 +1,20 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, test } from 'node:test'
+import assert from 'node:assert/strict'
+import { initialLimits } from '../../src/core/limits.ts'
 
-import type { Fragment, FragmentInput, Values } from '../../src/core/types'
-import { initialLimits } from '../../src/hosts/claude/collect/limits'
-import { initialSession } from '../../src/hosts/claude/collect/session'
-import { claudeDisplay } from '../../src/hosts/claude/display'
-import { initialVcs } from '../../src/hosts/claude/collect/vcs'
-import { en, type Labels } from '../../src/i18n/en'
-import { DEFAULTS, type Options } from '../../src/options'
-import { calls } from '../../src/render/fragments/calls'
-import { context } from '../../src/render/fragments/context'
-import { folder } from '../../src/render/fragments/folder'
-import { model } from '../../src/render/fragments/model'
-import { session } from '../../src/render/fragments/session'
-import { tokens } from '../../src/render/fragments/tokens'
-import { makeTheme } from '../../src/theme'
+import type { Fragment, FragmentInput, Values } from '../../src/core/types.ts'
+import { initialSession } from '../../src/core/session.ts'
+import { displaySession, shortModelName } from '../../src/render/session.ts'
+import { initialVcs } from '../../src/core/vcs.ts'
+import { en, type Labels } from '../../src/i18n/en.ts'
+import { DEFAULTS, type Options } from '../../src/options.ts'
+import { calls } from '../../src/render/fragments/calls.ts'
+import { context } from '../../src/render/fragments/context.ts'
+import { folder } from '../../src/render/fragments/folder.ts'
+import { model } from '../../src/render/fragments/model.ts'
+import { session } from '../../src/render/fragments/session.ts'
+import { tokens } from '../../src/render/fragments/tokens.ts'
+import { makeTheme } from '../../src/theme/index.ts'
 
 // DESIGN, "Languages": every fragment rendered with labels `⟦<key>⟧` shows only
 // those for its words, which catches a word written straight into a fragment.
@@ -30,7 +31,7 @@ function input(session: Partial<Values['session']>, o: Partial<Options> = {}, is
     limits: initialLimits(),
     vcs: initialVcs(),
   }
-  return { v, display: claudeDisplay(v.session), o: { ...DEFAULTS, ...o }, l: marked, t: makeTheme('graphite', false), now: 3 * 3_600_000 }
+  return { v, display: displaySession(v.session, shortModelName), o: { ...DEFAULTS, ...o }, l: marked, t: makeTheme('graphite', false), now: 3 * 3_600_000 }
 }
 
 // What is left once the escapes, the marked labels, the data and the numbers
@@ -56,11 +57,11 @@ const cases: [string, Fragment, FragmentInput, string[], string[]][] = [
 
 describe('labels', () => {
   for (const [name, fragment, f, data, keys] of cases) {
-    test(`${name}: only labels for its words`, async () => {
+    test(`${name}: only labels for its words`, () => {
       const text = fragment(f)
-      expect(text).not.toBe(null)
-      expect(leftover(text!, data)).not.toMatch(/\p{L}/u)
-      for (const key of keys) expect(text).toContain(`⟦${key}⟧`)
+      assert.notEqual(text, null)
+      assert.doesNotMatch(leftover(text!, data), /\p{L}/u)
+      for (const key of keys) assert.ok(text!.includes(`⟦${key}⟧`))
     })
   }
 })

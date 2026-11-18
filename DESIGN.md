@@ -1332,7 +1332,7 @@ tests/claude/                    Claude engine, installer, reader and manifest c
 tests/codex/                     Codex, tmux and psmux tests
 tests/codex/fixtures/            Saved Codex pane inputs for views.test.mts
 tests/omo/                       OmO collection, layout and setup
-tests/shared/                    Cross-host displays, CLI and source boundaries
+tests/shared/                    Shared renderer, CLI and import-boundary checks
 tests/run-node.mjs               Node suite discovery and platform selection
 ```
 
@@ -1793,9 +1793,9 @@ the Claude mod. A throwaway mod run in a live session settles each.
 ## Tests
 
 - `npm ci` installs development/test tools. `npm run test:local` type-checks
-  the Node graph and runs local checks, including boundaries and protocol/log
-  checks. `npm test` also runs app-server turns with a localhost mock provider
-  and isolated tmux or psmux lifecycle tests.
+  the Node graph and runs the shared renderer, import-boundary and local host tests.
+  `npm test` also runs app-server turns with a localhost mock provider and isolated tmux
+  or psmux lifecycle tests.
   Standalone tests copy source, the Bash entry and package metadata without `dist` or
   `node_modules`; legacy-worker and reload probes change the copied `.ts` files.
   Standalone and sibling-view command helpers require the current shell marker's
@@ -1820,11 +1820,10 @@ the Claude mod. A throwaway mod run in a live session settles each.
 - `tsc -p .` type-checks against the types the engine writes into `.claude-plugin/types/`
   (gitignored by the engine's own `.gitignore` there). The engine writes them only for a folder
   it watches: start `claude --plugin-dir .` once per Claude Code release.
-- `claude plugin test .` runs the `*.test.ts` files: the renderer's output for given values and
-  widths, the writer's file, and each rule in [Rules carried over from
-  VantageHUD](#rules-carried-over-from-vantagehud). A test has no files, network or processes: the
-  writer's tests drive the mod through `$.session.start` and answer its calls with hooks of their
-  own beneath it (`fs.write`, `fs.list`, `fs.stat`, `process.run`, `session.id`), each returning
+- `claude plugin test .` exercises the Claude collectors, quota policy and line writer in
+  the plugin runtime. The writer tests drive the mod through `$.session.start` and answer
+  its calls with hooks of their own beneath it (`fs.write`, `fs.list`, `fs.stat`, `process.run`,
+  `session.id`), each returning
   `{ value }`, and end it through `$.session.end` with a `session.end` hook beneath.
 - `sh tests/claude/manifest.test.sh` checks the Claude picker against the shared and
   Claude-specific keys and defaults in `src/options.ts`.
