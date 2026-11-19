@@ -1017,13 +1017,22 @@ and `ctx.getContextUsage()`. Missing/null context stays unknown and is omitted.
 When supplied, `ctx.model.defaultThinkingLevel` is the baseline for effort
 colour. The Senpi `Model` type declares it as `defaultThinkingLevel?: ModelThinkingLevel`,
 and `ExtensionContext.model` exposes the active model. [Senpi model defaults](https://github.com/code-yeongyu/senpi/blob/main/packages/coding-agent/docs/models.md#default-thinking-level)
-OmO names omit versions. The named families fable, opus, sonnet, haiku, sol, terra,
-luna, astra and argon retain their names; other model IDs use their family stem
-(glm, kimi, grok, qwen, deepseek, etc.). Bare Kimi coding IDs such as `k3.1-pro`
-map to kimi. Native catalog IDs end in `-fast`, `-ultrafast` or `-highspeed` for
-speed variants: these render `(fast)`, `(ultrafast)` and `(fast)` respectively,
-after effort (`sol:high(fast)`), including when effort is hidden. The maintainer
-selected these rules on 2026-11-14; other hosts retain their naming rules.
+
+OmO uses versionless aliases for known model shapes. The alias lookup uses the
+last component of slash-separated gateway IDs and removes recognized Bedrock
+region and vendor prefixes. The Senpi catalog gives `us.amazon.nova-pro-v1:0`
+and `us.meta.llama4-scout-17b-instruct-v1:0`, displayed as `nova-pro` and
+`llama-scout`. The IDs `deepseek-v4-flash` and `deepseek-v4.1-flash` display
+`deepseek`. The ID `deepseek-v4-pro` displays `deepseek-pro`.
+Qwen tiers use labels such as `qwen-max` and `qwen-plus`.
+Kimi coding IDs such as `k3.1-pro` use `kimi`. Unrecognized shapes keep their
+full ID, including the namespace, as the display fallback. OmO retains the
+original collected ID.
+
+The renderer moves a terminal `-fast`, `-ultrafast`, or `-highspeed` to a
+marker after effort, including when effort is hidden. `-highspeed` uses
+`(fast)`. Venice lists `kimi-k3-fast-api` as Kimi K3 Fast, so that spelling
+also produces `kimi(fast)`.
 
 Claude and ChatGPT quotas use `getSubscriptionLimits()` and `onSubscriptionLimits()`. Bundled
 `docs/extensions.md:2559-2569` establishes these APIs; `docs/rpc.md:4214-4238`

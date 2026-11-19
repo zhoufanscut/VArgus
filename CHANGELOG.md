@@ -17,6 +17,12 @@ Notable changes to this project. The format follows
 
 - Setup commands put the action first. Update scripts to use `vargus install HOST`
   and `vargus remove HOST`. Terminal removal is supported for Codex and OmO.
+- OmO displays `deepseek-v4-flash` as `deepseek` and `deepseek-v4-pro` as
+  `deepseek-pro`. It recognizes Bedrock prefixes and keeps unfamiliar IDs whole.
+
+### Fixed
+
+- OmO shows the `(fast)` marker for Venice's Kimi K3 Fast model ID.
 
 ### Removed
 

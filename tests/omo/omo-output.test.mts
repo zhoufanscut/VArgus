@@ -76,7 +76,8 @@ test('OmO preserves unknown context and renders short model families', () => {
   for (const [id, expected] of [
     ['gpt-6.1-sol', 'sol:high'],
     ['claude-fable-5', 'fable:high'],
-    ['custom/provider-model', 'provider:high'],
+    ['us.amazon.nova-pro-v1:0', 'nova-pro:high'],
+    ['custom/provider-model', 'custom/provider-model:high'],
   ]) {
     assert.equal(model(input({ model: id, effort: 'high' })), expected)
   }

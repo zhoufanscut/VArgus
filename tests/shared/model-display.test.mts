@@ -92,7 +92,7 @@ test('Fast mode stays beside the model when effort is hidden or unavailable', ()
   assert.equal(model(codexInput(v)), null)
 })
 
-test('OmO model IDs display named families or provider stems without versions', () => {
+test('OmO shortens known families, keeps variants and preserves unrecognized IDs', () => {
   const collector = new CodexCollector('/repo', '/home/u')
   collector.start('/repo', 0)
   const v = collector.snapshot()!
@@ -105,9 +105,17 @@ test('OmO model IDs display named families or provider stems without versions', 
     ['gpt-6-astra', 'astra'], ['gemini-4-argon', 'argon'],
     ['sol-6.1', 'sol'], ['GLM-5.1', 'glm'], ['k3', 'kimi'],
     ['k3.1-pro', 'kimi'], ['kimi-for-coding', 'kimi'], ['kimi-k3', 'kimi'],
-    ['grok-4.1', 'grok'], ['qwen3.5-coder', 'qwen'], ['deepseek-v4', 'deepseek'],
-    ['gemini-4-pro', 'gemini'], ['MiniMax-M3', 'minimax'],
-    ['vendor/glm-5', 'glm'], ['custom-model-v2', 'custom'],
+    ['grok-4.1', 'grok'], ['deepseek-v4', 'deepseek'], ['MiniMax-M3', 'minimax'],
+    ['deepseek-flash', 'deepseek'], ['deepseek/deepseek-v4-flash', 'deepseek'],
+    ['deepseek-v4.1-flash', 'deepseek'], ['deepseek/deepseek-v4-pro', 'deepseek-pro'],
+    ['qwen3.7-max', 'qwen-max'], ['qwen3.7-plus', 'qwen-plus'], ['qwen3.5-coder', 'qwen-coder'],
+    ['google/gemini-2.5-flash-lite', 'gemini-flash-lite'], ['gemini-4-pro', 'gemini-pro'],
+    ['openai-gpt-56-sol', 'sol'], ['openai-gpt-56-sol-pro', 'sol-pro'],
+    ['us.amazon.nova-pro-v1:0', 'nova-pro'], ['us.meta.llama4-scout-17b-instruct-v1:0', 'llama-scout'],
+    ['us.anthropic.claude-opus-4-5-20251101-v1:0', 'opus'], ['global.moonshotai.kimi-k3', 'kimi'],
+    ['vendor/glm-5', 'glm'], ['o3', 'o3'], ['o4-mini', 'o4-mini'],
+    ['custom-sol', 'custom-sol'], ['vendor/Custom-Model-v2', 'vendor/Custom-Model-v2'],
+    ['vendor/Custom-Model-fast-api', 'vendor/Custom-Model-fast-api'],
   ] as const) {
     v.session.model = id
     assert.equal(model(input()), `${name}:high`, id)
@@ -126,7 +134,10 @@ test('OmO speed suffixes follow effort and stay visible when effort is hidden', 
     ['gpt-6.1-sol-fast', 'sol', 'fast'],
     ['claude-fable-5-ultrafast', 'fable', 'ultrafast'],
     ['k3.1-pro-highspeed', 'kimi', 'fast'],
+    ['kimi-k3-fast-api', 'kimi', 'fast'],
     ['GLM-5-FAST', 'glm', 'fast'],
+    ['deepseek/deepseek-v4.1-flash-ultrafast', 'deepseek', 'ultrafast'],
+    ['vendor/Custom-Model-fast', 'vendor/Custom-Model', 'fast'],
   ]) {
     v.session.model = id
     v.session.effort = 'high'

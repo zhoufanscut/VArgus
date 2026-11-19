@@ -281,10 +281,11 @@ count distinct persisted DAG notices; a running workflow without a notice is not
 yet counted. Skill counts are unavailable and omitted: reading `SKILL.md` does not
 prove a skill was loaded.
 
-OmO uses short model families such as `opus`, `fable`, `sol`, `terra`, `luna`
-and `argon`, without versions. Other models use their family stem, such as
-`glm`, `kimi`, `grok` or `qwen`. Fast and ultrafast variants appear after effort:
-`sol:high(fast)` or `sol:high(ultrafast)`. Kimi's highspeed variants use `(fast)`.
+OmO shortens known models to labels such as `opus`, `sol`, `sol-pro`,
+and `nova-pro`. For example, `deepseek-v4-flash` displays `deepseek`
+and `deepseek-v4-pro` displays `deepseek-pro`. Unfamiliar IDs are shown in full.
+Speed appears after effort, as in `sol:high(fast)` and `sol:high(ultrafast)`.
+Kimi highspeed variants and Venice's Kimi K3 Fast use `(fast)`.
 
 Context stays absent until OmO supplies a reading. Quotas follow the selected
 provider: Claude and ChatGPT subscription windows come from OmO's subscription-limit
