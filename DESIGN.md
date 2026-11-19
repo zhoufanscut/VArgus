@@ -1849,7 +1849,14 @@ the Claude mod. A throwaway mod run in a live session settles each.
   unchanged baseline failed inside and passed outside.
 
 - `claude plugin validate .` reads the manifest and the module as the engine will, and reports
-  what the engine would refuse.
+  what the engine would refuse. Claude Code 2.1.323 also statically checks TypeScript files under
+  `tests/`, including the Node-only `.mts` suites, and follows their imports. It warns on their
+  explicit `.ts` imports (TS5097) and some Node-only types although `tsconfig.node.json` passes.
+  In a minimal A/B probe on 2026-11-19, moving the same files outside `tests/` removed those
+  warnings; enabling `allowImportingTsExtensions` in either the root or generated tsconfig did not.
+  Keep the shared test layout: normal validation exits 0, `--strict` turns these warnings into
+  exit 1, and the supported Node runtime requires the explicit extensions. The digest refusal for
+  `node_modules/.bin/tsc` names npm's symlink to `../typescript/bin/tsc`, not a source failure.
 - `tsc -p .` type-checks against the types the engine writes into `.claude-plugin/types/`
   (gitignored by the engine's own `.gitignore` there). The engine writes them only for a folder
   it watches: start `claude --plugin-dir .` once per Claude Code release.
