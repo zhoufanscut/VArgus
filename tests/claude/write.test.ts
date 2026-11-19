@@ -2,6 +2,7 @@ import { describe, expect, mock, test, type MockClock } from 'claude-code/testin
 import type { On } from 'claude-code'
 
 import { dataDir, homeDir, moveArgv, removeArgv } from '../../src/hosts/claude/write'
+import { fixtureFsPath } from './fixture-path'
 
 // The line file (DESIGN, "The line file"), driven through the mod's own hooks.
 
@@ -39,7 +40,12 @@ type World = {
   dirTimes: Record<string, number>
 }
 
-function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '/home/u', NO_COLOR: '1' }): World {
+function world(
+  on: On,
+  clock: MockClock,
+  env: Record<string, string> = { HOME: '/home/u', NO_COLOR: '1' },
+  pathStyle: 'posix' | 'drive' = 'posix',
+): World {
   const w: World = {
     writes: [], runs: [], id: 'S1', mv: 0, tmpFails: false, cwd: () => '/home/u/proj/x',
     holdMs: 0, rmHoldMs: 0, listHoldMs: 0, inFlight: 0, maxInFlight: 0, started: [], tree: {}, dirTimes: {},
@@ -53,22 +59,16 @@ function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '
   on('session.id', async () => ({ value: w.id }))
   on('session.cwd', async () => ({ value: w.cwd() }))
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
+  const key = (path: string) => fixtureFsPath(path, pathStyle)
   on('fs.write', async ($, e) => {
     w.inFlight += 1
     w.maxInFlight = Math.max(w.maxInFlight, w.inFlight)
     if (w.holdMs) await clock.sleep(w.holdMs)
     w.inFlight -= 1
     if (w.tmpFails && e.path.endsWith('.tmp')) throw new Error('denied')
-    w.writes.push({ path: e.path, text: e.text })
+    w.writes.push({ path: key(e.path), text: e.text })
     return { value: undefined }
   })
-  // The engine hands a Windows drive path on as relative to its cwd on Linux
-  // (`<cwd>/C:/...`): tree keys start at the drive.
-  // On Windows it hands them on as given, with `\`.
-  const key = (p: string) => {
-    const at = p.search(/[A-Za-z]:[\\/]/)
-    return at < 0 ? p : p.slice(at).replace(/\\/g, '/')
-  }
   on('fs.list', async ($, e) => {
     if (w.listHoldMs) await clock.sleep(w.listHoldMs)
     const entries = w.tree[key(e.path ?? '')]
@@ -165,7 +165,7 @@ describe('line file', () => {
 
   test('Windows: HOME unset, the folder shortens to ~ from USERPROFILE', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
-    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u', NO_COLOR: '1' })
+    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u', NO_COLOR: '1' }, 'drive')
     w.cwd = () => 'C:\\Users\\u\\proj'
     await $.session.start({ ...start, cwd: 'C:\\Users\\u\\proj' })
     await clock.settle()
@@ -184,7 +184,7 @@ describe('line file', () => {
 
   test('Windows: a data folder with a cmd special character is never given to cmd', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 100 * 24 * 3_600_000 })
-    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u', CLAUDE_CONFIG_DIR: 'D:\\R&D\\claude' })
+    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u', CLAUDE_CONFIG_DIR: 'D:\\R&D\\claude' }, 'drive')
     // an old folder the prune would remove, given a command
     const data = 'D:/R&D/claude/plugins/data/vargus-vargus'
     w.tree[data] = [{ name: 'old', kind: 'dir', mtimeMs: 0 }]
@@ -234,7 +234,7 @@ describe('line file', () => {
 
   test('Windows: HOME set elsewhere, the folder still shortens against USERPROFILE', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
-    const w = world(on, clock, { HOME: 'D:\\h', USERPROFILE: 'C:\\Users\\u', NO_COLOR: '1' })
+    const w = world(on, clock, { HOME: 'D:\\h', USERPROFILE: 'C:\\Users\\u', NO_COLOR: '1' }, 'drive')
     w.cwd = () => 'C:\\Users\\u\\proj'
     await $.session.start({ ...start, cwd: 'C:\\Users\\u\\proj' })
     await clock.settle()
@@ -243,7 +243,7 @@ describe('line file', () => {
 
   test('Windows: HOME set elsewhere, the line still goes under USERPROFILE', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
-    const w = world(on, clock, { HOME: 'D:\\h', USERPROFILE: 'C:\\Users\\u' })
+    const w = world(on, clock, { HOME: 'D:\\h', USERPROFILE: 'C:\\Users\\u' }, 'drive')
     await $.session.start(start)
     await clock.settle()
     expect(w.runs[0]?.[5]).toBe('C:\\Users\\u\\.claude\\plugins\\data\\vargus-vargus\\S1\\line.3.tmp')
@@ -262,7 +262,7 @@ describe('line file', () => {
 
   test('Windows: cmd.exe move puts the line in place, with \\ separators', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
-    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u' })
+    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u' }, 'drive')
     await $.session.start(start)
     await clock.settle()
     const data = 'C:\\Users\\u\\.claude\\plugins\\data\\vargus-vargus\\S1'
@@ -365,7 +365,7 @@ describe('the session folder at session.end', () => {
 
   test('Windows: removed with cmd.exe rmdir', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 1 })
-    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u' })
+    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u' }, 'drive')
     await $.session.start(start)
     await clock.settle()
     await $.session.end(end('prompt_input_exit'))
@@ -456,7 +456,7 @@ describe('the age prune at session.start', () => {
 
   test('Windows: an old folder is removed with cmd.exe rmdir', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: NOW })
-    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u' })
+    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u' }, 'drive')
     const data = 'C:/Users/u/.claude/plugins/data/vargus-vargus'
     w.tree[data] = [dir('old'), dir('S1')]
     w.tree[`${data}/old`] = [file('line', 30)]

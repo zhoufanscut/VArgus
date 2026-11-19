@@ -2,6 +2,7 @@ import { describe, expect, mock, test, type MockClock } from 'claude-code/testin
 import type { On, SessionRepo } from 'claude-code'
 
 import { findSvnRoot, resolvePath } from '../../src/hosts/claude/collect/vcs'
+import { fixtureFsPath } from './fixture-path'
 
 // The vcs collector driven through the mod's own hooks: the git-vs-svn
 // choice, the worktree and detached-HEAD reads from the git dir, and the
@@ -54,10 +55,14 @@ function world(on: On, clock: MockClock): World {
     w.writes.push(e.text)
     return { value: undefined }
   })
-  on('fs.exists', async ($, e) => ({ value: e.path in w.files || w.dirs.has(e.path) }))
+  on('fs.exists', async ($, e) => {
+    const path = fixtureFsPath(e.path)
+    return { value: path in w.files || w.dirs.has(path) }
+  })
   on('fs.read', async ($, e) => {
-    w.reads.push(e.path)
-    const text = w.files[e.path]
+    const path = fixtureFsPath(e.path)
+    w.reads.push(path)
+    const text = w.files[path]
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
     return { value: text }
   })

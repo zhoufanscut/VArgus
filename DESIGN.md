@@ -1849,6 +1849,10 @@ the Claude mod. A throwaway mod run in a live session settles each.
   its calls with hooks of their own beneath it (`fs.write`, `fs.list`, `fs.stat`, `process.run`,
   `session.id`), each returning
   `{ value }`, and end it through `$.session.end` with a `session.end` hook beneath.
+  The writer and VCS mocks map filesystem paths that the engine has normalized back to their
+  synthetic fixture paths. Drive fixtures keep their drive letters even in a path such as
+  `<cwd>/D:/...`. Command arguments are checked as emitted so the POSIX and Windows commands
+  stay distinct.
 - `sh tests/claude/manifest.test.sh` checks the Claude picker against the shared and
   Claude-specific keys and defaults in `src/options.ts`.
 - `sh tests/claude/reader.test.sh` checks the README's two reader commands and runs them with `sh`
