@@ -177,15 +177,20 @@ from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-
 1. Run `claude plugin list --json` from the project to check the installed scopes. Before
    uninstalling, check `settings.json` in your Claude config directory and the affected project's
    `.claude/settings.local.json` and `.claude/settings.json`. Remove the VArgus `statusLine` entry
-   that applies to the install you're removing. A VArgus reader points to
-   `vargus-vargus/$CLAUDE_CODE_SESSION_ID/line`. Confirm before editing shared project settings.
-   If you saved a status line before switching to VArgus, restore that entry. Uninstalling deletes
-   the plugin's data folder, so a VArgus reader left in settings shows a blank row.
+   for the scope you're removing if no remaining installation uses that reader. A VArgus reader
+   points to `vargus-vargus/$CLAUDE_CODE_SESSION_ID/line`. Confirm before editing shared project
+   settings. If you backed up a previous status line, restore it to the settings file you just edited.
+   A reader left behind after the last uninstall can show a blank row.
 2. Run `claude plugin uninstall vargus@vargus --scope <scope>` from a shell, or remove it in
-   `/plugin` under **Installed**. If removing the directory marketplace too, run
-   `claude plugin marketplace remove vargus`.
-   Reload plugins or close affected sessions.
-3. For a directory install, follow [Remove shared files](../README.md#remove-shared-files).
+   `/plugin` under **Installed**.
+3. If you also want to remove the directory marketplace, check `extraKnownMarketplaces` in
+   the settings files from step 1. Keep any declaration another installation needs. For example,
+   if both user and project settings declare `vargus`, remove just the project declaration with
+   `claude plugin marketplace remove vargus --scope project` from that project.
+   Use `claude plugin marketplace remove vargus` only for a full removal across scopes.
+   It also uninstalls remaining plugins from that marketplace.
+4. Reload plugins or close affected sessions. For a directory install, follow
+   [Remove shared files](../README.md#remove-shared-files).
 
 ## Limits
 

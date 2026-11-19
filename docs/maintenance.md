@@ -38,8 +38,11 @@ then `---` and `**Full changelog**: <compare link>` (see VantageHUD's GitHub rel
 - Run `npm ci` for development tools. `npm run test:local` type-checks the
   Node source and runs the shared renderer and local host tests with Node and Git.
   `npm test` adds native Codex and tmux checks, or Codex and psmux checks on Windows.
-- Claude checks: `npm run test:claude` runs plugin validation, type-checking, engine
-  tests, and the reader/manifest checks. See [test and verification details](../DESIGN.md#tests).
+- For Claude development, start `claude --plugin-dir .` interactively from the repository
+  root on a fresh checkout or after upgrading Claude Code. Let Claude load the plugin and
+  write its TypeScript declarations to `.claude-plugin/types/`, then exit the session.
+  Run `npm run test:claude` for plugin validation, type-checking, engine tests and the
+  reader and manifest checks. See [test and verification details](../DESIGN.md#tests).
 
 ## Add a host
 

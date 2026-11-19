@@ -37,9 +37,16 @@ not an earlier custom footer.
 
 ## Configure
 
-To add or change a standalone JSON options file, target the recorded loader.
-You can reuse the file you pass to Codex or Antigravity CLI. For a loader in the
-active agent directory, run the following command from the checkout.
+Create the options file before running the installer, or reuse the one you pass
+to Codex or Antigravity CLI. For example, save this JSON as `~/.config/vargus.json`.
+See the [shared option keys](../src/options.ts).
+
+```json
+{"theme":"ember","session":false}
+```
+
+For a loader in the active agent directory, run the following command from the
+checkout, substituting your file's path if it differs.
 
 ```sh
 ./bin/vargus install omo --config "$HOME/.config/vargus.json"
@@ -52,13 +59,11 @@ exact directory containing the recorded loader.
 ./bin/vargus install omo --dir "/absolute/path/to/extensions" --config "$HOME/.config/vargus.json"
 ```
 
-Use a JSON object with the [shared option keys](../src/options.ts), for example
-`{"theme":"ember","session":false}`. The loader saves the absolute path and
-VArgus reads the file when OmO loads the extension. Run `/reload` after editing
-the file. To change its path, rerun the command for that loader with the new
-file. Reinstalling without `--config` keeps the saved path. To stop using the
-file, [remove the loader](#remove) and reinstall without `--config` in the same
-directory.
+The loader saves the absolute path and VArgus reads the file when OmO loads the
+extension. Run `/reload` after editing the file. To change its path, rerun the
+command for that loader with the new file. Reinstalling without `--config` keeps
+the saved path. To stop using the file, [remove the loader](#remove) and
+reinstall without `--config` in the same directory.
 
 ```text
 /vargus off

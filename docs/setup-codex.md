@@ -287,9 +287,9 @@ Codex can report a current transcript with an extra UUID suffix while an older
 same-thread file remains. VArgus uses the reported path and validates its metadata;
 it does not pick the newest filename. The root view stays pinned to that path.
 
-Saved session logs and composer recognition are version-sensitive interfaces.
-Compatibility is checked with fixtures and a live official-Codex/local-mock test
-on 0.167.0. Other prompt layouts can require a compatibility update.
+Saved session logs and composer recognition are version-sensitive. Linux tmux
+checks used Codex 0.167.0 and 0.169.1. For coverage by build, including native
+Windows psmux, see the [live verification record](../DESIGN.md#live-evidence-and-limits).
 
 ### Narrow terminals and SSH
 

@@ -116,17 +116,21 @@ command was disabled, run `/statusline on` in `agy`.
 
 ## Configure
 
-Defaults work with no extra flags or files. Pass `--theme NAME` or
-`--config /absolute/path/to/vargus.json` in `statusLine.command`:
+Defaults work without flags or files. To set `--config FILE` or `--theme NAME`,
+append the flags to your existing `statusLine.command`. With `vargus` on PATH,
+use the JSON string for your platform as the `command` value. Substitute the path
+to your options file.
+
+**Linux or macOS**
 
 ```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "\"$HOME/.local/bin/vargus\" statusline --theme ember --config \"$HOME/.config/vargus.json\"",
-    "enabled": true
-  }
-}
+"vargus statusline --config \"$HOME/.config/vargus.json\" --theme ember"
+```
+
+**Windows**
+
+```json
+"vargus statusline --config \"C:\\Users\\Pat Lee\\.config\\vargus.json\" --theme ember"
 ```
 
 The JSON file uses the keys and defaults in [`src/options.ts`](../src/options.ts).

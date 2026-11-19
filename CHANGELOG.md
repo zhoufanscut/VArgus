@@ -30,6 +30,10 @@ Notable changes to this project. The format follows
 - OmO shows the `(fast)` marker for Venice's Kimi K3 Fast model ID.
 - Codex side chats opened with `/btw` or `/side` keep the last confirmed readings
   visible. Live readings resume on return to a recognized saved conversation.
+- Codex keeps showing the active conversation's readings when its agent label
+  is right-aligned beside the native shortcut hints.
+- On Linux, `!vargus off` can clear an abandoned tmux row even while the exited
+  helper is still listed in the process table.
 
 ### Removed
 

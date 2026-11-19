@@ -482,7 +482,7 @@ VantageHUD 0.6.0 is the read-only reference for these rules.
 |---|---|
 | Preserve fragment order, label text and terminal-column fitting. | A narrow row keeps the higher-priority fragments and handles wide characters. See [Fragments](#fragments) and [Languages](#languages). |
 | Use a palette registry with safe lookup and shared percentage tiers. | Unexpected names fall back to a known palette. See [Colours](#colours). |
-| Omit expired quota readings and isolate usage caches by provider and account. | Expired or unrelated usage must not appear as current. See [Usage cache and staleness](#usage-cache-and-staleness). |
+| Omit expired quota readings and keep Claude's usage cache separate by provider and config directory. | After an account switch in the same directory, the previous account's cached reading can still appear. See [Usage cache and staleness](#usage-cache-and-staleness). |
 | Use the host's OAuth handle without refreshing its credential. | The usage read leaves the login lifecycle with the host. See [Claude data sources](#data-sources). |
 | Pace repository status, resolve the actual worktree and count SVN item and property changes. | Reading status stays bounded and the branch reflects the session's repository. See [Repository readings](#repository-readings). |
 
