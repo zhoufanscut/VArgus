@@ -192,7 +192,7 @@ describe('line file', () => {
     await $.session.start(start)
     await clock.settle()
     // no move: the line written in place, no temp file
-    expect(w.writes.map(x => x.path.split(/[\\/]/).pop())).toEqual(['line'])
+    expect(w.writes.map(x => x.path)).toEqual([`${data}/S1/line`])
     await $.session.end({ reason: 'prompt_input_exit', sessionId: 'S1', resume: { id: 'S1' } } as const)
     await clock.advance(3000)
     expect(w.runs).toEqual([])
@@ -456,15 +456,15 @@ describe('the age prune at session.start', () => {
 
   test('Windows: an old folder is removed with cmd.exe rmdir', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: NOW })
-    const w = world(on, clock, { USERPROFILE: 'C:\\Users\\u' }, 'drive')
-    const data = 'C:/Users/u/.claude/plugins/data/vargus-vargus'
+    const w = world(on, clock, { USERPROFILE: 'D:\\Users\\u' }, 'drive')
+    const data = 'D:/Users/u/.claude/plugins/data/vargus-vargus'
     w.tree[data] = [dir('old'), dir('S1')]
     w.tree[`${data}/old`] = [file('line', 30)]
     w.tree[`${data}/S1`] = [file('line', 30)]
     await $.session.start(start)
     await clock.settle()
     expect(w.runs.filter(r => r[3] === 'rmdir')).toEqual([
-      ['cmd', '/d', '/c', 'rmdir', '/s', '/q', 'C:\\Users\\u\\.claude\\plugins\\data\\vargus-vargus\\old'],
+      ['cmd', '/d', '/c', 'rmdir', '/s', '/q', 'D:\\Users\\u\\.claude\\plugins\\data\\vargus-vargus\\old'],
     ])
   })
 
