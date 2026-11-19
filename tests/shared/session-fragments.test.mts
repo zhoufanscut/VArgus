@@ -51,21 +51,16 @@ describe('model', () => {
     assert.equal(shortModelName('  '), null)
   })
 
-  test('effort colours: low alert, medium middle, high or higher calm; unknown or a number calm', () => {
-    assert.deepEqual(effortColor(t, 'max'), gradLow)
-    assert.deepEqual(effortColor(t, 'xhigh'), gradLow)
-    assert.deepEqual(effortColor(t, 'HIGH'), gradLow)
-    assert.deepEqual(effortColor(t, 'medium'), gradMid)
-    assert.deepEqual(effortColor(t, 'low'), gradHigh)
-    assert.deepEqual(effortColor(t, 'odd'), gradLow)
-    assert.deepEqual(effortColor(t, 4096), gradLow)
-    assert.deepEqual(effortColor(t, undefined), gradLow)
+  test('off and none are the same level, with minimal below low', () => {
+    assert.deepEqual(effortColor(t, 'off', 'none'), gradLow)
+    assert.deepEqual(effortColor(t, 'minimal', 'none'), gradLow)
+    assert.deepEqual(effortColor(t, 'minimal', 'low'), gradHigh)
   })
 
   test('opus:high, label then effort colour; effort off or absent: the name alone, calm', () => {
     const m = 'claude-opus-5-5[1m]'
     assert.equal(model(input({ model: m, effort: 'high' })), 'opus:high')
-    assert.equal(model(input({ model: m, effort: 'high' }, {}, { color: true })), t.paint('label', 'opus:') + t.paint(gradLow, 'high'))
+    assert.equal(model(input({ model: m, effort: 'high', defaultEffort: 'medium' }, {}, { color: true })), t.paint('label', 'opus:') + t.paint(gradLow, 'high'))
     assert.equal(model(input({ model: m, effort: 'high' }, { effort: false }, { color: true })), t.paint(gradLow, 'opus'))
     assert.equal(model(input({ model: m })), 'opus')
     assert.equal(model(input({})), null)

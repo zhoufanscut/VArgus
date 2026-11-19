@@ -151,8 +151,11 @@ Codex CLI:
 | `repo:` `branch:` | repository and branch; Claude supports git and svn, OmO, Antigravity CLI and Codex support git |
 | `?4` | working-tree status: staged `+`, modified `!`, untracked `?`, conflicts `✗`, ahead `⇡`, behind `⇣` |
 
-Effort colours follow the selected theme: `low` uses Alert, `medium` uses Middle,
-and `high`, `xhigh`, and `max` share Calm.
+Effort uses the selected theme's Calm colour at or above the model's default
+and Alert below it. When the default is unavailable, `high` is the cutoff.
+Effort values that cannot be compared use Alert. Codex reads the configured
+model catalog or its local cache, OmO uses the active model's metadata, and
+Claude Code and Antigravity use published defaults for recognised models.
 
 With Claude Code on Kimi Code, an exact match for
 `https://api.kimi.com/coding/` or `https://api.kimi.ai/coding/` enables Kimi's

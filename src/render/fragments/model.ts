@@ -5,15 +5,21 @@ import { cleanText } from '../text.ts'
 // and the model has one (`opus:high`) (DESIGN, "Fragments"; VantageHUD's
 // elements/model.js, format `short`). Recorded Fast mode adds `(fast)`.
 
-// Effort uses three flat tiers: low → alert, medium → middle, high and
-// higher → calm. An unknown level or a numeric budget also uses calm.
-export function effortColor(t: Theme, effort: string | number | undefined): Rgb {
-  const { gradLow, gradMid, gradHigh } = t.rgb
-  switch (String(effort ?? 'max').toLowerCase()) {
-    case 'low': return gradHigh
-    case 'medium': return gradMid
-    default: return gradLow
-  }
+const EFFORT_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+
+function normalizeEffort(effort: string): string {
+  const level = effort.trim().toLowerCase()
+  return level === 'none' ? 'off' : level
+}
+
+export function effortColor(t: Theme, effort: string | number, defaultEffort: string | undefined): Rgb {
+  const { gradLow, gradHigh } = t.rgb
+  if (typeof effort !== 'string') return gradHigh
+  const level = normalizeEffort(effort)
+  const baseline = normalizeEffort(defaultEffort ?? '') || 'high'
+  const defaultRank = EFFORT_LEVELS.indexOf(baseline)
+  const atOrAbove = level === baseline || (defaultRank >= 0 && EFFORT_LEVELS.indexOf(level) >= defaultRank)
+  return atOrAbove ? gradLow : gradHigh
 }
 
 export const model: Fragment = ({ v, display, o, t }) => {
@@ -21,7 +27,7 @@ export const model: Fragment = ({ v, display, o, t }) => {
   if (!name) return null
   const suffix = speed ? t.paint('faint', `(${speed})`) : ''
   const effort = o.effort ? v.session.effort : undefined
-  if (effort === undefined || effort === '') return t.paint(effortColor(t, undefined), name) + suffix
+  if (effort === undefined || effort === '') return t.paint('gradLow', name) + suffix
   const level = cleanText(String(effort)).toLowerCase()
-  return t.paint('label', `${name}:`) + t.paint(effortColor(t, effort), level) + suffix
+  return t.paint('label', `${name}:`) + t.paint(effortColor(t, effort, v.session.defaultEffort), level) + suffix
 }

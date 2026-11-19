@@ -68,6 +68,23 @@ test('Antigravity model catalog shortens Gemini/Claude families, keeps Orchestra
   assert.equal(shortAntigravityModelName('  '), null)
 })
 
+test('Antigravity colour follows the published default or the high cutoff', () => {
+  const theme = makeTheme('graphite', false)
+  for (const [payload, name, effort, color, defaultEffort] of [
+    [{ display_name: 'Gemini 4 Hydrogen (Medium)' }, 'hydrogen', 'medium', 'gradHigh', 'high'],
+    [{ display_name: 'Gemini 4 Hydrogen (High)' }, 'hydrogen', 'high', 'gradLow', 'high'],
+    [{ id: 'gemini-4-neon-xhigh', display_name: 'Gemini 4 Neon (XHigh)', effort: 'xhigh' }, 'neon', 'xhigh', 'gradLow', 'high'],
+    [{ display_name: 'Gemini 4 Carbon (Medium)' }, 'carbon', 'medium', 'gradHigh', undefined],
+    [{ display_name: 'Gemini 4 Carbon (High)' }, 'carbon', 'high', 'gradLow', undefined],
+  ] as const) {
+    const v = collectAntigravityPayload({ model: payload })
+    assert.equal(v.session.defaultEffort, defaultEffort)
+    const display = antigravityDisplay(v.session)
+    assert.equal(model({ v, display, o: DEFAULTS, l: en, t: theme, now: 0 }),
+      theme.paint('label', `${name}:`) + theme.paint(color, effort))
+  }
+})
+
 test('Antigravity quota maps active model group, skips disabled or expired windows, and supports otherModelWeekly', () => {
   const now = Date.parse('2026-11-14T01:00:00Z')
   function draw(payload: AntigravityPayload, otherModelWeekly = false) {

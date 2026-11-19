@@ -38,18 +38,22 @@ test('child local commands require the complete dim read-only placeholder', () =
   assert.equal(codexComposer(screen('› \x1b[2mViewing sub-agent — direct input is d\x1b[0m'), ''), false)
 })
 
-test('footer settings preload once per workspace and retain unset, empty and ordered selections until reset', async () => {
+test('footer settings preload each workspace selection and catalog until reset', async () => {
   const calls: string[] = []
   let selection = ['session-id', 'model']
   const settings = new FooterSettings(async cwd => {
     calls.push(cwd)
-    return cwd === '/unset' ? null : cwd === '/empty' ? [] : [...selection]
+    return { selection: cwd === '/unset' ? null : cwd === '/empty' ? [] : [...selection],
+      modelCatalog: cwd === '/ordered' ? '/workspace/catalog.json' : null }
   })
   await settings.preload(['/unset', '/empty', '/ordered', '/ordered'])
   assert.deepEqual(calls, ['/unset', '/empty', '/ordered'])
   assert.equal(settings.get('/unset'), null)
   assert.deepEqual(settings.get('/empty'), [])
   assert.deepEqual(settings.get('/ordered'), ['session-id', 'model'])
+  assert.equal(settings.modelCatalog('/ordered'), '/workspace/catalog.json')
+  assert.equal(settings.modelCatalog('/unset'), null)
+  assert.equal(settings.modelCatalog('/unread'), undefined)
   selection = ['current-dir']
   await settings.preload(['/ordered'])
   assert.deepEqual(settings.get('/ordered'), ['session-id', 'model'])
@@ -64,7 +68,7 @@ test('a preload failure leaves other workspaces ready and can be retried', async
   let attempts = 0
   const settings = new FooterSettings(async cwd => {
     if (cwd === '/retry' && ++attempts === 1) throw new Error('config read failed')
-    return ['model']
+    return { selection: ['model'], modelCatalog: null }
   })
   await settings.preload(['/retry', '/ready'])
   assert.throws(() => settings.get('/retry'), /config read failed/)

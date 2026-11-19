@@ -34,6 +34,22 @@ import type { VargusCounts } from '../state'
 
 const COUNTS = { plugin: 'vargus', key: 'counts' } as const
 
+// Built-in model defaults from Claude Code's model configuration guide.
+const DEFAULT_EFFORTS = new Map([
+  ['claude-fable-5-2', 'medium'],
+  ['claude-opus-5-5', 'medium'],
+  ['claude-sonnet-5-5', 'medium'],
+  ['claude-haiku-5-5', 'medium'],
+  ['claude-opus-4-7', 'xhigh'],
+  ['claude-fable-5', 'high'],
+  ['claude-fable-5-1', 'high'],
+  ['claude-opus-5', 'high'],
+  ['claude-sonnet-5', 'high'],
+  ['claude-opus-4-8', 'high'],
+  ['claude-opus-4-6', 'high'],
+  ['claude-sonnet-4-6', 'high'],
+])
+
 // Saves run one after another, each writing the counts as they are when it
 // runs, so the last save holds the latest counts whatever order calls came in.
 let saving: Promise<unknown> = Promise.resolve()
@@ -98,7 +114,10 @@ export function measured($: EngineInterface, e: SessionMeasureInput, values: Ses
 }
 
 export function stepStarting(e: TurnStepInput, values: SessionValues): void {
-  if (e.agentId === undefined) values.effort = e.effort
+  if (e.agentId !== undefined) return
+  values.effort = e.effort
+  const model = e.model.toLowerCase().replace(/\[1m\]$/, '').replace(/-\d{8}$/, '')
+  values.defaultEffort = DEFAULT_EFFORTS.get(model)
 }
 
 // A main-loop response is already in usage() when its step resolves; a

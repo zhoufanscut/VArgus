@@ -1,7 +1,8 @@
 import { rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
-import { restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, FooterSettings } from '../../hosts/codex/footer.ts'
+import { restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, savedFooterSettings, FooterSettings } from '../../hosts/codex/footer.ts'
+import { cachedModelDefault } from '../../hosts/codex/model-defaults.ts'
 import { resolveCodexOptions } from '../../hosts/codex/options.ts'
 import { RolloutReader } from '../../hosts/codex/rollout.ts'
 import { Views, canHoldReadings, selectedView, type View, type ViewScreen } from '../../hosts/codex/views.ts'
@@ -23,8 +24,11 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const file = recordPath(target), views = new Views(spec.home, thread, spec.transcript), input = new PaneInput(target)
   const output = new TmuxOutput(target.socket, target.pane)
   const options = resolveCodexOptions(spec.options), theme = makeTheme(options.theme, !!process.env.NO_COLOR)
+  const footerSettings = new FooterSettings(cwd => savedFooterSettings(cwd, spec.home))
+  const modelDefault = options.model && options.effort
+    ? cachedModelDefault(spec.home, cwd => footerSettings.modelCatalog(cwd)) : undefined
   const readers = new Map<string, { reader: RolloutReader; line: ReturnType<typeof codexLine> }>()
-  const suppressed = new Set<string>(), footerSettings = new FooterSettings()
+  const suppressed = new Set<string>()
   let mode = spec.mode, selected: string | undefined, error: string | undefined
   let stopping = false, attached = false, refreshAt = 0, renderAt = 0
   let lastConfirmed: string | undefined, readingError: string | undefined, published = ''
@@ -96,7 +100,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
         try {
           let value = readers.get(view.thread)
           if (!value) {
-            const reader = new RolloutReader(view.file, view.thread, view.cwd, homedir())
+            const reader = new RolloutReader(view.file, view.thread, view.cwd, homedir(), modelDefault)
             value = { reader, line: codexLine(reader.collector, options, theme) }; readers.set(view.thread, value)
           }
           await value.reader.poll()

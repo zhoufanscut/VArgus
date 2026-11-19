@@ -1,5 +1,6 @@
 import { describe, expect, mock, test, type Engine, type MockClock } from 'claude-code/testing'
 import type { On, TurnStepInput } from 'claude-code'
+import { makeTheme } from '../../src/theme'
 
 // src/hosts/claude/register.ts, the wiring: each hook passes the event on and returns
 // what the hooks beneath it answered, untouched; the width from the
@@ -107,6 +108,25 @@ describe('register: the line as the host sets it up', () => {
     await $.session.start(start)
     // graphite's sep #3f3f3f
     expect(await line(clock, w)).toContain('\x1b[38;2;63;63;63m | \x1b[0m')
+  })
+
+  test('effort colour follows the main step model default or high cutoff', NO_VCS, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock, { HOME: '/home/u' })
+    const theme = makeTheme('graphite', false)
+    await $.session.start(start)
+    await step($, { model: 'claude-opus-5-5[1m]', effort: 'medium' })
+    expect(await line(clock, w)).toContain(theme.paint('gradLow', 'medium'))
+    await step($, { model: 'claude-opus-4-7', effort: 'high', agentId: 'a1' })
+    expect(await line(clock, w)).toContain(theme.paint('gradLow', 'medium'))
+    w.model = 'claude-opus-4-7'
+    await step($, { model: w.model, effort: 'high' })
+    expect(await line(clock, w)).toContain(theme.paint('gradHigh', 'high'))
+    w.model = 'unknown-model'
+    await step($, { model: w.model, effort: 'max' })
+    expect(await line(clock, w)).toContain(theme.paint('gradLow', 'max'))
+    await step($, { model: w.model, effort: 'medium' })
+    expect(await line(clock, w)).toContain(theme.paint('gradHigh', 'medium'))
   })
 
   test('startup requests closure of the old detail pane and applies the saved theme',

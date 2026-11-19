@@ -7,9 +7,9 @@ import type { TokenName } from '../core/types.ts'
 //   faint     the quietest tone (parentheticals, the stale `*`)
 //   sep       the ` | ` separator
 //   gradLow   calm tier (< 70 %), and the value tone of token:/repo:/branch:,
-//             and effort `high` or higher
+//             and effort at or above its cutoff (the model default or high)
 //   gradMid   watch tier (70-84 %)
-//   gradHigh  alert tier (>= 85 %), and effort `low`
+//   gradHigh  alert tier (>= 85 %), and effort below its cutoff or without a known order
 //   add / del / track   git: staged and ahead / modified and behind / untracked
 export const PALETTES: Record<string, Record<TokenName, string>> = {
   // cool slate with cyan-teal accents (Nord / Tokyo Night family)

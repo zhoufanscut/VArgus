@@ -17,37 +17,47 @@ export function restoreFooter(items: FooterSelection): string {
   return selection.length ? '/statusline ' + selection.join(' ') : clearFooter
 }
 
+type SavedFooterSettings = { selection: FooterSelection; modelCatalog: string | null }
+
 // Read effective saved layers through Codex's own parser. No config write, thread
 // creation, model request, or dependence on a second TOML parser.
-export async function savedFooter(cwd: string): Promise<FooterSelection> {
-  const result = await codexRead('config/read', { includeLayers: false, cwd }, cwd)
+export async function savedFooterSettings(cwd: string, home?: string): Promise<SavedFooterSettings> {
+  const result = await codexRead('config/read', { includeLayers: false, cwd }, cwd, home)
   const items = result?.config?.tui?.status_line ?? null
   if (items !== null && (!Array.isArray(items) || !items.every((item: unknown) => typeof item === 'string'))) throw new Error('Codex returned an unsupported footer configuration.')
-  return items
+  return { selection: items, modelCatalog: result?.config?.model_catalog_json ?? null }
+}
+
+export async function savedFooter(cwd: string): Promise<FooterSelection> {
+  return (await savedFooterSettings(cwd)).selection
 }
 
 // Warm each workspace before inspecting the pane. A first child visit must not
 // wait for config/read while its initially visible agent label can be clipped.
 export class FooterSettings {
-  private values = new Map<string, FooterSelection>()
+  private values = new Map<string, SavedFooterSettings>()
   private errors = new Map<string, Error>()
-  private load: typeof savedFooter
-  constructor(load = savedFooter) { this.load = load }
+  private load: typeof savedFooterSettings
+  constructor(load = savedFooterSettings) { this.load = load }
   reset(): void { this.values.clear(); this.errors.clear() }
   async preload(cwds: Iterable<string>): Promise<void> {
     for (const cwd of new Set(cwds)) {
       if (this.values.has(cwd)) continue
       try {
-        const selection = await this.load(cwd)
-        restoreFooter(selection)
-        this.values.set(cwd, selection)
+        const settings = await this.load(cwd)
+        restoreFooter(settings.selection)
+        this.values.set(cwd, settings)
         this.errors.delete(cwd)
       } catch (error) { this.errors.set(cwd, error as Error) }
     }
   }
   get(cwd: string): FooterSelection {
-    if (!this.values.has(cwd)) throw this.errors.get(cwd) ?? new Error('Codex footer settings have not been preloaded for this workspace.')
-    return this.values.get(cwd)!
+    const settings = this.values.get(cwd)
+    if (!settings) throw this.errors.get(cwd) ?? new Error('Codex footer settings have not been preloaded for this workspace.')
+    return settings.selection
+  }
+  modelCatalog(cwd: string): string | null | undefined {
+    return this.values.get(cwd)?.modelCatalog
   }
 }
 

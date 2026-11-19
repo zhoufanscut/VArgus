@@ -4,6 +4,7 @@ import { open, readdir, realpath } from 'node:fs/promises'
 import { join, relative, isAbsolute, sep } from 'node:path'
 import { codexRead } from './read.ts'
 import { CodexCollector } from './collect.ts'
+import type { ModelDefault } from './model-defaults.ts'
 import { SkillLoads } from './skills.ts'
 import type { Usage } from './protocol.ts'
 
@@ -63,8 +64,11 @@ export class RolloutReader {
   private historyError: string | undefined
   private file: string
   private thread: string
-  constructor(file: string, thread: string, cwd: string, home: string) {
+  private modelProvider: string | undefined
+  private modelDefault: ModelDefault | undefined
+  constructor(file: string, thread: string, cwd: string, home: string, modelDefault?: ModelDefault) {
     this.file = file; this.thread = thread
+    this.modelDefault = modelDefault
     this.collector = new CodexCollector(cwd, home)
   }
 
@@ -97,6 +101,7 @@ export class RolloutReader {
         this.historyStart = p.subagent_history_start_ordinal
       }
       this.collector.start(p.cwd, Date.parse(p.timestamp ?? record.timestamp!) / 1000)
+      this.modelProvider = p.model_provider
       this.selected = true
     }
     if (!this.selected) return
@@ -113,6 +118,7 @@ export class RolloutReader {
       const settings = record.type === 'turn_context' ? p : p.thread_settings
       if (record.type === 'event_msg') {
         v.session.fast = settings.service_tier === 'priority' || settings.service_tier === 'fast'
+        if (typeof settings.model_provider_id === 'string') this.modelProvider = settings.model_provider_id
       } else if (settings.model !== v.session.model) {
         // turn_context has no tier: keep it for the same model, clear on a switch.
         v.session.fast = undefined
@@ -166,5 +172,11 @@ export class RolloutReader {
         }
       }
     } finally { await file.close() }
+    const v = this.collector.snapshot()
+    if (v) {
+      const { session } = v
+      session.defaultEffort = this.modelProvider === 'openai' && session.model
+        ? await this.modelDefault?.(session.model, v.core.cwd) : undefined
+    }
   }
 }

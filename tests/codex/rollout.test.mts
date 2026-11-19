@@ -9,6 +9,11 @@ import { pathToFileURL } from 'node:url'
 import fs from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 import { RolloutReader, findRollout } from '../../src/hosts/codex/rollout.ts'
+import { cachedModelDefault } from '../../src/hosts/codex/model-defaults.ts'
+import { FooterSettings } from '../../src/hosts/codex/footer.ts'
+import { codexLine } from '../../src/cli/codex/line.ts'
+import { resolveCodexOptions } from '../../src/hosts/codex/options.ts'
+import { makeTheme } from '../../src/theme/index.ts'
 
 const meta = { type: 'session_meta', payload: { id: 'thread-a', cwd: '/repo', timestamp: '2026-11-08T05:41:17Z' } }
 const amount = { input_tokens: 42424, cached_input_tokens: 40000, output_tokens: 777, total_tokens: 43201 }
@@ -57,6 +62,72 @@ test('rollout polling waits for complete UTF-8 JSONL records and selects the exa
     await appendFile(file, JSON.stringify(count) + '\n'); await r.poll()
     assert.equal(r.collector.snapshot()!.session.counts.tokens, 3201)
     await writeFile(file, ''); await assert.rejects(r.poll(), /replaced/)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('Codex effort colour follows the exact model in the current local catalog', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-model-default-'))
+  try {
+    const file = join(dir, 'rollout.jsonl'), catalog = join(dir, 'models_cache.json')
+    const theme = makeTheme('graphite', false)
+    const r = new RolloutReader(file, 'thread-a', '/repo', dir, cachedModelDefault(dir, () => null))
+    const options = resolveCodexOptions({ repo: false, branch: false, status: false })
+    const line = codexLine(r.collector, options, theme)
+    const calm = theme.paint('label', 'sol:') + theme.paint('gradLow', 'low')
+    const alert = theme.paint('label', 'sol:') + theme.paint('gradHigh', 'low')
+    const saveCatalog = (originalSol: string) => writeFile(catalog, JSON.stringify({ models: [
+      { slug: 'gpt-6.1-sol', default_reasoning_level: 'low' },
+      { slug: 'gpt-6-sol', default_reasoning_level: originalSol },
+    ] }))
+    await saveCatalog('medium')
+    const first = { ...meta, payload: { ...meta.payload, model_provider: 'openai' } }
+    await writeFile(file, [first, settings].map(record => JSON.stringify(record) + '\n').join(''))
+    await r.poll()
+    assert.ok((await line(200)).includes(calm))
+    await appendFile(file, JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-6-sol', cwd: '/repo', effort: 'low' } }) + '\n')
+    await r.poll()
+    assert.ok((await line(200)).includes(alert))
+    await saveCatalog('low')
+    await r.poll()
+    assert.ok((await line(200)).includes(calm))
+    await rm(catalog)
+    await r.poll()
+    assert.ok((await line(200)).includes(alert))
+    await saveCatalog('low')
+    await appendFile(file, JSON.stringify({ ...settings, payload: { ...settings.payload,
+      thread_settings: { ...settings.payload.thread_settings, model_provider_id: 'local_mock' } } }) + '\n')
+    await r.poll()
+    assert.ok((await line(200)).includes(alert))
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('Codex uses a configured catalog for the saved workspace before the home cache', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-model-catalog-'))
+  try {
+    const file = join(dir, 'rollout.jsonl'), catalog = join(dir, 'configured.json')
+    const model = 'gpt-6.1-sol'
+    const models = (effort: string) => JSON.stringify({ models: [{ slug: model, default_reasoning_level: effort }] })
+    await writeFile(join(dir, 'models_cache.json'), models('low'))
+    await writeFile(catalog, models('xhigh'))
+    const footer = new FooterSettings(async cwd => ({ selection: null, modelCatalog: cwd === '/custom' ? catalog : null }))
+    await footer.preload(['/repo', '/custom'])
+    const reader = new RolloutReader(file, 'thread-a', '/repo', dir,
+      cachedModelDefault(dir, cwd => footer.modelCatalog(cwd)))
+    const theme = makeTheme('graphite', false)
+    const options = resolveCodexOptions({ repo: false, branch: false, status: false })
+    const line = codexLine(reader.collector, options, theme)
+    const context = (cwd: string, effort: string) => JSON.stringify({ type: 'turn_context', payload: { model, cwd, effort } }) + '\n'
+    const first = { ...meta, payload: { ...meta.payload, model_provider: 'openai' } }
+    await writeFile(file, JSON.stringify(first) + '\n' + context('/repo', 'low'))
+    await reader.poll()
+    assert.ok((await line(200)).includes(theme.paint('gradLow', 'low')))
+    await appendFile(file, context('/custom', 'high'))
+    await reader.poll()
+    assert.ok((await line(200)).includes(theme.paint('gradHigh', 'high')))
+    await rm(catalog)
+    await appendFile(file, context('/custom', 'low'))
+    await reader.poll()
+    assert.ok((await line(200)).includes(theme.paint('gradHigh', 'low')))
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 

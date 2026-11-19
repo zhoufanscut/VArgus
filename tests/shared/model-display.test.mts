@@ -22,24 +22,26 @@ function codexInput(v: Values, o: CodexOptions = defaults, t = plain) {
   return { v, display: codexDisplay(v.session, o), o, l: en, t, now: 0 }
 }
 
-test('effort uses flat alert, middle and calm tiers in each palette', () => {
+test('each palette uses calm at or above the model default or high cutoff', () => {
   const collector = new CodexCollector('/repo', '/home/u')
   collector.start('/repo', 0)
   const v = collector.snapshot()!
   v.session.model = 'gpt-6.1-sol'
   for (const name of Object.keys(PALETTES)) {
     const t = makeTheme(name, false)
-    for (const [effort, color] of [
-      ['low', t.rgb.gradHigh], ['medium', t.rgb.gradMid], ['high', t.rgb.gradLow],
-      ['xhigh', t.rgb.gradLow], ['max', t.rgb.gradLow], ['HIGH', t.rgb.gradLow],
-      ['odd', t.rgb.gradLow], [4096, t.rgb.gradLow],
+    for (const [effort, defaultEffort, color] of [
+      ['low', 'low', t.rgb.gradLow], ['medium', 'medium', t.rgb.gradLow], ['high', 'xhigh', t.rgb.gradHigh],
+      ['low', 'medium', t.rgb.gradHigh], ['HIGH', 'medium', t.rgb.gradLow], ['ultra', 'max', t.rgb.gradLow],
+      ['medium', undefined, t.rgb.gradHigh], ['high', undefined, t.rgb.gradLow],
+      ['xhigh', undefined, t.rgb.gradLow], ['max', undefined, t.rgb.gradLow], ['ultra', undefined, t.rgb.gradLow],
+      ['odd', 'medium', t.rgb.gradHigh], [4096, 'medium', t.rgb.gradHigh],
     ] as const) {
-      assert.deepEqual(effortColor(t, effort), color, `${name}: ${effort}`)
+      assert.deepEqual(effortColor(t, effort, defaultEffort), color, `${name}: ${effort} with default ${defaultEffort}`)
       v.session.effort = effort
+      v.session.defaultEffort = defaultEffort
       assert.equal(model(codexInput(v, defaults, t)),
         t.paint('label', 'sol:') + t.paint(color, String(effort).toLowerCase()))
     }
-    assert.deepEqual(effortColor(t, undefined), t.rgb.gradLow)
   }
 })
 
@@ -75,6 +77,7 @@ test('Fast mode stays beside the model when effort is hidden or unavailable', ()
   collector.start('/repo', 0)
   const v = collector.snapshot()!
   v.session.model = 'gpt-6.1-sol'; v.session.effort = 'max'
+  v.session.defaultEffort = 'low'
   assert.equal(model(codexInput(v)), 'sol:max')
   v.session.fast = true
   assert.equal(model(codexInput(v)), 'sol:max(fast)')
@@ -136,6 +139,7 @@ test('OmO speed suffixes follow effort and stay visible when effort is hidden', 
   }
   v.session.model = 'gpt-6.1-sol-ultrafast'
   v.session.effort = 'high'
+  v.session.defaultEffort = 'high'
   v.session.fast = true
   const t = makeTheme('graphite', false)
   assert.equal(model({ ...input(), t }),

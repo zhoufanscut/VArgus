@@ -51,6 +51,14 @@ export type AntigravityEnv = {
 }
 
 const EFFORT_IN_LABEL = /\((low|medium|high|xhigh|max)\)\s*$/i
+// Google's model guide explicitly names High as the default for these two models.
+const HIGH_DEFAULT_MODEL = /^gemini-4-(?:neon|hydrogen)(?:-(?:low|medium|high|xhigh|max))?$/
+
+function antigravityDefaultEffort(model: unknown): string | undefined {
+  if (typeof model !== 'string') return undefined
+  const id = model.replace(EFFORT_IN_LABEL, '').trim().toLowerCase().replace(/\s+/g, '-')
+  return HIGH_DEFAULT_MODEL.test(id) ? 'high' : undefined
+}
 
 function extractModelAndEffort(raw: AntigravityPayload['model']): { model: string | undefined; effort: string | undefined } {
   if (typeof raw === 'string') {
@@ -170,6 +178,8 @@ export function collectAntigravityPayload(payload: AntigravityPayload, env: Anti
   const { model, effort } = extractModelAndEffort(payload.model)
   session.model = model
   session.effort = effort
+  const id = typeof payload.model === 'object' ? payload.model?.id : undefined
+  session.defaultEffort = antigravityDefaultEffort(id) ?? antigravityDefaultEffort(model)
 
   const cw = payload.context_window
   if (cw && typeof cw === 'object' && typeof cw.context_window_size === 'number' && cw.context_window_size > 0) {

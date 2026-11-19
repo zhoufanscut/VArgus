@@ -7,6 +7,8 @@ export type SessionValues = {
   model: string | undefined
   // Effective main-thread effort; undefined before the host supplies it.
   effort: string | number | undefined
+  // Default effort for the model that supplied the effective effort.
+  defaultEffort?: string
   // Recorded Fast-mode selection; undefined before the host supplies it.
   fast: boolean | undefined
   // Host context percent, 0-100; undefined before a reading.

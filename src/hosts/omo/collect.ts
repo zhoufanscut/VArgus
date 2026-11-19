@@ -132,6 +132,7 @@ export function collectOmo(
   session.counts = { ...history.counts }
   session.model = ctx.model?.id
   session.effort = ctx.thinkingLevel
+  session.defaultEffort = ctx.model?.defaultThinkingLevel
   const startedAt = Date.parse(ctx.sessionManager.getHeader()?.timestamp ?? '')
   if (Number.isFinite(startedAt)) session.startedAt = startedAt
   const context = ctx.getContextUsage()

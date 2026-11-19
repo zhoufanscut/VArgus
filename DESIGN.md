@@ -893,6 +893,18 @@ recorded settings. The local model catalog checked on 2026-11-08 contains those
 five IDs, and the official [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
 gives `gpt-6.1-sol` as its ID.
 
+For an `openai` thread, the row looks up `default_reasoning_level` by exact
+`slug`. `session_meta.model_provider` and
+`thread_settings_applied.thread_settings.model_provider_id` identify the
+provider. The workspace's existing `config/read` supplies the configured
+`model_catalog_json` path, with `CODEX_HOME/models_cache.json` used when the
+saved configuration specifies no catalog. An unavailable config reading,
+selected catalog, or catalog entry leaves the default unknown. The worker reuses each
+parsed file revision across its views. The local 0.169.1 cache put `gpt-6.1-sol`
+at `low` and `gpt-6-sol` at `medium`, so the displayed family name cannot supply
+the baseline. In an isolated 0.169.1 probe, `model/list` returned the configured
+`high` default for `gpt-6.1-sol` while the home cache held `low`. [Codex model metadata](https://github.com/openai/codex/blob/e58bf8f523/codex-rs/protocol/src/openai_models.rs)
+
 Recorded Fast selection adds a faint `(fast)` suffix to the same fragment:
 `sol:max(fast)`, or `sol(fast)` with effort hidden/unavailable. It has no separate
 option and is visible by default. In checked Codex source `8703d32bd0`,
@@ -1002,6 +1014,9 @@ Reducer state belongs to the session manager; entry IDs prevent replay duplicati
 
 Model, effective effort and context come from `ctx.model`, `ctx.thinkingLevel`
 and `ctx.getContextUsage()`. Missing/null context stays unknown and is omitted.
+When supplied, `ctx.model.defaultThinkingLevel` is the baseline for effort
+colour. The Senpi `Model` type declares it as `defaultThinkingLevel?: ModelThinkingLevel`,
+and `ExtensionContext.model` exposes the active model. [Senpi model defaults](https://github.com/code-yeongyu/senpi/blob/main/packages/coding-agent/docs/models.md#default-thinking-level)
 OmO names omit versions. The named families fable, opus, sonnet, haiku, sol, terra,
 luna, astra and argon retain their names; other model IDs use their family stem
 (glm, kimi, grok, qwen, deepseek, etc.). Bare Kimi coding IDs such as `k3.1-pro`
@@ -1169,6 +1184,9 @@ Data sources and caching in `src/hosts/antigravity/`:
   `authenticating` frames `agy` 1.5.8 omits `model.effort` while `display_name` already has
   `(High)`; inferring only `(low|medium|high|xhigh|max)` prevents startup flicker without
   mistaking `(Carbon)` or `(Argon)` for effort.
+- **Model default effort** comes from Google's model guide for Gemini 4 Neon and
+  Hydrogen, which both default to `high`. The collector matches their full labels
+  and slugs. Other defaults are unknown. [Statusline schema](https://antigravity.google/docs/cli/statusline#available-json-fields) · [Google model guide](https://antigravity.google/docs/models#select-a-model)
 - **Quota buckets (`collect.ts`)**: `agy --output-format json -p /usage` and live
   `statusLine` payloads on 1.5.8 expose two shared groups: `"Gemini Models"` (`gemini-5h`,
   `gemini-weekly`) and `"Claude and GPT models"` (`3p-5h`, `3p-weekly`), each with
@@ -1360,6 +1378,12 @@ text in the line file. The reader prints it on Claude Code's next status-line ru
 | git | `$.session.repo()` (in a repo or not, and the remote URL: the push URL when one is set, where VantageHUD read the fetch URL), then `git rev-parse --absolute-git-dir` and `git status --porcelain=v2 --branch` with `GIT_OPTIONAL_LOCKS=0` (no `index.lock` against the person's own git) and `-c core.fsmonitor=false` (a repo's config could start a hook program or a daemon); the host runs git with repo hooks off. Detached-HEAD naming and the operation are read from files, the naming only with the `detachedHead` option on. Read at session start, after a file-changing tool (`Bash`, `Edit`, `Write`, `NotebookEdit`, `EnterWorktree`, `ExitWorktree`) returns, and every 5 s otherwise; each walk holds off the next for 10× its length (VantageHUD did so for walks of 1 s or more). `git status` took a median 2.7 ms on this repo (17 files) and 75.9 ms on a 9,227-file repo (git 2.47.3, 2026-10-15), so the 5 s poll costs about 1.5 % of a core on the larger | types; timing measured |
 | svn | `svn --non-interactive info --xml` and `status --xml` (no `-u`), only when the folder is not in a git worktree; the working copy found by `.svn` upward from the resolved folder. Same 5 s poll and hold-off as git, where VantageHUD kept a 30 s memo checked against `wc.db`: a 510 ms walk (VantageHUD's figure for a 96k-file checkout) would cost about 9 % of a core | types; no svn on the dev machine: the XML in the tests is written to svn's documented shape, never run |
 | Clock-driven fragments (countdowns, session time) | `$.clock.every(1000)`, which keeps running between turns (mods/api: "keeps running between turns and doesn't start one") | docs |
+
+Effort colour compares the main step's effort with the documented built-in
+default for its model ID. In Claude Code 2.1.323, `TurnStepInput.model` names the
+request's model "as the engine resolved it for this step". Recognised Claude IDs
+use the published values, including `medium` for Opus 5.5 and `xhigh` for Opus
+4.7. Other IDs leave the default unknown. [Claude Code model configuration](https://code.claude.com/docs/en/model-config#adjust-effort-level)
 
 ### When the line is written
 
@@ -1688,11 +1712,10 @@ cat "<data>/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null
 ## Colours
 
 - Every colour is a theme token written as a 24-bit SGR sequence (`ESC[38;2;r;g;bm`).
-- Effort uses flat theme tiers: `low` → alert (`gradHigh`), `medium` → middle
-  (`gradMid`), and `high`, `xhigh`, `max` → calm (`gradLow`). The maintainer chose
-  to keep higher efforts at the same calm colour instead of interpolating between
-  tiers. Unknown levels and numeric budgets also use calm; a hidden or unavailable
-  effort leaves the model name alone in calm.
+- Effort uses the model's default as its cutoff, or `high` when the default is
+  unknown. Use Calm (`gradLow`) at or above the cutoff and Alert (`gradHigh`)
+  below it or for values that cannot be compared. A model name displayed by
+  itself uses Calm.
 - `NO_COLOR` set and non-empty in the mod's env: no colour codes at all (no-color.org).
 - Every fragment's text has control characters (C0, C1, DEL), ESC included, replaced with `?`
   before the colour codes go on. VantageHUD's `cleanText` (`sanitize.js`, used by `render.js`)

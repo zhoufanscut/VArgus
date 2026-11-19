@@ -17,7 +17,12 @@ export type HistoryReducer<S> = {
 export type NativeContext = {
   readonly mode: string
   readonly cwd: string
-  readonly model: { readonly id: string; readonly provider: string; readonly name?: string } | undefined
+  readonly model: {
+    readonly id: string
+    readonly provider: string
+    readonly name?: string
+    readonly defaultThinkingLevel?: string
+  } | undefined
   readonly thinkingLevel?: string
   readonly sessionManager: {
     getSessionId(): string
