@@ -1,5 +1,5 @@
 #!/bin/sh
-# The statusLine commands from README.md, run against line files in a test home.
+# The statusLine commands from the Claude setup guide, run in a test home.
 # Run: sh tests/claude/reader.test.sh   (exits 1 on a failure)
 set -u
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -9,14 +9,14 @@ fail() { echo "FAIL: $*"; fails=$((fails + 1)); }
 cmd='cat "$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null'
 cmd2='f="$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line"; [ -n "$(find "$f" -mmin -2 2>/dev/null)" ] && cat "$f"'
 
-node --input-type=module - "$root/README.md" "$cmd" "$cmd2" <<'JS' || exit 1
+node --input-type=module - "$root/docs/setup-claude.md" "$cmd" "$cmd2" <<'JS' || exit 1
 import { readFileSync } from "node:fs"
 const [file, ...commands] = process.argv.slice(2)
-const readme = readFileSync(file, "utf8")
+const guide = readFileSync(file, "utf8")
 for (const command of commands) {
   const entry = '"command": ' + JSON.stringify(command) + ','
-  if (!readme.includes(entry)) {
-    console.error("FAIL: README is missing " + entry)
+  if (!guide.includes(entry)) {
+    console.error("FAIL: " + file + " is missing " + entry)
     process.exitCode = 1
   }
 }

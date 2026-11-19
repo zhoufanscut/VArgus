@@ -116,7 +116,7 @@
     "blankStopped": {
       "type": "boolean",
       "title": "Blank a stopped line",
-      "description": "Rewrite the line every 30 s so the status line can go blank when the plugin stops mid-session. After changing this option, update the statusLine command using the Claude Code setup in README.md.",
+      "description": "Rewrite the line every 30 s so the status line can go blank when the plugin stops mid-session. After changing this option, update the statusLine command using docs/setup-claude.md.",
       "default": false
     }
   }

@@ -12,24 +12,31 @@ Notable changes to this project. The format follows
   and preserves any existing custom status line.
 - `vargus install claude` installs the plugin at user scope and configures the
   inline status line from a terminal.
+- `vargus install codex` adds automatic startup hooks to the selected Codex home.
+- OmO setup accepts a JSON options file with `--config FILE`. Saved session
+  overrides take precedence over values from the file.
 
 ### Changed
 
 - Setup commands put the action first. Update scripts to use `vargus install HOST`
   and `vargus remove HOST`. Terminal removal is supported for Codex and OmO.
+- Effort uses the theme's Calm colour at or above the model's default and Alert
+  below it. When the model default is unavailable, `high` is the cutoff.
 - OmO displays `deepseek-v4-flash` as `deepseek` and `deepseek-v4-pro` as
   `deepseek-pro`. It recognizes Bedrock prefixes and keeps unfamiliar IDs whole.
 
 ### Fixed
 
 - OmO shows the `(fast)` marker for Venice's Kimi K3 Fast model ID.
+- Codex side chats opened with `/btw` or `/side` keep the last confirmed readings
+  visible. Live readings resume on return to a recognized saved conversation.
 
 ### Removed
 
 - Claude Code's optional Detail view and its `/vargus` command. VArgus ignores
   the old `detailView` setting and keeps the saved status-line options.
 - The bundled `vargus-setup` skill. Use `vargus install claude` for user-scope
-  setup or follow the manual Claude setup and uninstall instructions in README.md.
+  setup or follow the [Claude guide](docs/setup-claude.md) for manual setup and removal.
 
 ## [0.6.0] - 2026-11-14
 
