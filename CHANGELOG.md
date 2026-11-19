@@ -6,6 +6,8 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-19
+
 ### Added
 
 - `vargus install antigravity` configures the native status line from a terminal
@@ -23,7 +25,8 @@ Notable changes to this project. The format follows
 - Effort uses the theme's Calm colour at or above the model's default and Alert
   below it. When the model default is unavailable, `high` is the cutoff.
 - OmO displays `deepseek-v4-flash` as `deepseek` and `deepseek-v4-pro` as
-  `deepseek-pro`. It recognizes Bedrock prefixes and keeps unfamiliar IDs whole.
+  `deepseek-pro`. It recognizes Bedrock prefixes and preserves unfamiliar model
+  names, displaying recognized speed suffixes separately.
 
 ### Fixed
 
@@ -31,7 +34,8 @@ Notable changes to this project. The format follows
 - Codex side chats opened with `/btw` or `/side` keep the last confirmed readings
   visible. Live readings resume on return to a recognized saved conversation.
 - Codex keeps showing the active conversation's readings when its agent label
-  is right-aligned beside the native shortcut hints.
+  is right-aligned beside the native shortcut hints or followed by the context
+  percentage while typing a draft.
 - On Linux, `!vargus off` can clear an abandoned tmux row even while the exited
   helper is still listed in the process table.
 
@@ -371,7 +375,8 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
-[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/zhoufanscut/VArgus/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/zhoufanscut/VArgus/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zhoufanscut/VArgus/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/zhoufanscut/VArgus/compare/v0.4.3...v0.4.4
