@@ -61,7 +61,8 @@ describe('options and labels', () => {
     assert.deepEqual(resolveOptions({ spendLimit: true, theme: 'ember', folder: 'no' }), {
       ...DEFAULTS, spendLimit: true, theme: 'ember',
     })
-    assert.equal(DEFAULTS.spendLimit || DEFAULTS.otherModelWeekly || DEFAULTS.workflowRuns || DEFAULTS.detachedHead, false)
+    assert.equal(DEFAULTS.spendLimit || DEFAULTS.otherModelWeekly || DEFAULTS.detachedHead, false)
+    assert.equal(Object.hasOwn(resolveOptions({ workflowRuns: true }), 'workflowRuns'), false)
   })
 
   test('an unknown language tag, constructor included, falls back to English', () => {

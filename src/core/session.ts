@@ -1,5 +1,5 @@
 // Shared session values. Hosts own the source and lifetime of these readings.
-export type Counts = { tokens: number; tools: number; agents: number; skills: number; workflows: number }
+export type Counts = { tokens: number; tools: number; agents: number; skills: number }
 
 
 export type SessionValues = {
@@ -25,8 +25,9 @@ export type SessionValues = {
 }
 
 
-export function zero(): Counts {
-  return { tokens: 0, tools: 0, agents: 0, skills: 0, workflows: 0 }
+export function initialCounts(saved?: Partial<Counts>): Counts {
+  const { tokens = 0, tools = 0, agents = 0, skills = 0 } = saved ?? {}
+  return { tokens, tools, agents, skills }
 }
 
 
@@ -34,6 +35,6 @@ export function initialSession(): SessionValues {
   return {
     model: undefined, effort: undefined, fast: undefined, contextPercent: undefined, contextTokens: undefined,
     contextWindow: undefined, startedAt: undefined, compactPending: false,
-    counts: zero(),
+    counts: initialCounts(),
   }
 }

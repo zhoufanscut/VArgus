@@ -6,6 +6,10 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+### Removed
+
+- The workflow run counter and its `workflowRuns` setting.
+
 ## [0.7.0] - 2026-11-19
 
 ### Added

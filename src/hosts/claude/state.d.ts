@@ -7,7 +7,6 @@ export type VargusCounts = {
   tools: number
   agents: number
   skills: number
-  workflows: number
 }
 
 declare module 'claude-code' {

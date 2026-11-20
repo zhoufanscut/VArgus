@@ -148,9 +148,8 @@ The explicit file accepts JSON or JSONC and uses the keys and defaults in
   buckets; Claude and GPT models show the `"Claude and GPT models"` `5h:` and `7d:` buckets.
   Setting `"otherModelWeekly": true` also shows the non-active group's weekly bucket (`3p:`
   or `gm:`) once it reaches 80% used.
-- **Call counts**: `🔧` counts `tool_calls`, `🤖` counts `invoke_subagent` and `swarm` `add`
-  spawns, `⚡` counts Antigravity `SKILL.md` reads once per skill path per user turn, and
-  `"workflowRuns": true` adds `🔀` for `run_workflow` calls.
+- **Call counts** show `🔧` for `tool_calls`, `🤖` for `invoke_subagent` and `swarm` `add`
+  spawns, and `⚡` for Antigravity `SKILL.md` reads once per skill path per user turn.
 - **Git & colours**: `"detachedHead": true` names detached tags/commits and rebase/merge
   operations; setting `repo`, `branch` and `status` all to `false` disables Git checks;
   setting `NO_COLOR` in the shell environment disables ANSI colours.
@@ -177,7 +176,7 @@ takes effect immediately on the next status-line update with no restart.
 Antigravity CLI reads live model, context and quota fields from `agy`'s `statusLine`
 JSON input and incrementally replays the active conversation's `transcript.jsonl`
 for session age, uncached input plus output tokens, and tool, subagent (`invoke_subagent`,
-`swarm` `add`), workflow (`run_workflow`) and skill (`SKILL.md` reads) counts. Subagent
+`swarm` `add`) and skill (`SKILL.md` reads) counts. Subagent
 conversations have separate transcripts and are not summed into the parent's `token:`.
 
 Live rendering checks used `agy` 1.5.8 on Linux on 2026-11-14. The macOS `agy` 1.5.9

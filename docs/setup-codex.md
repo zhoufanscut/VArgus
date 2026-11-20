@@ -218,7 +218,7 @@ Without the optional startup hook, after `/new` or `/resume` run `!vargus on` ag
 to bind the new conversation. Its token total covers recorded uncached input and output.
 Tool counts replay completed visible items and exclude `!` controls. `🤖2` counts
 recorded subagent starts in the displayed conversation; `⚡3` counts observed skill
-loads, once per skill path per user turn. Workflow counts are omitted. Missing readings stay hidden.
+loads, once per skill path per user turn. Missing readings stay hidden.
 Live readings come from saved transcripts and update as Codex writes them.
 Model and effort picks appear once recorded.
 For paginated subagent logs with Codex's recorded history boundary, VArgus skips

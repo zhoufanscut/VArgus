@@ -1,13 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
-import { appendFile, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { fixtureCheckout } from '../checkout.mts'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { renderAntigravityStatusLine } from '../../src/cli/antigravity.ts'
 import { collectAntigravityPayload, type AntigravityPayload } from '../../src/hosts/antigravity/collect.ts'
+import { cachePath } from '../../src/hosts/antigravity/cache.ts'
 import {
   readTranscriptState,
   resolveContainedTranscriptCandidate,
@@ -234,7 +235,7 @@ test('resolveTranscriptPath handles Antigravity 1.5.8 antigravity-vs-antigravity
   }
 })
 
-test('readTranscriptState incrementally counts uncached tokens, tools, agents, workflows and Antigravity skills', async () => {
+test('readTranscriptState incrementally counts uncached tokens, tools, agents and Antigravity skills', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vargus-agy-transcript-'))
   try {
     const cacheDir = join(root, 'cache')
@@ -305,9 +306,15 @@ test('readTranscriptState incrementally counts uncached tokens, tools, agents, w
       tools: 5,
       agents: 1,
       skills: 1,
-      workflows: 1,
     })
     assert.equal(s1.mutatingToolsSeen, 0)
+
+    // Resume a cache written by a version that tracked workflow runs.
+    const cacheFile = cachePath(cacheDir, 'transcript', transcript)
+    const cached = JSON.parse(await readFile(cacheFile, 'utf8'))
+    cached.counts.workflows = 1
+    await writeFile(cacheFile, JSON.stringify(cached))
+    assert.deepEqual((await readTranscriptState(transcript, cacheDir, ctx)).counts, s1.counts)
 
     // Append an incomplete line without trailing newline: held back until `\n` arrives.
     const partialStep = JSON.stringify({
@@ -359,7 +366,6 @@ test('readTranscriptState incrementally counts uncached tokens, tools, agents, w
       tools: 5 + 11,
       agents: 1 + 2,
       skills: 1 + 8,
-      workflows: 1,
     })
     assert.equal(s2.mutatingToolsSeen, 1)
 
@@ -378,14 +384,14 @@ test('readTranscriptState incrementally counts uncached tokens, tools, agents, w
     ].join('\n') + '\n'
     await writeFile(transcript, rewound)
     const sRewound = await readTranscriptState(transcript, cacheDir, ctx)
-    assert.deepEqual(sRewound.counts, { tokens: 900, tools: 0, agents: 0, skills: 0, workflows: 0 })
+    assert.deepEqual(sRewound.counts, { tokens: 900, tools: 0, agents: 0, skills: 0 })
     assert.equal(sRewound.mutatingToolsSeen, 0)
 
     // Replacing the transcript with a new conversation resets from byte 0.
     await writeFile(transcript, JSON.stringify({ step_index: 0, type: 'USER_INPUT', created_at: '2026-11-14T01:00:00Z' }) + '\n')
     const sReset = await readTranscriptState(transcript, cacheDir, ctx)
     assert.equal(sReset.startedAt, Date.parse('2026-11-14T01:00:00Z'))
-    assert.deepEqual(sReset.counts, { tokens: 0, tools: 0, agents: 0, skills: 0, workflows: 0 })
+    assert.deepEqual(sReset.counts, { tokens: 0, tools: 0, agents: 0, skills: 0 })
   } finally {
     await rm(root, { recursive: true, force: true })
   }

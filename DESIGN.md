@@ -81,11 +81,10 @@ can exceed 100%. Each host decides which readings are current, stale or absent.
 
 [Shared defaults](src/options.ts) and the Claude manifest agree on picker keys
 and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
-Existing optional spend, other-model weekly, workflow,
-detached-HEAD and stopped-line options default off. Codex resolves its
-[extra options](src/hosts/codex/options.ts) separately. Its agent count, skill
-count and installed startup hooks default on. Explicit activation or hook
-installation enables its tmux integration.
+The spend, other-model weekly, detached-HEAD and stopped-line options default
+off. Codex resolves its [extra options](src/hosts/codex/options.ts)
+separately. Its agent count, skill count and installed startup hooks default on.
+Explicit activation or hook installation enables its tmux integration.
 
 The recommended install runs from one checkout. Its optional
 [`vargus.jsonc`](README.md#shared-configuration) supplies shared values, with
@@ -306,7 +305,7 @@ Tools count completed visible items and exclude user-shell controls. Agents
 count recorded starts. [Skill counting](src/hosts/codex/skills.ts) uses marked
 instruction injections or successful recognised reads of catalogued
 `SKILL.md` files, deduplicated by path and turn. Parent and child counts stay
-separate. Workflow counts are outside the saved-log collector.
+separate.
 
 ### Opt-in tmux row
 
@@ -349,9 +348,9 @@ subscriptions. Other native widgets and dialogs still belong to OmO.
 
 [History reducers](src/hosts/omo/collect.ts) fold persisted main-session
 assistant entries across branches and compaction history. Tokens sum
-uncached input and output. Tool counts use outer calls, agents use accepted
-task IDs, and workflow counts use distinct persisted notices. Skills lack a
-canonical load receipt. For a native assistant edit that copies usage,
+uncached input and output. Tool counts use outer calls, and agent counts use
+distinct task IDs from accepted spawns. Skills lack a canonical load receipt.
+For a native assistant edit that copies usage,
 registration writes a receipt naming the new entry. Older unobserved copies
 remain in the total, and equal usage amounts alone do not identify copies.
 
@@ -442,8 +441,9 @@ state shapes. [Mod reference](https://code.claude.com/docs/en/plugins/mods/refer
 
 - [Session collector](src/hosts/claude/collect/session.ts) sums uncached
   input plus output from `turn.step` usage, including observed subagents.
-  Main-loop `tool.call` events supply tool, Agent, Skill and Workflow starts.
-  Workflow resumes do not add another start.
+  Each main-loop `tool.call` increments the tool total. Calls to `Agent` and
+  `Skill` also increment their own totals. Claude Code 2.1.323 describes
+  `AgentLoop.agentId` as “absent on the main loop.”
 - `session.measure` supplies live context and engine limits. The collector
   reads `$.session.usage()` after main-loop steps for context. Main-thread
   compaction clears the old context until the next step. Clear and in-session
@@ -554,12 +554,14 @@ Use the [maintenance guide](docs/maintenance.md#development-checks) for
 commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
 
 - `npm run test:local` type-checks the Node graph and exercises shared rendering,
-  import boundaries, installers and local fixtures. It includes the psmux
-  command-contract fixtures.
+  import boundaries, installers and local fixtures. The Codex replay fixtures
+  check which counters belong to each thread. The suite also checks the psmux
+  command contract.
 - `npm test` adds native Codex and multiplexer integration tests through the
   [platform-aware runner](tests/run-node.mjs). Codex tests with a localhost
   provider exercise the stock engine, saved events and TUI. The supplied
-  responses test handling of provider data and tool calls. Model choice,
+  responses test handling of provider data and tool calls. The native skill
+  test checks a child thread's token, tool, agent and skill totals. Model choice,
   billing and different provider timing need their own evidence.
 - `npm run test:claude` validates the plugin, type-checks against generated
   types, runs Claude engine fixtures and checks the documented reader and

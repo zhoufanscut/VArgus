@@ -143,7 +143,7 @@ describe('session time', () => {
 })
 
 describe('call counts', () => {
-  const c = counts({ tools: 73, agents: 2, skills: 1, workflows: 3 })
+  const c = counts({ tools: 73, agents: 2, skills: 1 })
 
   test('emoji, zeros left out, all zero hidden; numbers in the label tone', () => {
     assert.equal(calls(input({ counts: c })), '🔧73 🤖2 ⚡1')
@@ -152,12 +152,7 @@ describe('call counts', () => {
     assert.equal(calls(input({ counts: counts({ tools: 1 }) }, {}, { color: true })), '🔧' + t.paint('label', '1'))
   })
 
-  test('workflow runs after the agents, only with the option on', () => {
-    assert.equal(calls(input({ counts: c }, { workflowRuns: true })), '🔧73 🤖2 🔀3 ⚡1')
-    assert.equal(calls(input({ counts: counts({ workflows: 3 }) })), null)
-  })
-
-  test('text on WSL: T:73 A:2 W:3 S:1', () => {
-    assert.equal(calls(input({ counts: c }, { workflowRuns: true }, { isWsl: true })), 'T:73 A:2 W:3 S:1')
+  test('text on WSL: T:73 A:2 S:1', () => {
+    assert.equal(calls(input({ counts: c }, {}, { isWsl: true })), 'T:73 A:2 S:1')
   })
 })

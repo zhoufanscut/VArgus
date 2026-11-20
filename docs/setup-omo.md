@@ -122,10 +122,8 @@ itself: copies made before installation or through another client without VArgus
 cannot be distinguished reliably and remain in the recorded total.
 Tools count persisted outer
 assistant tool calls; calls hidden inside `eval` are not added. Agents count distinct
-task IDs from accepted spawn results. Workflow counts, when `workflowRuns` is enabled,
-count distinct persisted DAG notices; a running workflow without a notice is not
-yet counted. Skill counts are unavailable and omitted: reading `SKILL.md` does not
-prove a skill was loaded.
+task IDs from accepted spawn results. Skill counts are omitted because a `SKILL.md`
+read alone does not establish a skill load.
 
 OmO shortens known models to labels such as `opus`, `sol`, `sol-pro`,
 and `nova-pro`. For example, `deepseek-v4-flash` displays `deepseek`

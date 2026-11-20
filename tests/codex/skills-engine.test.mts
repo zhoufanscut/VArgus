@@ -174,7 +174,7 @@ trust_level = "trusted"
     await childReader.poll(); await childReader.poll()
     const childValues = childReader.collector.snapshot()!
     assert.equal(childValues.session.model, 'gpt-6.1-sol')
-    assert.deepEqual(childValues.session.counts, { tokens: 4040, tools: 1, skills: 1, agents: 0, workflows: 0 })
+    assert.deepEqual(childValues.session.counts, { tokens: 4040, tools: 1, skills: 1, agents: 0 })
     await reader!.poll()
     assert.equal(reader!.collector.snapshot()!.session.counts.skills, 4)
     assert.equal(reader!.collector.snapshot()!.session.counts.agents, 1)

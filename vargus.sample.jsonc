@@ -10,7 +10,6 @@
   // "tokens": true,         // Show the session's token count.
   // "session": true,        // Show elapsed session time.
   // "callCounts": true,     // Show tool, agent and skill counts where available.
-  // "workflowRuns": false,  // Include workflow runs in the call counts where available.
 
   // Rate limits
   // "rateLimits": true,        // Show usage and reset times for available limits.

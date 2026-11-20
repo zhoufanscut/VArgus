@@ -11,7 +11,6 @@ export const en = {
   tool: 'T',
   agent: 'A',
   skill: 'S',
-  workflow: 'W',
   staged: '+',
   modified: '!',
   untracked: '?',

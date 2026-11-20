@@ -8,7 +8,6 @@ export const DEFAULTS = {
   tokens: true,
   session: true,
   callCounts: true,
-  workflowRuns: false,
   rateLimits: true,
   spendLimit: false,
   otherModelWeekly: false,

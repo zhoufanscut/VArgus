@@ -154,9 +154,9 @@ without a shared checkout or options file uses Claude's own plugin settings.
 Rate-limit API reads stop when `rateLimits` is off. Git/svn polling stops when
 `repo`, `branch` and `status` are all off.
 
-The spend limit (`spendLimit`), other models' weekly limits (`otherModelWeekly`),
-workflow runs (`workflowRuns`) and detached-HEAD naming (`detachedHead`) default
-to off. Sonnet's weekly `sn:` appears from 80% used; Opus's `op:` appears when
+The spend limit (`spendLimit`), other models' weekly limits (`otherModelWeekly`)
+and detached-HEAD naming (`detachedHead`) default to off.
+Sonnet's weekly `sn:` appears from 80% used. Opus's `op:` appears when
 reported. Other models' weekly limits use the same threshold when enabled.
 
 - **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only the usage

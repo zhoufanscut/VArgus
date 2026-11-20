@@ -1,7 +1,7 @@
 import { isRecentUsage, resetTime, type QuotaWindow } from '../../core/limits.ts'
 import { en, type Labels } from '../../i18n/en.ts'
 import { DEFAULTS } from '../../options.ts'
-import { initialSession, zero, type Counts } from '../../core/session.ts'
+import { initialCounts, initialSession, type Counts } from '../../core/session.ts'
 import type { Values } from '../../core/types.ts'
 import { initialVcs } from '../../core/vcs.ts'
 import type { AccountLimits, HistoryReducer, NativeContext } from './contracts.ts'
@@ -21,7 +21,6 @@ export type OmoHistory = {
   entries: Set<string>
   calls: Set<string>
   agents: Set<string>
-  workflows: Set<string>
   usage: Map<string, number>
   edits: Set<string>
 }
@@ -59,8 +58,8 @@ export const omoSettingsReducer: HistoryReducer<OmoSettings> = {
 // It covers every branch of this session, including pre-compaction history.
 export const omoHistoryReducer: HistoryReducer<OmoHistory> = {
   initial: () => ({
-    counts: zero(), entries: new Set(), calls: new Set(),
-    agents: new Set(), workflows: new Set(), usage: new Map(), edits: new Set(),
+    counts: initialCounts(), entries: new Set(), calls: new Set(),
+    agents: new Set(), usage: new Map(), edits: new Set(),
   }),
   add(state, entry) {
     if (state.entries.has(entry.id)) return state
@@ -105,14 +104,8 @@ export const omoHistoryReducer: HistoryReducer<OmoHistory> = {
           agent(state, details)
         }
       }
-    } else if (message.role === 'custom' && message.customType === 'omo-senpi.dag-run') {
-      // The host emits these notices for paused/terminal DAG runs. A running
-      // workflow with no persisted notice is unknown, rather than inferred.
-      const details = record(message.details)
-      if (typeof details?.runId === 'string' && details.runId) state.workflows.add(details.runId)
     }
     state.counts.agents = state.agents.size
-    state.counts.workflows = state.workflows.size
     // No canonical skill-load receipt is exposed by the established history
     // contract. Reading a file named SKILL.md does not establish a skill load.
     return state

@@ -6,7 +6,7 @@ import { initialSession } from '../../src/core/session.ts'
 import { displaySession, shortModelName } from '../../src/render/session.ts'
 import { initialVcs } from '../../src/core/vcs.ts'
 import { en, type Labels } from '../../src/i18n/en.ts'
-import { DEFAULTS, type Options } from '../../src/options.ts'
+import { DEFAULTS } from '../../src/options.ts'
 import { calls } from '../../src/render/fragments/calls.ts'
 import { context } from '../../src/render/fragments/context.ts'
 import { folder } from '../../src/render/fragments/folder.ts'
@@ -23,14 +23,14 @@ import { makeTheme } from '../../src/theme/index.ts'
 
 const marked = Object.fromEntries(Object.keys(en).map(k => [k, `⟦${k}⟧`])) as Labels
 
-function input(session: Partial<Values['session']>, o: Partial<Options> = {}, isWsl = false): FragmentInput {
+function input(session: Partial<Values['session']>, isWsl = false): FragmentInput {
   const v: Values = {
     core: { cwd: '/home/u/proj', home: '/home/u', columns: undefined, isWsl },
     session: { ...initialSession(), ...session },
     limits: [],
     vcs: initialVcs(),
   }
-  return { v, display: displaySession(v.session, shortModelName), o: { ...DEFAULTS, ...o }, l: marked, t: makeTheme('graphite', false), now: 3 * 3_600_000 }
+  return { v, display: displaySession(v.session, shortModelName), o: DEFAULTS, l: marked, t: makeTheme('graphite', false), now: 3 * 3_600_000 }
 }
 
 // What is left once the escapes, the marked labels, the data and the numbers
@@ -41,7 +41,7 @@ function leftover(text: string, data: string[]): string {
   return s.replace(/(\d+[dhm])+/g, '').replace(/\d+(\.\d+)?[kM]?/g, '')
 }
 
-const counts = { tokens: 69_500, tools: 73, agents: 2, skills: 1, workflows: 3 }
+const counts = { tokens: 69_500, tools: 73, agents: 2, skills: 1 }
 const cases: [string, Fragment, FragmentInput, string[], string[]][] = [
   ['folder', folder, input({}), ['~/proj'], []],
   ['model', model, input({ model: 'claude-opus-5-5[1m]', effort: 'high' }), ['opus', 'high'], []],
@@ -50,8 +50,8 @@ const cases: [string, Fragment, FragmentInput, string[], string[]][] = [
   ['context critical', context, input({ contextPercent: 90 }), [], ['context', 'critical']],
   ['tokens', tokens, input({ counts }), [], ['tokens']],
   ['session', session, input({ startedAt: 0 }), [], ['session']],
-  ['calls emoji', calls, input({ counts }, { workflowRuns: true }), [], []],
-  ['calls text', calls, input({ counts }, { workflowRuns: true }, true), [], ['tool', 'agent', 'workflow', 'skill']],
+  ['calls emoji', calls, input({ counts }), [], []],
+  ['calls text', calls, input({ counts }, true), [], ['tool', 'agent', 'skill']],
 ]
 
 describe('labels', () => {

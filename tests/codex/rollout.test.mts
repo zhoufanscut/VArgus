@@ -168,7 +168,7 @@ test('recorded subagent starts count once without changing tool totals or summin
   r.observe(item('failed', { type: 'CollabAgentToolCall', tool: 'spawn_agent', status: 'failed' }))
   r.observe(item('interaction', { type: 'SubAgentActivity', kind: 'interacted' }))
   r.observe({ type: 'event_msg', payload: { ...spawn.payload, thread_id: 'child', item: { ...spawn.payload.item, id: 'nested' } } })
-  assert.deepEqual(r.collector.snapshot()!.session.counts, { tokens: 0, tools: 0, agents: 2, skills: 0, workflows: 0 })
+  assert.deepEqual(r.collector.snapshot()!.session.counts, { tokens: 0, tools: 0, agents: 2, skills: 0 })
 })
 
 test('skill loads use marked injections or successful catalogued reads, once per skill per turn', () => {
@@ -278,12 +278,12 @@ test('paginated child history skips the inherited prefix but retains its skill c
     const r = new RolloutReader(file, 'thread-a', '/repo', dir)
     await r.poll(); await r.poll()
     assert.equal(r.collector.snapshot()!.session.model, undefined)
-    assert.deepEqual(r.collector.snapshot()!.session.counts, { tokens: 0, tools: 0, agents: 0, skills: 0, workflows: 0 })
+    assert.deepEqual(r.collector.snapshot()!.session.counts, { tokens: 0, tools: 0, agents: 0, skills: 0 })
     await appendFile(file, jsonl(rows.slice(8)))
     await r.poll(); await r.poll()
     const v = r.collector.snapshot()!
     assert.equal(v.core.cwd, '/repo'); assert.equal(v.session.model, 'gpt-6.1-sol')
-    assert.deepEqual(v.session.counts, { tokens: 3201, tools: 1, agents: 1, skills: 1, workflows: 0 })
+    assert.deepEqual(v.session.counts, { tokens: 3201, tools: 1, agents: 1, skills: 1 })
     const replay = new RolloutReader(file, 'thread-a', '/repo', dir)
     await replay.poll()
     assert.deepEqual(replay.collector.snapshot()!.session, v.session)

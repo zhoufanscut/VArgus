@@ -6,7 +6,7 @@ import type { On, TurnStepInput } from 'claude-code'
 
 // The session area's fragments only, uncoloured.
 const MINE = {
-  options: { folder: false, rateLimits: false, repo: false, branch: false, status: false, workflowRuns: true },
+  options: { folder: false, rateLimits: false, repo: false, branch: false, status: false },
 }
 
 type World = {
@@ -124,7 +124,7 @@ describe('session collector', () => {
     expect((await step($)).usage).toEqual({ ...w.usage, model: 'claude-opus-5-5' })
   })
 
-  test('call counts: the main loop\'s tool calls; Agent, Skill, Workflow runs (not resumes)', MINE, async ($, on) => {
+  test('call counts include main-loop tool calls with separate Agent and Skill totals', MINE, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     await $.session.start(start)
@@ -137,9 +137,9 @@ describe('session collector', () => {
     await call('Workflow', { name: 'w', resumeFromRunId: 'r1' })
     // a subagent's call is not counted
     await call('Bash', { command: 'ls', agentId: 'a1' })
-    expect(await line(clock, w)).toBe('opus | ctx:20% | session:0m | 🔧5 🤖1 🔀1 ⚡1')
+    expect(await line(clock, w)).toBe('opus | ctx:20% | session:0m | 🔧5 🤖1 ⚡1')
     await clock.settle()
-    expect(w.saved).toEqual({ tokens: 0, tools: 5, agents: 1, skills: 1, workflows: 1 })
+    expect(w.saved).toEqual({ tokens: 0, tools: 5, agents: 1, skills: 1 })
   })
 
   test('session time from usage().startedAt on the mod\'s clock', MINE, async ($, on) => {
@@ -176,7 +176,7 @@ describe('session collector', () => {
     await $.session.end({ reason: 'clear', sessionId: 'S2', resume: { id: 'S2' } })
     w.id = 'S3'
     await clock.settle()
-    expect(w.saved).toEqual({ tokens: 0, tools: 0, agents: 0, skills: 0, workflows: 0 })
+    expect(w.saved).toEqual({ tokens: 0, tools: 0, agents: 0, skills: 0 })
     // context and start stay unknown until the first main response reads them
     w.percent = 3
     w.startedAt = 1000
@@ -304,9 +304,12 @@ describe('session collector', () => {
     await $.session.start(start)
     await step($)
     await clock.settle()
-    expect(w.saved).toEqual({ tokens: 1500, tools: 0, agents: 0, skills: 0, workflows: 0 })
-    w.restore = { tokens: 70000, tools: 9, agents: 0, skills: 0, workflows: 0 }
+    expect(w.saved).toEqual({ tokens: 1500, tools: 0, agents: 0, skills: 0 })
+    w.restore = { tokens: 70000, tools: 9, agents: 2, skills: 1, workflows: 3 }
     await $.session.start(start)
-    expect(await line(clock, w)).toContain('token:70.0k | session:0m | 🔧9')
+    expect(await line(clock, w)).toContain('token:70.0k | session:0m | 🔧9 🤖2 ⚡1')
+    await step($)
+    await clock.settle()
+    expect(w.saved).toEqual({ tokens: 71500, tools: 9, agents: 2, skills: 1 })
   })
 })

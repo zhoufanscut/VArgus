@@ -19,7 +19,7 @@ describe('stringWidth', () => {
   })
 
   test('emoji 2, narrow symbols 1, a flag 2', () => {
-    assert.equal(stringWidth('🔧73 🤖2 ⚡1 🔀1'), 16)
+    assert.equal(stringWidth('🔧73 🤖2 ⚡1'), 12)
     assert.equal(stringWidth('✅⭐'), 4)
     assert.equal(stringWidth('⏱✓→'), 3)
     assert.equal(stringWidth('🇯🇵'), 2)

@@ -11,19 +11,16 @@
 //   (ModelUsage), so nothing is counted twice. One `turn.step` is one request
 //   with its settled usage, so VantageHUD's per-message.id de-duplication and
 //   its `~` for unsettled rows have nothing to do here.
-// - tools, agents, skills, workflow runs: the main loop's `tool.call`s
+// - tools, agents, skills: the main loop's `tool.call`s
 //   (`e.agentId` absent), as VantageHUD counted the lead transcript's tool_use
-//   blocks. An agent is a call to `Agent`, a skill one to `Skill`, a workflow
-//   run one to `Workflow` that does not resume a run (`resumeFromRunId`); each
-//   is a tool call too. A call counts when it starts, refused or not, as a
-//   tool_use block did. Not `agent.spawn`: it also fires for each agent a
-//   workflow run starts and for a plugin's `$.agent.spawn` (types,
-//   AgentSpawnInput), where VantageHUD counted one per Agent call.
+//   blocks. Each call counts when it starts, including a call later refused.
+//   Calls to `Agent` and `Skill` also increment their respective totals.
+//   Counting `agent.spawn` would include agents started by plugins.
 // Edges: a hook above VArgus that answers without `next` hides that event
 // from it; the tool names are the 2.1.300 tool table's (VantageHUD also
 // counted `Task`, `proxy_Task`, `proxy_Skill`, which that table lacks).
 
-import { initialSession, zero, type SessionValues } from '../../../core/session'
+import { initialCounts, type SessionValues } from '../../../core/session'
 export { initialSession, type SessionValues } from '../../../core/session'
 import type {
   EngineInterface, SessionCompactInput, SessionCompactResult, SessionContextUsage, SessionEndInput,
@@ -89,7 +86,7 @@ async function readSession($: EngineInterface, values: SessionValues, withContex
 export async function startSession($: EngineInterface, values: SessionValues): Promise<void> {
   try {
     const saved = (await $.state.get(COUNTS)).value
-    if (saved) values.counts = { ...zero(), ...saved }
+    if (saved) values.counts = initialCounts(saved)
   } catch {
     // nothing saved
   }
@@ -145,7 +142,6 @@ export function toolCalled($: EngineInterface, e: ToolCallInput, values: Session
   c.tools += 1
   if (e.tool === 'Agent') c.agents += 1
   else if (e.tool === 'Skill') c.skills += 1
-  else if (e.tool === 'Workflow' && !e.resumeFromRunId) c.workflows += 1
   save($, values)
 }
 
@@ -155,7 +151,7 @@ export function toolCalled($: EngineInterface, e: ToolCallInput, values: Session
 export function sessionEnding($: EngineInterface, e: SessionEndInput, values: SessionValues): void {
   if (e.reason !== 'clear' && e.reason !== 'resume') return
   sessionGeneration += 1
-  values.counts = zero()
+  values.counts = initialCounts()
   values.contextPercent = undefined
   values.startedAt = undefined
   values.compactPending = false

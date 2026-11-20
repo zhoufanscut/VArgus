@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { open, readFile, stat } from 'node:fs/promises'
 import { dirname, join, posix, resolve, sep, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { zero, type Counts } from '../../core/session.ts'
+import { initialCounts, type Counts } from '../../core/session.ts'
 import { cachePath, readCache, writeCache } from './cache.ts'
 import type { AntigravityPayload } from './collect.ts'
 
@@ -338,8 +338,6 @@ function applyStep(
       if (Array.isArray(tasks) && tasks.length > 0) state.counts.agents += tasks.length
       else if (typeof copies === 'number' && Number.isFinite(copies) && copies > 1) state.counts.agents += Math.floor(copies)
       else state.counts.agents += 1
-    } else if (name === 'run_workflow') {
-      state.counts.workflows += 1
     } else if (name === 'read_file') {
       const rawPath = unwrapArg(args?.Path)
       if (typeof rawPath === 'string' && rawPath.trim()) {
@@ -369,7 +367,7 @@ export async function readTranscriptState(
   cacheDir: string,
   context: TranscriptReadContext = {},
 ): Promise<TranscriptState> {
-  const empty = (): TranscriptState => ({ startedAt: undefined, counts: zero(), mutatingToolsSeen: 0 })
+  const empty = (): TranscriptState => ({ startedAt: undefined, counts: initialCounts(), mutatingToolsSeen: 0 })
   let handle
   try {
     handle = await open(transcriptPath, 'r')
@@ -410,7 +408,7 @@ export async function readTranscriptState(
     if (canResume && cached && cached.size === info.size) {
       return {
         startedAt: cached.startedAt,
-        counts: { ...zero(), ...cached.counts },
+        counts: initialCounts(cached.counts),
         mutatingToolsSeen: cached.mutatingToolsSeen,
       }
     }
@@ -421,7 +419,7 @@ export async function readTranscriptState(
       turnIndex: canResume && cached ? cached.turnIndex : 0,
       seenSkills: new Set<string>(canResume && cached ? cached.seenSkillsInTurn : []),
       mutatingToolsSeen: canResume && cached ? cached.mutatingToolsSeen : 0,
-      counts: canResume && cached ? { ...zero(), ...cached.counts } : zero(),
+      counts: initialCounts(canResume ? cached?.counts : undefined),
     }
 
     let readOffset = canResume && cached ? cached.size : 0

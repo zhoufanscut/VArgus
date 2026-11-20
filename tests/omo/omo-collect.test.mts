@@ -102,18 +102,16 @@ test('skill availability, SKILL.md reads and child load requests do not establis
   assert.equal(collectOmo(h.ctx, [], undefined, now).session.counts.skills, 0)
 })
 
-test('agent identities and workflow notices count once without inferring requested or hidden work', () => {
+test('agent counts use distinct task IDs from accepted spawns', () => {
   const h = host([
     assistant('a', [call('task', 'task', { tasks: [{}, {}, {}] })]),
     result('spawn', 'task', 'task', { mode: 'spawn', task_id: 'a', items: [{ task_id: 'a' }, { task_id: 'b' }, { task_id: '' }] }),
     result('again', 'task-2', 'task', { mode: 'spawn', task_id: 'a' }),
     result('output', 'out', 'task_output', { task_id: 'c' }),
     message('dag', { role: 'custom', customType: 'omo-senpi.dag-run', details: { runId: 'run-1', status: 'paused' } }),
-    message('dag-end', { role: 'custom', customType: 'omo-senpi.dag-run', details: { runId: 'run-1', status: 'completed' } }),
   ])
   const counts = collectOmo(h.ctx, [], undefined, now).session.counts
-  assert.equal(counts.agents, 2)
-  assert.equal(counts.workflows, 1)
+  assert.deepEqual(counts, { tokens: 12, tools: 1, agents: 2, skills: 0 })
 })
 
 test('settings restore disabled state and full options across reload and malformed records', () => {
@@ -210,7 +208,7 @@ test('malformed persisted message data is ignored at the host boundary', () => {
     message('bad', { role: 'assistant', usage: { input: NaN, output: -1 }, content: [null, {}] }),
   ])
   assert.deepEqual(collectOmo(h.ctx, [], undefined, now).session.counts, {
-    tokens: 0, tools: 0, agents: 0, skills: 0, workflows: 0,
+    tokens: 0, tools: 0, agents: 0, skills: 0,
   })
   assert.equal(h.ctx.sessionManager.reduceHistory(omoHistoryReducer).counts.tokens, 0)
 })

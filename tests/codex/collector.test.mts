@@ -91,5 +91,5 @@ test('item identities prevent duplicate tool counts; messages and subagent tools
     { id: 'agent1', type: 'subAgentActivity', kind: 'started' }, { id: 'agent1', type: 'subAgentActivity', kind: 'started' },
     { id: 'message', type: 'agentMessage' },
   ]) c.completeItem(item)
-  assert.deepEqual(c.snapshot()!.session.counts, { tokens: 0, tools: 1, agents: 1, skills: 0, workflows: 0 })
+  assert.deepEqual(c.snapshot()!.session.counts, { tokens: 0, tools: 1, agents: 1, skills: 0 })
 })

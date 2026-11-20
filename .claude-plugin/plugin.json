@@ -52,12 +52,6 @@
       "description": "Show tool calls, agents and skills (\ud83d\udd2773 \ud83e\udd162 \u26a11)",
       "default": true
     },
-    "workflowRuns": {
-      "type": "boolean",
-      "title": "Call counts: workflow runs",
-      "description": "Add workflow runs to the call counts",
-      "default": false
-    },
     "rateLimits": {
       "type": "boolean",
       "title": "Rate limits",
