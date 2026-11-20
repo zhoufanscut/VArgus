@@ -50,7 +50,7 @@ function world(on: On, clock: MockClock): World {
     return { value: { startedAt, context: { window: 200000, percent }, rateLimits: [] } }
   })
   on('fs.write', async ($, e) => {
-    w.lines.push(e.text)
+    if (!e.path.endsWith('.live')) w.lines.push(e.text)
     return { value: undefined }
   })
   on('process.run', async () => ({

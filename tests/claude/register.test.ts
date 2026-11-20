@@ -7,7 +7,7 @@ import { makeTheme } from '../../src/theme'
 // PromptHint viewport; NO_COLOR, the theme option and WSL as the line shows
 // them; the model re-read on each tick.
 
-type World = { lines: string[]; blankMarkers: string[]; model: string }
+type World = { lines: string[]; model: string }
 
 // The bottoms answer with sentinels: values no mod would make up, so a hook
 // that rebuilt or replaced the answer is seen.
@@ -25,7 +25,7 @@ const SENTINEL = {
 }
 
 function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '/home/u', NO_COLOR: '1' }, mockProcess = true): World {
-  const w: World = { lines: [], blankMarkers: [], model: 'claude-opus-5-5[1m]' }
+  const w: World = { lines: [], model: 'claude-opus-5-5[1m]' }
   mock.env(on, env)
   on('session.start', async () => SENTINEL.start)
   on('session.id', async () => ({ value: 'S1' }))
@@ -35,8 +35,7 @@ function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '
     value: { startedAt: 0, context: { window: 200000, percent: 20 }, rateLimits: [] },
   }))
   on('fs.write', async ($, e) => {
-    if (e.path.endsWith('/line.blank')) w.blankMarkers.push(e.text)
-    else w.lines.push(e.text)
+    if (!e.path.endsWith('.live')) w.lines.push(e.text)
     return { value: undefined }
   })
   if (mockProcess) on('process.run', async () => ({
@@ -80,7 +79,7 @@ function sharedPicker($: Engine, on: On, profile = '/home/u/.claude') {
   const rows: ConfigRow[] = [
     { key: 'vargus.model', label: 'Model', kind: 'boolean', value: true, provider, isLocked: false },
     { key: 'vargus.theme', label: 'Theme', kind: 'choice', value: 'graphite', provider, isLocked: false },
-    { key: 'vargus.blankStopped', label: 'Blank a stopped line', kind: 'boolean', value: false, provider, isLocked: true },
+    { key: 'vargus.folder', label: 'Folder', kind: 'boolean', value: true, provider, isLocked: true },
   ]
   const edits: string[] = []
   const state: { file?: string; backup?: string; rewrite: boolean } = { rewrite: false }
@@ -260,18 +259,18 @@ describe('register: the line as the host sets it up', () => {
 
   test('opening the picker imports canonical values and restores omitted native choices', NO_VCS, async ($, on) => {
     const { clock, w, rows, edits, state, command } = sharedPicker($, on)
-    state.file = '{"model":false,"theme":" EmBeR ","blankStopped":true}'
+    state.file = '{"model":false,"theme":" EmBeR ","folder":false}'
     await $.session.start(start)
     expect(await line(clock, w)).not.toContain('opus')
-    expect(w.blankMarkers.at(-1)).toBe('')
+    expect(w.lines.at(-1)).toContain('~/x')
     await command('config')
-    expect(rows.map(row => row.value)).toEqual([false, 'ember', false])
+    expect(rows.map(row => row.value)).toEqual([false, 'ember', true])
     expect(edits).toEqual(['vargus.model', 'vargus.theme'])
     state.file = '{}'
     await command('reload-plugins')
     expect(await line(clock, w)).toContain('opus')
     await command('config')
-    expect(rows.map(row => row.value)).toEqual([true, 'graphite', false])
+    expect(rows.map(row => row.value)).toEqual([true, 'graphite', true])
   })
 
   test('a clean install cannot restore a choice remembered by the previous installation', NO_VCS, async ($, on) => {

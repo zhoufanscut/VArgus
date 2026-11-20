@@ -82,12 +82,6 @@
       "description": "Show staged, modified, untracked and other counts (?4)",
       "default": true
     },
-    "blankStopped": {
-      "type": "boolean",
-      "title": "Blank a stopped line",
-      "description": "Refresh an unchanged line every 30 s and hide it after the plugin stops. The reader in docs/setup-claude.md follows this setting.",
-      "default": false
-    },
     "theme": {
       "type": "string",
       "title": "Theme",

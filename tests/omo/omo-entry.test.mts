@@ -56,6 +56,7 @@ function host(mode = 'tui') {
       assert.ok(command)
       await command.handler(args, ctx)
     },
+    ctx,
     get hidden() { return footerHidden },
     get row() { return row },
     get listeners() { return listeners },
@@ -89,6 +90,30 @@ test('OmO disable survives reload and stays isolated from another session', asyn
   assert.equal(second.hidden, false)
   assert.equal(first.listeners, 0)
   assert.equal(second.listeners, 0)
+})
+
+test('OmO warns on a redraw after missed updates and clears the warning after recovery', t => {
+  const h = host()
+  let now = 1000
+  t.mock.method(Date, 'now', () => now)
+  h.load(); h.event('session_start')
+  const text = () => h.row!.render(200)[0]!.replace(/\x1b\[[0-9;]*m/g, '')
+  try {
+    const healthy = text()
+    now += 4500
+    assert.equal(text(), healthy)
+    h.ctx.getContextUsage = () => { throw new Error('collection failed') }
+    h.event('message_end')
+    now += 501
+    assert.equal(text(), healthy + ' | ⚠ stale')
+    h.ctx.getContextUsage = () => {
+      now += 6000
+      return { tokens: 750, contextWindow: 1000, percent: 75 }
+    }
+    h.event('message_end')
+    assert.match(text(), /ctx:75%/)
+    assert.doesNotMatch(text(), /⚠ stale/)
+  } finally { h.event('session_shutdown') }
 })
 
 test('OmO configuration changes rendering and keeps a disabled session disabled', async () => {

@@ -114,6 +114,10 @@ sample data. To verify activation, look for the row under the prompt in `agy`
 after applying the setting or reopening the session. If an existing VArgus
 command was disabled, run `/statusline on` in `agy`.
 
+If collection fails during a refresh, VArgus can show the last row for that
+conversation and configuration with `| ⚠ stale`. A successful invocation clears
+the marker. If agy stops invoking the status command, the row cannot update.
+
 ## Configure
 
 Antigravity reads the checkout's `vargus.jsonc` on every status-line invocation.

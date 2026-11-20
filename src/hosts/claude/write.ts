@@ -2,6 +2,8 @@ import { dataDir, homeDir, DRIVE_PATH } from './paths'
 export { DATA_FOLDER, dataDir, homeDir } from './paths'
 import type { EngineInterface } from 'claude-code'
 
+import { REFRESH_GRACE_MS, staleLine } from '../../render/freshness'
+
 export type Writer = {
   // <data>, absolute, with `/` separators; null when the config folder is
   // not an absolute path (CLAUDE_CONFIG_DIR relative, or it, HOME and
@@ -15,13 +17,10 @@ export type Writer = {
   tools: 'posix' | 'cmd'
   // line.<t>.tmp: one temp file per loaded copy of the mod.
   tmpName: string
-  last: { id: string; text: string; at: number; blankStopped: boolean } | null
-  // with blankStopped: rewrite an unchanged line this often, so the reader
-  // can tell a stopped mod by the file's age; null: only on a change
-  heartbeatMs: number | null
+  last: { id: string; text: string; checkedAt: number; columns?: number } | null
   // the write loop while it runs
   running: Promise<void> | null
-  pending: string | null
+  pending: { text: string; columns?: number } | null
   // the id of the session that ended, written no more while $.session.id()
   // still gives it (0.75 s after the one resume measured), until another
   // session ends in this process; a resume back to it ends the session in
@@ -44,25 +43,24 @@ export async function createWriter($: EngineInterface): Promise<Writer> {
     tools: dir !== null && DRIVE_PATH.test(dir) ? 'cmd' : 'posix',
     tmpName: `line.${await $.clock.now()}.tmp`,
     last: null,
-    heartbeatMs: null,
     running: null,
     pending: null,
     ended: null,
   }
 }
 
-// Writes `text` unless it and the session id match the last write, or the id
-// is the ended session's. One write runs at a time; a newer text waiting
+// Publishes changed text and renews the reader deadline for active sessions.
+// One write runs at a time; a newer text waiting
 // replaces an older one. The id is read on every write: /clear and a resume
 // change it with no session.start.
-export function writeLine($: EngineInterface, w: Writer, text: string): Promise<void> {
-  w.pending = text
+export function writeLine($: EngineInterface, w: Writer, text: string, columns?: number): Promise<void> {
+  w.pending = { text, columns }
   if (!w.running) {
     w.running = drain($, w).finally(() => {
       w.running = null
       // a text still waiting when the loop ended: it came in after the last
       // check, or its write failed (tried once more)
-      if (w.pending !== null) writeLine($, w, w.pending).catch(() => {})
+      if (w.pending !== null) writeLine($, w, w.pending.text, w.pending.columns).catch(() => {})
     })
   }
   return w.running
@@ -135,33 +133,36 @@ function backslash(path: string): string {
 
 async function drain($: EngineInterface, w: Writer): Promise<void> {
   while (w.pending !== null) {
-    const next = w.pending
+    const { text, columns } = w.pending
     w.pending = null
     const id = await $.session.id()
     if (!w.dir || !id || id === w.ended) continue
-    const now = w.heartbeatMs === null ? 0 : await $.clock.now()
-    const blankStopped = w.heartbeatMs !== null
-    const modeChanged = w.last?.id !== id || w.last.blankStopped !== blankStopped
-    const same = !modeChanged && w.last?.text === next
-    if (same && (w.heartbeatMs === null || now - w.last!.at < w.heartbeatMs)) continue
     const folder = `${w.dir}/${id}`
     const line = `${folder}/line`
-    // The reader gets the effective option from this session, including policy.
-    if (modeChanged) await $.fs.write(line + '.blank', blankStopped ? '1' : '')
-    const tmp = `${folder}/${w.tmpName}`
-    const argv = moveArgv(w, tmp, line)
-    let moved = false
-    // no command to move with: no temp file either
-    if (argv) {
-      await $.fs.write(tmp, next)
-      try {
-        moved = (await $.process.run(argv)).exitCode === 0
-      } catch {
-        // refused (an organization hook, say): fall back below
+    let checkedAt = await $.clock.now()
+    const last = w.last
+    const unchanged = last?.id === id && last.text === text
+    if (unchanged && last.columns === columns && checkedAt >= last.checkedAt && checkedAt - last.checkedAt < 2000) continue
+    if (!unchanged) {
+      const tmp = `${folder}/${w.tmpName}`
+      const argv = moveArgv(w, tmp, line)
+      let moved = false
+      // no command to move with: no temp file either
+      if (argv) {
+        await $.fs.write(tmp, text)
+        try {
+          moved = (await $.process.run(argv)).exitCode === 0
+        } catch {
+          // refused (an organization hook, say): fall back below
+        }
       }
+      // Not atomic: a read can catch a half-written line for one run.
+      if (!moved) await $.fs.write(line, text)
+      checkedAt = await $.clock.now()
     }
-    // Not atomic: a read can catch a half-written line for one run.
-    if (!moved) await $.fs.write(line, next)
-    w.last = { id, text: next, at: now, blankStopped }
+    // A reader accepts only a complete deadline and newline-terminated stale row.
+    const deadline = Math.ceil((checkedAt + REFRESH_GRACE_MS) / 1000)
+    await $.fs.write(line + '.live', `${deadline}\n${staleLine(text, columns)}\n`)
+    w.last = { id, text, checkedAt, columns }
   }
 }

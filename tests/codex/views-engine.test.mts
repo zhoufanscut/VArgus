@@ -205,7 +205,7 @@ trust_level = "trusted"
     await wait(row, /session:/)
     assert.equal(posts, 0)
     let active = (await records())[0]
-    assert.equal(active.version, 7)
+    assert.equal(active.version, 8)
     if (!crowded) {
       const fake = join(dir, 'fake'), trace = join(dir, 'ps-trace.jsonl')
       await mkdir(fake)
@@ -386,16 +386,21 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
       console.log(JSON.stringify({ crowdedFirstVisits: [...visited], configReadsBeforeVisits: readsBeforeVisits, configReadsAfterVisits: await reads(), providerCalls: posts }))
       return
     }
-    // Losing a saved log blanks readings without killing the pane controller.
+    // A known view keeps its own last readings when the saved log becomes unreadable.
     const missing = children.find(m => m.source.subagent.thread_spawn.agent_path === lastPath)!
     const relative = (await readdir(join(cfg, 'sessions'), { recursive: true })).find(n => n.endsWith('-' + missing.id + '.jsonl'))!
     const transcript = join(cfg, 'sessions', relative), held = join(dir, 'held.jsonl')
+    const visibleRow = async () => (await tmux('display-message', '-p', '-t', pane, '#{E:status-format[0]}')).replace(/#\[[^\]]*\]/g, '')
+    const healthy = await visibleRow()
+    assert.match(healthy, new RegExp('token:' + expected.get(lastPath)!.tokens.replace('.', '\\.')))
     await rename(transcript, held)
-    await wait(row, /^$/)
+    await wait(visibleRow, / \| ⚠ stale$/)
+    assert.equal(await visibleRow(), await row() + ' | ⚠ stale')
     await wait(async () => (await records())[0]?.error ?? '', /ENOENT/)
     await delay(400)
     assert.match((await records())[0].error, /ENOENT/)
     await rename(held, transcript)
+    await wait(async () => (await visibleRow()).includes('⚠ stale') ? '' : 'fresh', /^fresh$/)
     await wait(row, new RegExp('token:' + expected.get(lastPath)!.tokens.replace('.', '\\.')))
     // A narrow pane that clips the contextual identity must blank rather than guess.
     await tmux('resize-window', '-t', 'test', '-x', '24', '-y', '40')

@@ -13,7 +13,6 @@ export const DEFAULTS = {
   repo: true,
   branch: true,
   status: true,
-  blankStopped: false,
   theme: 'graphite',
 }
 

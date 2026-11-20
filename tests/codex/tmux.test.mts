@@ -53,6 +53,24 @@ test('real tmux: preserve existing rows, select active-pane content, restore onl
   } finally { await first.detach(); await second?.detach(); await r.close() }
 })
 
+test('real tmux expands a stalled pane’s row at redraw and clears it on the next identical update', async () => {
+  const r = await rig()
+  const output = new TmuxOutput(r.socket, r.pane, r.root)
+  const row = () => r.run('display-message', '-p', '-t', r.pane, '#{E:status-format[0]}')
+  try {
+    await r.run('set-option', 'status-interval', '0')
+    await output.attach()
+    await output.update('sol | ctx:7% | token:3.2k')
+    assert.doesNotMatch(await row(), /⚠ stale/)
+    await r.run('set-option', '-p', '-t', r.pane, '@vargus_deadline', '1')
+    assert.match(await row(), /sol \| ctx:7% \| token:3.2k \| ⚠ stale/)
+    await new Promise(done => setTimeout(done, 1100))
+    await output.update('sol | ctx:7% | token:3.2k')
+    assert.doesNotMatch(await row(), /⚠ stale/)
+    assert.equal(await r.run('show-options', '-v', 'status-interval'), '0')
+  } finally { await output.detach(); await r.close() }
+})
+
 test('real tmux: a user edit made while the row is active survives shutdown', { timeout: 15000 }, async () => {
   const r = await rig()
   const output = new TmuxOutput(r.socket, r.pane, r.root)

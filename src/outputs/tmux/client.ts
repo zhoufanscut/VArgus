@@ -9,18 +9,24 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { processIsRunning } from '../../node/process.ts'
 import { tmuxLine, TMUX_PADDING } from './format.ts'
 import { ansiRuns } from '../ansi.ts'
+import { REFRESH_GRACE_MS, staleLine } from '../../render/freshness.ts'
 import { stringWidth } from '../../render/width.ts'
 
 const exec = promisify(execFile)
-type Owner = { pid: number; pane: string; token: string; priorLine?: string; priorHeader?: string; inheritedMark?: string }
+type Owner = { pid: number; pane: string; token: string; priorLine?: string; priorHeader?: string; priorFreshness?: Record<string, string>; inheritedMark?: string }
 type NativeBase = { left: string; leftLength: string; rightLength: string; priorLeftAlias: string; template: string;
-  sharedMark?: string; priorSharedLine?: string; priorSharedHeader?: string; priorLayout?: string }
+  appliedHeader?: string; sharedMark?: string; priorSharedLine?: string; priorSharedHeader?: string; priorLayout?: string }
 type NativeRows = { command: string; hooks: [string, string][]; prior: Record<string, [string, string][]> }
 type WindowRows = { emptyHooks: string[]; status: string; active: string; aliases: [string, string][]; hooks: [string, string][]; command: string[] }
 type State = { owners: Owner[]; backup: string; applied: string; windowRows?: WindowRows; native?: { status: string; index: number; base?: NativeBase; rows?: NativeRows } }
-const ROW = '#{@vargus_line}'
+const freshnessOptions = ['@vargus_clock', '@vargus_deadline', '@vargus_header_deadline', '@vargus_stale']
+function timedRow(line: string, deadline: string): string {
+  const expired = `#{&&:#{${deadline}},#{>=:#{T:@vargus_clock},#{${deadline}}}}`
+  return `#{?${expired},#{@vargus_stale},#{${line}}}`
+}
+const ROW = timedRow('@vargus_line', '@vargus_deadline')
 const NATIVE_ROW = ROW + '#{@vargus_row_probe}'
-const NATIVE_HEADER = '#{@vargus_header}'
+const NATIVE_HEADER = timedRow('@vargus_header', '@vargus_header_deadline')
 // psmux's terminal columns are u16; this lets the padded header fill a row.
 const NATIVE_LEFT_LENGTH = '65535'
 // psmux joins P: results with spaces, even when every pane value is empty.
@@ -37,7 +43,7 @@ export class TmuxOutput {
   private attached = false
   private nativeBase: NativeBase | undefined
   private nativeRows: State['native']
-  private nativePublished = new Map<string, string>()
+  private published = new Map<string, string>()
 
   private socket: string
   private pane: string
@@ -180,7 +186,7 @@ export class TmuxOutput {
 
   private async restoreNativeBase(base: NativeBase): Promise<void> {
     for (const [option, applied, original] of [
-      ['status-left', NATIVE_HEADER, base.left],
+      ['status-left', base.appliedHeader ?? '#{@vargus_header}', base.left],
       ['status-left-length', NATIVE_LEFT_LENGTH, base.leftLength],
       ['status-right-length', '0', base.rightLength],
       ['@vargus_original_left', base.left, base.priorLeftAlias],
@@ -200,12 +206,12 @@ export class TmuxOutput {
         await this.save(state)
       }
       this.nativeBase = undefined
-      this.nativePublished.clear()
+      this.published.clear()
     })
   }
 
-  private async nativePublish(changes: { pane?: string; option: string; value: string }[]): Promise<void> {
-    const changed = changes.filter(change => this.nativePublished.get((change.pane ?? '') + '\0' + change.option) !== change.value)
+  private async publish(changes: { pane?: string; option: string; value: string }[]): Promise<void> {
+    const changed = changes.filter(change => this.published.get((change.pane ?? '') + '\0' + change.option) !== change.value)
     if (!changed.length) return
     const args: string[] = []
     for (const change of changed) {
@@ -215,7 +221,7 @@ export class TmuxOutput {
     // Publish one batch of differences. SetOption already requests a psmux
     // redraw; forcing another refresh sends redundant metadata/full frames.
     await this.command(...args)
-    for (const change of changed) this.nativePublished.set((change.pane ?? '') + '\0' + change.option, change.value)
+    for (const change of changed) this.published.set((change.pane ?? '') + '\0' + change.option, change.value)
   }
 
   private async nativeSlotOwned(index: number): Promise<boolean> {
@@ -227,8 +233,12 @@ export class TmuxOutput {
     await this.command('set-option', '@vargus_row_probe', witness)
     try {
       const live = JSON.parse(await this.command('dump-state')) as { status_format: string[] }
-      const line = await this.command('display-message', '-p', '#{@vargus_line}')
-      return live.status_format[index] === line + witness
+      const rendered = live.status_format[index]
+      if (!rendered?.endsWith(witness)) return false
+      const line = await this.command('display-message', '-p', ROW)
+      if (rendered === line + witness) return true
+      // Earlier releases reserved a slot containing just the plain line and witness.
+      return rendered === await this.command('display-message', '-p', '#{@vargus_line}') + witness
     } finally {
       if (prior) await this.command('set-option', '@vargus_row_probe', prior)
       else await this.command('set-option', '-u', '@vargus_row_probe')
@@ -240,6 +250,11 @@ export class TmuxOutput {
       if (await this.command('show-options', '-p', '-v', '-t', owner.pane, '@vargus_owner') !== owner.token) return
       const inherited = (value: string | undefined) => value === undefined || (process.platform === 'win32'
         && (value === '' || (!!owner.inheritedMark && value.endsWith(owner.inheritedMark))))
+      if (owner.priorFreshness) for (const name of freshnessOptions) {
+        const prior = owner.priorFreshness[name]
+        if (prior === undefined) await this.command('set-option', '-p', '-u', '-t', owner.pane, name)
+        else await this.command('set-option', '-p', '-t', owner.pane, name, prior)
+      }
       if (inherited(owner.priorLine)) await this.command('set-option', '-p', '-u', '-t', owner.pane, '@vargus_line')
       else await this.command('set-option', '-p', '-t', owner.pane, '@vargus_line', owner.priorLine!)
       if (process.platform === 'win32') {
@@ -286,7 +301,7 @@ export class TmuxOutput {
       // Restore the actual native scalar bar in plain windows. Rebuilding it
       // with format trimming would count style markup as visible characters.
       for (const [option, original, applied] of [
-        ['status-left', base.left, NATIVE_HEADER],
+        ['status-left', base.left, base.appliedHeader ?? '#{@vargus_header}'],
         ['status-left-length', base.leftLength, NATIVE_LEFT_LENGTH],
         ['status-right-length', base.rightLength, '0'],
       ]) {
@@ -470,7 +485,7 @@ export class TmuxOutput {
               const priorSharedHeader = await this.command('show-options', '-v', '@vargus_header')
               const priorLayout = await this.command('show-options', '-v', '@vargus_native_layout')
               const sharedMark = `#[fg=#${randomUUID().replaceAll('-', '').slice(0, 6)}]`
-              base = { left, leftLength, rightLength, priorLeftAlias, template, sharedMark, priorSharedLine, priorSharedHeader, priorLayout }
+              base = { appliedHeader: NATIVE_HEADER, left, leftLength, rightLength, priorLeftAlias, template, sharedMark, priorSharedLine, priorSharedHeader, priorLayout }
               }
             }
             state = { owners: [], backup: '', applied: '', native: { status, index, base } }
@@ -479,8 +494,8 @@ export class TmuxOutput {
               // Publish ownership before the first assignment. A setup failure
               // can then identify and reuse the reserved slot on its next try.
               await this.command('set-option', '@vargus_native_row', String(index))
-              await this.command('set-option', `status-format[${index}]`, NATIVE_ROW)
             }
+            await this.command('set-option', `status-format[${index}]`, NATIVE_ROW)
             if (base) {
               await this.command('set-option', '@vargus_original_left', base.left)
               await this.command('set-option', 'status-left', NATIVE_HEADER)
@@ -548,12 +563,19 @@ export class TmuxOutput {
         }
         try { this.owner.priorLine = await this.command('show-options', '-p', '-v', '-t', this.pane, '@vargus_line') } catch { /* unset */ }
         if (process.platform === 'win32') try { this.owner.priorHeader = await this.command('show-options', '-p', '-v', '-t', this.pane, '@vargus_header') } catch { /* unset */ }
+        this.owner.priorFreshness = {}
+        for (const name of freshnessOptions) {
+          try {
+            const value = await this.command('show-options', '-p', '-v', '-t', this.pane, name)
+            if (value || process.platform !== 'win32') this.owner.priorFreshness[name] = value
+          } catch { /* no pane-local override */ }
+        }
         this.owner.inheritedMark = state.native?.base?.sharedMark
         state.owners.push(this.owner)
         await this.save(state)
         this.nativeBase = state.native?.base
         this.nativeRows = state.native?.rows ? state.native : undefined
-        this.nativePublished.clear()
+        this.published.clear()
         this.attached = true
         await this.command('set-option', '-p', '-t', this.pane, '@vargus_owner', this.owner.token)
         await this.selectRows(state)
@@ -562,7 +584,7 @@ export class TmuxOutput {
           this.attached = false
           this.nativeBase = undefined
           this.nativeRows = undefined
-          this.nativePublished.clear()
+          this.published.clear()
           await this.clearOwner(this.owner)
           state.owners = state.owners.filter(owner => owner.token !== this.owner.token)
           // Retain an ownerless recovery record if restoration itself fails.
@@ -578,18 +600,22 @@ export class TmuxOutput {
     return Math.max(0, Number(await this.command('display-message', '-p', '-t', this.pane, '#{window_width}')) - TMUX_PADDING.length)
   }
 
-  async update(ansi: string): Promise<void> {
+  async update(ansi: string, availableWidth?: number): Promise<void> {
     const changes: { pane?: string; option: string; value: string }[] = []
     // NativeBase is immutable for an attachment and captured under its lock.
     // A render must not read the shared JSON while another owner saves it.
     if (this.nativeBase?.sharedMark && await this.command('show-options', '-v', '@vargus_native_layout') !== this.nativeBase.sharedMark) this.nativeBase = undefined
     if (this.nativeBase && await this.nativeAppendRequired(this.nativeBase.left)) await this.nativeAppendFallback()
+    const columns = availableWidth ?? await this.width()
+    const stale = staleLine(ansi, columns)
     if (this.nativeBase) {
       const base = this.nativeBase
-      const width = await this.width() + TMUX_PADDING.length
+      const width = columns + TMUX_PADDING.length
       const text = ansiRuns(ansi).map(run => run.text).join('')
       const line = tmuxLine(ansi) + ' '.repeat(Math.max(0, width - stringWidth(text) - (text ? TMUX_PADDING.length : 0)))
-      changes.push({ pane: this.pane, option: '@vargus_header', value: line })
+      const staleHeader = tmuxLine(stale) + ' '.repeat(Math.max(0, columns - stringWidth(stale)))
+      changes.push({ pane: this.pane, option: '@vargus_header', value: line },
+        { pane: this.pane, option: '@vargus_stale', value: staleHeader })
       const original = await this.command('display-message', '-p', base.template)
       changes.push({ pane: this.pane, option: '@vargus_line', value: original })
       if (base.sharedMark) {
@@ -597,15 +623,19 @@ export class TmuxOutput {
         changes.push({ option: '@vargus_header', value: ' '.repeat(activeWidth) + base.sharedMark })
         changes.push({ option: '@vargus_line', value: original + base.sharedMark })
       }
-    } else changes.push({ pane: this.pane, option: '@vargus_line', value: tmuxLine(ansi) })
+    } else changes.push({ pane: this.pane, option: '@vargus_line', value: tmuxLine(ansi) },
+      { pane: this.pane, option: '@vargus_stale', value: tmuxLine(stale) })
+    const deadline = ansi ? String(Math.ceil((Date.now() + REFRESH_GRACE_MS) / 1000)) : ''
+    changes.push({ pane: this.pane, option: '@vargus_clock', value: '%s' },
+      { pane: this.pane, option: '@vargus_deadline', value: this.nativeBase ? '' : deadline },
+      { pane: this.pane, option: '@vargus_header_deadline', value: this.nativeBase ? deadline : '' })
+    await this.publish(changes)
     if (process.platform === 'win32') {
-      await this.nativePublish(changes)
       // Some psmux pane-targeted window routes omit the selection hook.
       // The normal render tick also reconciles height without reading JSON.
       if (this.nativeRows) await this.locked(() => this.selectNativeHeight(this.nativeRows!))
       return
     }
-    await this.command('set-option', '-p', '-t', this.pane, '@vargus_line', tmuxLine(ansi))
     const clients = await this.command('list-clients', '-t', this.session, '-F', '#{client_name}')
     for (const client of clients.split('\n').filter(Boolean)) await this.command('refresh-client', '-S', '-t', client)
   }

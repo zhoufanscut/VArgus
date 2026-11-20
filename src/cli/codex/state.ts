@@ -13,7 +13,7 @@ export type Running = { pid: number; thread: string; transcript?: string; target
 export type FooterBackup = { thread: string; target: Target; selection: FooterSelection }
 export type Spec = SavedOptions & { target: Target; thread: string; transcript: string; home: string;
   token: string; mode: 'on' | 'restore' }
-export const workerVersion = 7
+export const workerVersion = 8
 export const controlRoot = () => join(tmpdir(), `vargus-control-${process.getuid?.() ?? 'user'}`)
 export const running = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
 export const recordPath = (target: Target) => join(controlRoot(), createHash('sha256').update(target.socket + '\0' + target.pane).digest('hex') + '.json')

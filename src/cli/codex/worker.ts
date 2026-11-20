@@ -94,6 +94,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
     if (mode === 'on' && (changed || Date.now() >= renderAt || hold !== !!paused)) {
       renderAt = Date.now() + 1000
       let line = ''
+      let width: number | undefined
       paused = undefined
       if (view) {
         readingError = undefined
@@ -104,11 +105,13 @@ export async function rowWorker(spec: Spec): Promise<number> {
             value = { reader, line: codexLine(reader.collector, options, theme) }; readers.set(view.thread, value)
           }
           await value.reader.poll()
-          line = await value.line(await output.width())
+          width = await output.width()
+          line = await value.line(width)
           if (line) lastReadings = { thread: view.thread, label: cleanText(view.path ?? 'main'), line: value.line }
         } catch (e) { readingError = (e as Error).message }
       } else if (hold) {
-        const frozen = lastReadings!.line.paused(await output.width())
+        width = await output.width()
+        const frozen = lastReadings!.line.paused(width)
         if (frozen) {
           line = frozen
           paused = { thread: lastReadings!.thread, label: lastReadings!.label }
@@ -116,12 +119,13 @@ export async function rowWorker(spec: Spec): Promise<number> {
       }
       // Release the row when there are no readings and the composer is empty.
       // Transient shell/popup frames must not discard a draft's saved readings.
+      const keepFailedReading = attached && readingError && view && lastReadings?.thread === view.thread
       if (line) {
         if (!attached) { await output.attach(); attached = true }
-        await output.update(line)
-      } else if (attached && codexComposer(screen, '')) {
+        await output.update(line, width)
+      } else if (attached && !keepFailedReading && codexComposer(screen, '')) {
         await output.detach(); attached = false; lastReadings = undefined
-      } else if (attached) await output.update('')
+      } else if (attached && !keepFailedReading) await output.update('')
       // Thread switches rebuild the terminal surface. Redraw once at a confirmed
       // identity transition, rather than repainting the full client every poll.
       if (view && lastConfirmed !== view.thread) {

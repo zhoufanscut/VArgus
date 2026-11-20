@@ -253,7 +253,7 @@ trust_level = "trusted"
       await cp(install, legacyRoot, { recursive: true })
       const oldPath = join(legacyRoot, 'src/cli.ts')
       for (const [file, from, to] of [
-        ['src/cli/codex/state.ts', 'const workerVersion = 7', 'const workerVersion = 5'],
+        ['src/cli/codex/state.ts', 'const workerVersion = 8', 'const workerVersion = 5'],
         ['src/options.ts', 'export const DEFAULTS = {', 'export const DEFAULTS = { codexDraftHold: false,'],
         ['src/cli/codex/worker.ts', 'const hold = !!(lastReadings', 'const hold = !!(options.codexDraftHold && lastReadings'],
       ] as const) {
@@ -275,7 +275,7 @@ trust_level = "trusted"
       assert.match(upgraded.stdout, /helper upgraded/)
       const active = await runtime(), input = new PaneInput(active.target)
       assert.notEqual(active.pid, legacy.pid)
-      assert.equal(active.version, 7)
+      assert.equal(active.version, 8)
       assert.equal(active.thread, legacy.thread)
       assert.equal(active.transcript, legacy.transcript)
       assert.deepEqual(active.target, legacy.target)
@@ -338,8 +338,8 @@ trust_level = "trusted"
       const entryPath = join(replacement, 'src/cli.ts')
       const sourcePath = join(replacement, 'src/cli/codex/worker.ts')
       const source = await readFile(sourcePath, 'utf8'), entrySource = await readFile(entryPath, 'utf8')
-      assert.equal(source.split('await output.update(line)').length, 2)
-      const changed = source.replace('await output.update(line)', 'await output.update(line + " RELOAD_SOURCE_B")')
+      assert.equal(source.split('await output.update(line, width)').length, 2)
+      const changed = source.replace('await output.update(line, width)', 'await output.update(line + " RELOAD_SOURCE_B", width)')
       await writeFile(sourcePath, changed)
       const control = (action: string, flags: string[] = []) => exec(process.execPath, [entryPath, action, ...flags], {
         cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1', CODEX_THREAD_ID: first.thread },
@@ -357,7 +357,10 @@ trust_level = "trusted"
       await rename(first.transcript, first.transcript + '.held')
       await assert.rejects(control('reload'))
       assert.equal((await runtime()).pid, first.pid, 'unreadable transcript keeps healthy helper')
+      const expanded = async () => (await tmux('display-message', '-p', '-t', pane, '#{E:status-format[0]}')).replace(/#\[[^\]]*\]/g, '')
+      await wait(expanded, /token:6\.4k.*⚠ stale/)
       await rename(first.transcript + '.held', first.transcript)
+      await wait(async () => (await expanded()).includes('⚠ stale') ? 'stale' : await row(), /token:6\.4k/)
       assert.match((await control('reload')).stdout, /helper reloaded/)
       await wait(row, /RELOAD_SOURCE_B/)
       const second = await runtime()

@@ -62,6 +62,10 @@ test('Windows psmux refresh survives tty client names while retaining rendered r
       assert.ok(frame.status_format[1].includes('test'))
       assert.equal(await run('show-options', '-v', 'status'), '2')
     }
+    await run('set-option', '-p', '-t', pane, '@vargus_header_deadline', '1')
+    const stale = JSON.parse(await run('dump-state'))
+    assert.match(stale.status_left, /SECOND READING.* \| ⚠ stale/)
+    assert.doesNotMatch(stale.status_format[1], /⚠ stale/)
     await output.detach()
     assert.equal(await run('show-options', '-v', 'status'), 'on')
     assert.equal(await run('show-hooks'), hooksBefore)

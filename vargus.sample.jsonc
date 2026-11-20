@@ -23,9 +23,6 @@
   // Codex
   // "codexAutoStart": true,   // Let the installed startup hooks activate VArgus.
 
-  // Claude Code
-  // "blankStopped": false, // Hide a stale status line using the reader in docs/setup-claude.md.
-
   // Choose graphite, aurora, ember, nebula or daylight.
   "theme": "graphite"
 }

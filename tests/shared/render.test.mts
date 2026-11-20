@@ -1,3 +1,4 @@
+import { staleLine } from '../../src/render/freshness.ts'
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -84,4 +85,15 @@ test('quota windows retain labels, stale marks, reset times and dollar amounts',
 
   f.v.limits = [{ label: 'extra', percent: 40, resetsAt: 60_000, cost: { spentUsd: 20, limitUsd: 50 } }]
   assert.equal(limits(f), 'extra:40%($20.00/$50.00)(1m)')
+})
+
+test('stale rows keep the separator with the warning, fit complete readings, and leave empty rows empty', () => {
+  const row = 'sol | ctx:7% | token:3.2k'
+  assert.equal(staleLine(row), row + ' | ⚠ stale')
+  assert.equal(staleLine(row, 22), 'sol | ctx:7% | ⚠ stale')
+  assert.equal(staleLine(row, 8), '⚠ stale')
+  assert.equal(staleLine(''), '')
+  const sep = '\x1b[38;2;1;2;3m | \x1b[0m'
+  assert.equal(staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 22),
+    'sol' + sep + 'ctx:7% | ⚠ stale')
 })

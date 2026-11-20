@@ -25,6 +25,31 @@ import { makeTheme } from '../../src/theme/index.ts'
 const exec = promisify(execFile)
 const plain = makeTheme('graphite', true)
 
+test('a failed Antigravity refresh retains the same conversation’s last row until recovery', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-agy-stale-'))
+  const cacheDir = join(dir, 'cache'), brain = join(dir, 'brain', 'alpha')
+  const runtime = { cacheDir, home: dir, noColor: true, givenOptions: { repo: false, branch: false, status: false } }
+  const transcript = join(brain, 'transcript.jsonl')
+  const payload = { conversation_id: 'alpha', model: 'gemini-4-carbon', cwd: '/repo', transcript_path: transcript }
+  const transcriptCache = cachePath(cacheDir, 'transcript', transcript)
+  try {
+    await mkdir(brain, { recursive: true })
+    await writeFile(transcript, '{}\n')
+    const healthy = await renderAntigravityStatusLine(payload, runtime)
+    const saved = await readFile(transcriptCache, 'utf8')
+    // The next incremental read cannot restore this damaged skill list.
+    await writeFile(transcriptCache, JSON.stringify({ ...JSON.parse(saved), seenSkillsInTurn: 42 }))
+    await appendFile(transcript, '{}\n')
+    assert.equal(await renderAntigravityStatusLine(payload, runtime), healthy + ' | ⚠ stale')
+    const other = await renderAntigravityStatusLine({ ...payload, conversation_id: 'beta', model: 'gemini-4-argon' }, runtime)
+    assert.match(other, /argon/)
+    assert.doesNotMatch(other, /carbon|stale/)
+    assert.equal(await renderAntigravityStatusLine(payload, runtime), healthy + ' | ⚠ stale')
+    await writeFile(transcriptCache, saved)
+    assert.equal(await renderAntigravityStatusLine(payload, runtime), healthy)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
 test('Antigravity model catalog shortens Gemini/Claude families, keeps Orchestrator variants and preserves other IDs', () => {
   const catalog: readonly [string, string, string, string | undefined][] = [
     ['gemini-4-carbon-medium', 'Gemini 4 Carbon (Medium)', 'carbon', 'medium'],

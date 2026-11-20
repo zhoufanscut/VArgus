@@ -9,6 +9,7 @@ import { mountOmo, type OmoUi } from '../../outputs/omo.ts'
 import { parseOptions, resolveOptions } from '../../options.ts'
 import { resolveLabels } from '../../i18n/index.ts'
 import { makeTheme } from '../../theme/index.ts'
+import { REFRESH_GRACE_MS, staleLine } from '../../render/freshness.ts'
 import { render } from '../../render/index.ts'
 
 type Context = NativeContext & {
@@ -65,12 +66,19 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
     let disposed = false
     let values = collectOmo(ctx, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now(), options.spendLimit, labels)
+    let checkedAt = Date.now()
     const instance = {
       ctx,
       update(forceGit = false) {
         if (disposed) return
         const current = instance.ctx
-        values = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now(), options.spendLimit, labels)
+        try {
+          values = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now(), options.spendLimit, labels)
+          checkedAt = Date.now()
+        } catch {
+          output.refresh()
+          return
+        }
         if (options.rateLimits) {
           void kimi.refresh(current.model?.provider).then(() => {
             if (disposed || instance.ctx.model?.provider !== 'kimi-coding') return
@@ -97,14 +105,16 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
       },
     }
     const output = mountOmo(ctx.ui, width => {
-      const now = Date.now()
+      const stale = Date.now() - checkedAt >= REFRESH_GRACE_MS
+      const now = stale ? checkedAt : Date.now()
       const limits = options.rateLimits && instance.ctx.model?.provider === 'kimi-coding'
         ? kimi.readings(now, labels) : values.limits
-      return render({
+      const line = render({
         v: { ...values, limits, core: { ...values.core, columns: width, isWsl } },
         display: omoDisplay(values.session),
         o: options, l: labels, t: theme, now,
       })
+      return stale ? staleLine(line, width) : line
     })
     const unsubscribe = options.rateLimits ? pi.onSubscriptionLimits(() => instance.update()) : () => {}
     const timer = setInterval(() => instance.update(), 1000)

@@ -99,19 +99,15 @@ For a custom config directory or Windows, replace `$HOME/.claude` in `command` w
 config directory from step 2. Use forward slashes on Windows, for example `C:/Users/you/.claude`.
 In a literal path, escape backslashes, double quotes, dollar signs and backticks with a
 backslash for the shell, then JSON-escape the command. For example, a literal dollar sign in
-the path appears as `\\$` in JSON. Leave `$CLAUDE_CODE_SESSION_ID` and `$f` as written.
+the path appears as `\\$` in JSON. Leave `$CLAUDE_CODE_SESSION_ID` as written.
 
 ```json
 "statusLine": {
   "type": "command",
-  "command": "f=\"$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line\"; { [ ! -s \"$f.blank\" ] || [ -n \"$(find \"$f\" -mmin -2 2>/dev/null)\" ]; } && cat \"$f\" 2>/dev/null",
+  "command": "f=\"$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line\"; if [ -s \"$f\" ] && { IFS= read -r d && [ \"$(date +%s)\" -ge \"$d\" ] && IFS= read -r row; } 2>/dev/null < \"$f.live\"; then printf %s \"$row\"; else cat \"$f\" 2>/dev/null; fi",
   "refreshInterval": 1
 }
 ```
-
-The mod writes the effective **Blank a stopped line** setting beside the line for
-that session. It reads `blankStopped` from the shared file or Claude’s plugin
-settings and respects managed settings. The reader uses that value immediately.
 
 Run `/reload-plugins` or start a new session. If you moved from a user-wide install to a
 project-only install, remove any leftover VArgus `statusLine` from your user settings or restore
@@ -161,10 +157,6 @@ Claude shows the account-wide five-hour and seven-day limits when available.
 
 - **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only the usage
   colours carry hue). All but `daylight` assume a dark terminal.
-- **Blank a stopped line** (off by default) makes the mod refresh an unchanged
-  line every 30 seconds. With the option enabled, the reader hides a line older
-  than about two minutes. If you installed a reader from an earlier version,
-  run `vargus install claude` once or update the manual reader above.
 - **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.
   Other programs Claude Code starts see it too.
 
@@ -176,6 +168,8 @@ Claude shows the account-wide five-hour and seven-day limits when available.
 
 Then run `/reload-plugins`. Your `statusLine` entry doesn't change between versions. Installed
 from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-plugins`.
+If your VArgus reader command does not reference `$f.live`, rerun `vargus install claude` for a user-scope
+install or replace the command in the original scope using the manual setup above.
 
 ## Remove
 
@@ -210,9 +204,9 @@ from a clone: `git -C <clone> pull` (or check out the newer tag), then `/reload-
   folder's path holds a character cmd acts on (`&`, `,`, `;`, `=`, `^`, `%`, `!`, `(`, `)` and
   others), it hands cmd nothing: the line is written in place (a refresh can catch it
   half-written) and session folders are not removed.
-- A line can lag the session by up to about two seconds. If the plugin stops (turned off, or a
-  crash), the last line stays on screen with frozen numbers, unless **Blank a stopped line** is
-  on.
+- A line can lag the session by up to about two seconds. If the mod stops checking in,
+  the reader shows the last readings with `| ⚠ stale` after their deadline expires.
+  A fresh check-in clears the marker. Old readers need the reader upgrade above.
 
 ## Readings
 

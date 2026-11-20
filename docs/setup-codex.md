@@ -106,6 +106,12 @@ If the row is blank and the current view is unknown, see
 [footer restoration and typing](#footer-restoration-and-typing) and
 [narrow terminals and SSH](#narrow-terminals-and-ssh).
 
+If the worker misses its check-ins, the next bar redraw shows the last readings
+with `| ⚠ stale`. This also applies when a previously readable transcript
+becomes unreadable while its view is still identified. The marker clears after a successful update, including a
+normal update while you type. The bar follows your existing `status-interval`.
+With periodic redraws disabled, the marker can appear on the next redraw.
+
 ## Configure
 
 The installed hooks and manual activation both read `vargus.jsonc` from the
@@ -175,6 +181,9 @@ retain their full saved options until a fresh activation. Reload flags override 
 only supplied keys, and `--theme`/`--config` are applied in command order. A reload
 while off stays off, including pending footer restoration and manual-off suppression
 recorded by an interrupted off command.
+If multiple panes share a bar from before the stale marker was introduced,
+turn VArgus off in all of them before re-enabling it. This releases the old
+shared layout so the next attachment can install the new format.
 An older helper without reload metadata stays running and reports how to migrate:
 run `!vargus off`, then `!vargus on` with your original options once. Unreadable
 history leaves a healthy helper running. Failed replacement retains backups and

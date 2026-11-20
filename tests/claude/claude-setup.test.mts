@@ -55,7 +55,7 @@ async function fixture(t: TestContext) {
   }
 }
 
-test('Claude installer preserves plugin settings and reloads the reader option on repeat install', { skip: process.platform === 'win32' }, async t => {
+test('Claude installer preserves plugin settings and keeps an idle line visible on repeat install', { skip: process.platform === 'win32' }, async t => {
   const f = await fixture(t)
   await writeFile(f.settings, JSON.stringify({ model: 'fixture-model', enabledPlugins: { 'other@market': true } }))
   await f.install()
@@ -81,7 +81,7 @@ test('Claude installer preserves plugin settings and reloads the reader option o
   assert.equal((await read(statusLine.command)).stdout, 'VArgus reader canary\n')
   const stale = new Date(Date.now() - 180000)
   await utimes(line, stale, stale)
-  await assert.rejects(read(statusLine.command), { code: 1 })
+  assert.equal((await read(statusLine.command)).stdout, 'VArgus reader canary\n')
   const saved = await readFile(f.settings, 'utf8')
   await f.install()
   assert.equal(await readFile(f.settings, 'utf8'), saved)
@@ -116,27 +116,39 @@ test('Claude installer protects a custom reader and skips configuration if plugi
   assert.match(await readFile(f.calls, 'utf8'), /"install","vargus"/)
 })
 
-test('the installed reader follows the session marker when shared and native blankStopped disagree', { skip: process.platform === 'win32' }, async t => {
+test('reinstall upgrades the old VArgus age-check readers in place', { skip: process.platform === 'win32' }, async t => {
   const f = await fixture(t)
-  const root = join(f.config, 'other checkout')
-  await mkdir(root)
-  await writeFile(f.settings, JSON.stringify({
-    statusLine: { type: 'command', command: 'cat "$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null' },
-    extraKnownMarketplaces: { vargus: { source: { source: 'directory', path: root } } },
-    enabledPlugins: { [id]: true },
-    pluginConfigs: { [id]: { options: { blankStopped: false } } },
-  }))
-  await writeFile(join(root, 'vargus.jsonc'), '// shared reader setting\n{"blankStopped":true}')
-  await f.install()
+  const path = '$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line'
+  const fresh = '[ -n "$(find "$f" -mmin -2 2>/dev/null)" ]'
+  const oldCommands = [
+    `f="${path}"; ${fresh} && cat "$f"`,
+    `f="${path}"; { [ ! -s "$f.blank" ] || ${fresh}; } && cat "$f" 2>/dev/null`,
+    `f="${path}"; { [ -f "$f.blank" ] && [ ! -s "$f.blank" ] || ${fresh}; } && cat "$f" 2>/dev/null`,
+  ]
   const line = join(f.config, 'plugins/data/vargus-vargus/S1/line')
   await mkdir(dirname(line), { recursive: true })
   await writeFile(line, 'idle row')
+  await writeFile(line + '.blank', '1')
   const stale = new Date(Date.now() - 180000)
   await utimes(line, stale, stale)
-  const { command } = (await f.load()).statusLine
-  const read = () => exec('sh', ['-c', command], { env: { PATH: process.env.PATH, CLAUDE_CODE_SESSION_ID: 'S1' } })
-  await writeFile(line + '.blank', '')
-  assert.equal((await read()).stdout, 'idle row')
-  await writeFile(line + '.blank', '1')
-  await assert.rejects(read(), { code: 1 })
+
+  for (const command of oldCommands) {
+    await writeFile(f.settings, JSON.stringify({
+      statusLine: { type: 'command', command, padding: 3 },
+      pluginConfigs: { [id]: { options: { blankStopped: true } } },
+    }))
+    await f.install()
+    const { statusLine } = await f.load()
+    assert.equal(statusLine.padding, 3)
+    const read = await exec('sh', ['-c', statusLine.command], {
+      env: { PATH: process.env.PATH, CLAUDE_CODE_SESSION_ID: 'S1' },
+    })
+    assert.equal(read.stdout, 'idle row')
+    await writeFile(line + '.live', '1\nidle row | ⚠ stale\n')
+    const expired = await exec('sh', ['-c', statusLine.command], {
+      env: { PATH: process.env.PATH, CLAUDE_CODE_SESSION_ID: 'S1' },
+    })
+    assert.equal(expired.stdout, 'idle row | ⚠ stale')
+    await rm(line + '.live')
+  }
 })

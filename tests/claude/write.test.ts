@@ -18,8 +18,8 @@ const FOLDER_ONLY = {
 }
 
 type World = {
+  checkIns: string[]
   writes: { path: string; text: string }[]
-  blankMarkers: { path: string; text: string }[]
   runs: string[][]
   id: string
   // mv's exit code, or 'throw' for a refused process
@@ -48,7 +48,7 @@ function world(
   pathStyle: 'posix' | 'drive' = 'posix',
 ): World {
   const w: World = {
-    writes: [], blankMarkers: [], runs: [], id: 'S1', mv: 0, tmpFails: false, cwd: () => '/home/u/proj/x',
+    checkIns: [], writes: [], runs: [], id: 'S1', mv: 0, tmpFails: false, cwd: () => '/home/u/proj/x',
     holdMs: 0, rmHoldMs: 0, listHoldMs: 0, inFlight: 0, maxInFlight: 0, started: [], tree: {}, dirTimes: {},
   }
   mock.env(on, env)
@@ -62,8 +62,8 @@ function world(
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   const key = (path: string) => fixtureFsPath(path, pathStyle)
   on('fs.write', async ($, e) => {
-    if (e.path.endsWith('line.blank')) {
-      w.blankMarkers.push({ path: key(e.path), text: e.text })
+    if (e.path.endsWith('/line.live')) {
+      w.checkIns.push(e.text)
       return { value: undefined }
     }
     w.inFlight += 1
@@ -107,12 +107,15 @@ describe('line file', () => {
     expect(w.runs).toEqual([['mv', '-f', `${DATA}/S1/line.42.tmp`, `${DATA}/S1/line`]])
   })
 
-  test('a tick with the same text and id writes nothing; a new id writes again', FOLDER_ONLY, async ($, on) => {
+  test('an idle line stays untouched even with the retired option saved; a new id writes again',
+    { options: { ...FOLDER_ONLY.options, blankStopped: true } }, async ($, on) => {
     const clock = mock.clock(on, { now: 1 })
     const w = world(on, clock)
     await $.session.start(start)
-    await clock.advance(1000)
+    await clock.advance(120_000)
     expect(w.writes).toHaveLength(1)
+    expect(w.checkIns[0]).toBe('6\n~/proj/x | ⚠ stale\n')
+    expect(w.checkIns.at(-1)).toBe('126\n~/proj/x | ⚠ stale\n')
     w.id = 'S2'
     await clock.advance(1000)
     expect(w.writes.map(x => x.path)).toEqual([`${DATA}/S1/line.1.tmp`, `${DATA}/S2/line.1.tmp`])
@@ -514,43 +517,5 @@ describe('the age prune at session.start', () => {
     await $.session.start(start)
     await clock.settle()
     expect(removed(w)).toEqual([])
-  })
-})
-
-describe('blankStopped: the heartbeat write', () => {
-  const HEART = { options: { ...FOLDER_ONLY.options, blankStopped: true } }
-
-  test('an unchanged line is written again every 30 s', HEART, async ($, on) => {
-    const clock = mock.clock(on, { now: 0 })
-    const w = world(on, clock)
-    await $.session.start(start)
-    await clock.settle()
-    await clock.advance(29_000)
-    expect(w.writes).toHaveLength(1)
-    await clock.advance(1_000)
-    expect(w.writes).toHaveLength(2)
-    expect(w.writes[1]).toEqual({ path: `${DATA}/S1/line.0.tmp`, text: '~/proj/x' })
-    await clock.advance(30_000)
-    expect(w.writes).toHaveLength(3)
-    expect(w.blankMarkers).toEqual([{ path: `${DATA}/S1/line.blank`, text: '1' }])
-  })
-
-  test('off: an unchanged line is never written again', FOLDER_ONLY, async ($, on) => {
-    const clock = mock.clock(on, { now: 0 })
-    const w = world(on, clock)
-    await $.session.start(start)
-    await clock.advance(120_000)
-    expect(w.writes).toHaveLength(1)
-    expect(w.blankMarkers).toEqual([{ path: `${DATA}/S1/line.blank`, text: '' }])
-  })
-
-  test('not for an ended session', HEART, async ($, on) => {
-    const clock = mock.clock(on, { now: 0 })
-    const w = world(on, clock)
-    await $.session.start(start)
-    await clock.settle()
-    await $.session.end({ reason: 'prompt_input_exit', sessionId: 'S1', resume: { id: 'S1' } })
-    await clock.advance(120_000)
-    expect(w.writes).toHaveLength(1)
   })
 })

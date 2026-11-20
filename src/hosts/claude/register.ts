@@ -41,7 +41,7 @@ async function refresh($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
   values.limits = options.rateLimits ? claudeQuotaReadings(quota, options, labels, now) : []
   const text = render({ v: values, display: claudeDisplay(values.session), o: options, l: labels, t: theme, now })
-  await writeLine($, writer, text)
+  await writeLine($, writer, text, values.core.columns)
 }
 
 async function isWsl($: EngineInterface): Promise<boolean> {
@@ -56,7 +56,6 @@ async function isWsl($: EngineInterface): Promise<boolean> {
 function configure($: EngineInterface, e: SessionStartInput, next: Options, noColor: boolean, previous?: Options): void {
   options = next
   theme = makeTheme(next.theme, noColor)
-  if (writer) writer.heartbeatMs = next.blankStopped ? 30_000 : null
   const hasVcs = next.repo || next.branch || next.status
   const hadVcs = previous?.repo || previous?.branch || previous?.status
   if (hasVcs && !hadVcs) startVcs($, values.vcs, e)

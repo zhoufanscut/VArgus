@@ -77,11 +77,15 @@ and colours percentages, formats amounts and reset times, skips expired
 windows, and keeps windows without a known reset. Host-marked spend windows
 can exceed 100%. Each host decides which readings are current, stale or absent.
 
+A whole-row freshness warning appends ` | ⚠ stale` to the last available readings.
+The [formatter](src/render/freshness.ts) drops trailing readings when needed to
+fit the warning. Missing individual metrics retain their own display rules.
+
 ### Config
 
 [Shared defaults](src/options.ts) and the Claude manifest agree on picker keys
 and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
-The spend and stopped-line options default off.
+The spend option defaults off.
 The shared `callCounts` setting controls the tool, agent and skill counts together.
 Codex's [startup hook option](src/hosts/codex/options.ts) defaults on.
 Explicit activation or hook installation enables its tmux integration.
@@ -326,6 +330,14 @@ VArgus and preserves later user changes. The last owner releases the added
 layout. Dead-owner pruning on subsequent controls recovers abandoned rows.
 The adapter refuses to overwrite a full status bar or reset a live owner.
 
+Each successful row update publishes a pane-local deadline five seconds ahead,
+rounded up to the next Unix second, and a width-fitted stale row. The status
+format compares that deadline with the multiplexer’s clock on redraw. Held
+draft readings renew the deadline. A read error for the same identified view
+leaves its existing deadline to expire. Empty rows clear it. The bar keeps its
+existing redraw interval. The Windows scalar header and appended layout have
+separate deadline fields so only the VArgus row can select the stale text.
+
 ### Native Windows Codex and psmux
 
 Windows uses CIM process ancestry and psmux `dump-state` for pane and cursor
@@ -376,12 +388,20 @@ It persists enabled state and explicit overrides, so changes to other file
 keys still apply after reload. Legacy full snapshots retain their saved
 values.
 
+The OmO widget compares its last successful collection time on each draw. A
+failed collection retains the readings and requests a redraw, including on the
+one-second timer. A blocked UI needs a later host redraw to show the marker.
+
 ## Antigravity CLI native statusLine
 
 The [command](src/cli/antigravity.ts) runs once per host refresh. It reads
 stdin JSON and emits one ANSI line with two leading spaces, included in the
 width budget. Empty or invalid input can exit successfully with no row.
-Lazy dispatch keeps this path independent of the Codex and tmux modules.
+Successful rows for identified conversations are cached alongside the transcript
+and Git caches. A collection exception can reuse that conversation’s row for
+the same workspace, profile, options and colour mode. With no further invocation
+there is no observer to draw a warning. Lazy dispatch keeps this path
+independent of the Codex and tmux modules.
 The `agy` 1.5.8 Linux probe on 2026-11-14 observed roughly 300 ms streaming
 refreshes, which is why transcript and Git state are cached across invocations.
 
@@ -485,7 +505,10 @@ traffic flag. The credential stays out of the cache.
 Interactive sessions start the writer, enabled collectors and a one-second
 render timer. The first render starts without blocking prompt startup.
 A `PromptHint` hook observes the viewport width. Identical text for the
-same session ID skips a write, except for the optional stopped-line heartbeat.
+same session ID skips rewriting the line. A completed refresh renews a
+companion `line.live` file on text or width changes and every two seconds
+during healthy idle ticks.
+It holds the deadline and width-fitted stale text on separate terminated lines.
 
 ### The line file
 
@@ -508,14 +531,12 @@ share the file and can overwrite or remove each other's row.
 
 ### The reader
 
-The normal reader prints the per-session file with `cat`. The
+The reader prints the per-session file with `cat` until the deadline expires,
+then prints the complete stale row from `line.live`. An absent or incomplete
+check-in falls back to the ordinary line. The
 `CLAUDE_CODE_SESSION_ID` supplied to the reader matches the writer's ID in
-the Claude Code 2.1.300 probe. The writer records its effective `blankStopped`
-in the session's `line.blank` when the session or setting changes. A nonempty
-marker pairs a 30-second heartbeat with the reader's mtime check. An empty
-marker keeps an unchanged row visible even when a checkout and managed setting
-disagree. For a session from an older writer with no marker, the installer
-retains the age-check behavior selected by the user's native setting. The
+the Claude Code 2.1.300 probe. Reinstalling upgrades the earlier plain and
+age-check VArgus readers. The
 [setup guide](docs/setup-claude.md#set-up-the-status-line) owns the commands.
 [Reader tests](tests/claude/reader.test.sh) cover a present, missing and stale
 file and an empty session ID.
@@ -579,6 +600,15 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   validation exit 1 for those warnings.
 
 ### Live evidence and limits
+
+On Linux, an attached tmux client with `status-interval 1` displayed
+`⚠ stale` after the writer stopped checking in. The probe supplied no keys
+or redraw commands while waiting. Publishing the identical reading again
+cleared the marker in the expanded status format. The reported Windows
+psmux 3.4.0 test observed automatic expiry and recovery in the appended row;
+with `status-interval 0`, expiry became visible on manual redraw. The Windows
+scalar header has a command-contract fixture and a native regression test;
+the reported Windows probe covered the appended layout.
 
 On Linux on 2026-11-20, a checkout installed with `vargus install claude`
 ran in Claude Code 2.1.323 with a saved native `model: true` and a shared

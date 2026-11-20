@@ -49,7 +49,7 @@ function world(on: On, clock: MockClock): World {
   on('session.cwd', async () => ({ value: CWD }))
   on('session.repo', async () => ({ value: w.repo }))
   on('fs.write', async ($, e) => {
-    w.writes.push(e.text)
+    if (!e.path.endsWith('.live')) w.writes.push(e.text)
     return { value: undefined }
   })
   on('fs.exists', async ($, e) => {

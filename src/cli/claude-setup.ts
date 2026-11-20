@@ -9,7 +9,12 @@ const PLUGIN = `vargus@${MARKETPLACE}`
 const LINE = '/$CLAUDE_CODE_SESSION_ID/line'
 const exec = promisify(execFile)
 
-function reader(path: string, legacyBlank: boolean): string {
+function reader(path: string): string {
+  return `f="${path}"; if [ -s "$f" ] && { IFS= read -r d && [ "$(date +%s)" -ge "$d" ] && IFS= read -r row; } 2>/dev/null < "$f.live"; then printf %s "$row"; else cat "$f" 2>/dev/null; fi`
+}
+
+// Recognize the old generated commands so reinstall can replace them in place.
+function legacyReader(path: string, legacyBlank: boolean): string {
   const keep = legacyBlank ? '[ -f "$f.blank" ] && [ ! -s "$f.blank" ]' : '[ ! -s "$f.blank" ]'
   return `f="${path}"; { ${keep} || [ -n "$(find "$f" -mmin -2 2>/dev/null)" ]; } && cat "$f" 2>/dev/null`
 }
@@ -17,7 +22,7 @@ function reader(path: string, legacyBlank: boolean): string {
 function isVargusReader(command: string): boolean {
   const path = /^(?:cat |f=)"((?:\\.|[^"\\\r\n])+)"/.exec(command)?.[1]
   if (!path?.endsWith(`/${DATA_FOLDER}${LINE}`)) return false
-  return command === reader(path, false) || command === reader(path, true)
+  return command === reader(path) || command === legacyReader(path, false) || command === legacyReader(path, true)
     || command === `cat "${path}" 2>/dev/null`
     || command === `f="${path}"; [ -n "$(find "$f" -mmin -2 2>/dev/null)" ] && cat "$f"`
 }
@@ -28,9 +33,8 @@ function nextStatusLine(settings: Record<string, unknown>, file: string, data: s
     || typeof current.command !== 'string' || !isVargusReader(current.command.trim()))) {
     throw new Error(`A different statusLine is configured in ${file}. Back it up and remove that entry before retrying.`)
   }
-  const plugins = settings.pluginConfigs as Record<string, { options?: { blankStopped?: boolean } }> | undefined
-  const blank = plugins?.[PLUGIN]?.options?.blankStopped === true
-  const command = reader(data.replace(/["\\$`]/g, '\\$&') + LINE, blank)
+  const path = data.replace(/["\\$`]/g, '\\$&') + LINE
+  const command = reader(path)
   if (current?.command === command) return undefined
   return { ...current, type: 'command', command, refreshInterval: 1 }
 }

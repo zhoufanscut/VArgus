@@ -1,5 +1,6 @@
 import { homedir, release } from 'node:os'
-import { defaultCacheDir } from '../hosts/antigravity/cache.ts'
+import { staleLine } from '../render/freshness.ts'
+import { cachePath, defaultCacheDir, readCache, writeCache } from '../hosts/antigravity/cache.ts'
 import { collectAntigravityPayload, type AntigravityPayload } from '../hosts/antigravity/collect.ts'
 import { antigravityDisplay } from '../hosts/antigravity/display.ts'
 import { readTranscriptState, resolveTranscriptPath } from '../hosts/antigravity/transcript.ts'
@@ -31,6 +32,28 @@ export async function renderAntigravityStatusLine(
   payload: AntigravityPayload,
   runtime: StatuslineRuntime = {},
 ): Promise<string> {
+  const id = payload.conversation_id || payload.session_id
+  if (typeof id !== 'string' || !id.trim()) return collectLine(payload, runtime)
+  const dir = runtime.cacheDir ?? defaultCacheDir()
+  const key = JSON.stringify([runtime.appDataDir ?? process.env.ANTIGRAVITY_APP_DATA_DIR, runtime.home ?? homedir(),
+    id, payload.workspace?.current_dir ?? payload.cwd ?? runtime.fallbackCwd ?? process.cwd(),
+    resolveOptions(runtime.givenOptions ?? {}), runtime.noColor ?? Boolean(process.env.NO_COLOR)])
+  const file = cachePath(dir, 'row', key)
+  const previous = await readCache<string>(file)
+  let line: string
+  try {
+    line = await collectLine(payload, runtime)
+  } catch (error) {
+    if (!previous || typeof previous !== 'string') throw error
+    const width = payload.terminal_width
+    return STATUSLINE_PADDING + staleLine(previous.slice(STATUSLINE_PADDING.length),
+      width && width > 0 ? width - STATUSLINE_PADDING.length : undefined)
+  }
+  if (line !== previous) await writeCache(dir, file, line).catch(() => {})
+  return line
+}
+
+async function collectLine(payload: AntigravityPayload, runtime: StatuslineRuntime): Promise<string> {
   const now = runtime.now ?? Date.now()
   const home = runtime.home ?? homedir()
   const appDataDir = runtime.appDataDir ?? process.env.ANTIGRAVITY_APP_DATA_DIR

@@ -33,6 +33,14 @@ class NativeServer {
 
   value(option: string, pane = '%0') { return this.panes.get(pane)?.get(option) ?? this.options.get(option) ?? '' }
 
+  expand(format: string): string {
+    return format.replace(/#\{\?#\{&&:#\{(@vargus_\w*deadline)\},#\{>=:#\{T:@vargus_clock\},#\{\1\}\}\},#\{@vargus_stale\},#\{(@vargus_\w+)\}\}/g,
+      (_, deadline: string, line: string) => {
+        const until = Number(this.value(deadline, this.activePane))
+        return this.value(until && until <= Date.now() / 1000 ? '@vargus_stale' : line, this.activePane)
+      }).replace(/#\{(@[\w-]+)\}/g, (_, name: string) => this.value(name, this.activePane))
+  }
+
   async command(...args: string[]): Promise<string> {
     const separator = args.indexOf(';')
     if (separator >= 0) {
@@ -47,12 +55,12 @@ class NativeServer {
       if (option === '#{session_id}') return '$1'
       if (option === '#{window_width}') return '80'
       if (option === '#{m/r:[^ ],#{P:#{@vargus_owner}}}') return this.value('@vargus_owner', this.activePane) ? '1' : '0'
-      if (option === '#{@vargus_line}') return this.value('@vargus_line')
+      if (option === '#{@vargus_line}' || option.startsWith('#{?#{&&:')) return this.expand(option)
       this.templates++
       return 'ORIGINAL INFO'
     }
     if (command === 'dump-state') return JSON.stringify({ status_format: this.formats.map(format =>
-      format.replace(/#\{(@[\w-]+)\}/g, (_, name: string) => this.value(name))) })
+      this.expand(format)) })
     if (command === 'list-windows') return [...this.localOptions.keys()].join('\n')
     if (command === 'show-hooks') return [...this.hooks].flatMap(([event, commands]) => commands.map((command, i) =>
       `${event}${commands.length > 1 ? `[${i}]` : ''} -> ${command}`)).join('\n')
@@ -114,6 +122,33 @@ async function rig() {
       .map(async name => JSON.parse(await readFile(join(root, name), 'utf8')))),
     close: () => rm(root, { recursive: true, force: true }) }
 }
+
+test('native stale readings occupy only the VArgus slot in each layout', async t => {
+  let now = 100000
+  t.mock.method(Date, 'now', () => now)
+  for (const scalar of [true, false]) {
+    const r = await rig(), output = r.output()
+    if (!scalar) r.server.formats.push('ORIGINAL')
+    try {
+      await output.attach(); await output.update('sol | ctx:7%')
+      const rows = () => [r.server.expand(r.server.options.get('status-left')!), r.server.expand(r.server.formats[1]!)]
+      const at = scalar ? 0 : 1
+      assert.match(rows()[at]!, /ctx:7%/)
+      assert.doesNotMatch(rows().join(''), /⚠ stale/)
+      now += 6000
+      assert.match(rows()[at]!, /sol \| ctx:7% \| ⚠ stale/)
+      assert.doesNotMatch(rows()[1 - at]!, /⚠ stale/)
+      await output.update('sol | ctx:7%')
+      assert.doesNotMatch(rows().join(''), /⚠ stale/)
+      await output.update('')
+      now += 6000
+      assert.doesNotMatch(rows().join(''), /⚠ stale/)
+      await output.detach()
+      assert.equal(r.server.value('@vargus_deadline'), '')
+      assert.equal(r.server.value('@vargus_header_deadline'), '')
+    } finally { await output.detach(); await r.close() }
+  }
+})
 
 test('native attachment rolls back rejected writes before and after their application and can retry', async () => {
   for (const option of ['@vargus_original_left', 'status-left', 'status-left-length', 'status-right-length', '@vargus_native_layout', 'status', '@vargus_owner']) {
