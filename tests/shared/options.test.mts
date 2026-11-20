@@ -4,11 +4,14 @@ import { readFile } from 'node:fs/promises'
 import { DEFAULTS, editOption, parseOptions } from '../../src/options.ts'
 import { resolveCodexOptions, workerOptions } from '../../src/hosts/codex/options.ts'
 
-test('the commented example documents the defaults and each switch can be enabled on its own', async () => {
+test('the sample lists shared defaults in order and each switch can be enabled on its own', async () => {
   const example = await readFile('vargus.sample.jsonc', 'utf8')
   assert.deepEqual(parseOptions(example), { theme: 'graphite' })
   const uncommented = example.replace(/^(\s*)\/\/ (")/gm, '$1$2')
-  assert.deepEqual(parseOptions(uncommented), resolveCodexOptions({}))
+  const sample = parseOptions(uncommented)
+  assert.deepEqual(sample, resolveCodexOptions({}))
+  const sharedKeys = Object.keys(sample).filter(key => Object.hasOwn(DEFAULTS, key))
+  assert.deepEqual(Object.keys(DEFAULTS), sharedKeys)
   for (const line of example.split('\n').filter(line => /^\s*\/\/ "/.test(line))) {
     const key = line.match(/"(\w+)"/)![1]!
     assert.ok(Object.hasOwn(parseOptions(example.replace(line, line.replace('// ', ''))), key))

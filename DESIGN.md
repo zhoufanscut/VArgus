@@ -80,7 +80,8 @@ can exceed 100%. Each host decides which readings are current, stale or absent.
 ### Config
 
 [Shared defaults](src/options.ts) and the Claude manifest agree on picker keys
-and defaults. Existing optional spend, other-model weekly, workflow,
+and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
+Existing optional spend, other-model weekly, workflow,
 detached-HEAD and stopped-line options default off. Codex resolves its
 [extra options](src/hosts/codex/options.ts) separately. Its agent count, skill
 count and installed startup hooks default on. Explicit activation or hook
