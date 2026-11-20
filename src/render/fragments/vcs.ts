@@ -10,12 +10,12 @@ import { cleanText } from '../text.ts'
 export const repo: Fragment = ({ v, l, t }) =>
   v.vcs.kind && v.vcs.repo ? t.paint('label', `${l.repo}:`) + t.paint('gradLow', cleanText(v.vcs.repo)) : null
 
-// git: branch:main, branch:main (wt:x), and with the detachedHead option
+// git: branch:main, branch:main (wt:x), or a detached HEAD:
 // branch:@v1.0, branch:@a1b2c3d (bisect), branch:feat (rebase 2/3).
-// svn: branch:trunk@12345, the working copy's revision after `@`.
+// svn: branch:trunk.
 export const branch: Fragment = f => {
   const { v, l, t } = f
-  const head = v.vcs.kind === 'svn' ? svnHead(f) : v.vcs.kind === 'git' ? gitHead(f) : null
+  const head = branchName(f)
   if (!head) return null
   const wt = v.vcs.kind === 'git' && v.vcs.worktree
     ? ` ${t.paint('label', l.worktree)}${t.paint('gradLow', cleanText(v.vcs.worktree))}${t.paint('label', ')')}`
@@ -23,18 +23,11 @@ export const branch: Fragment = f => {
   return `${t.paint('label', `${l.branch}:`)}${head}${wt}`
 }
 
-function svnHead({ v, l, t }: FragmentInput): string | null {
-  if (!v.vcs.branch) return null
-  const revision = v.vcs.revision ? t.paint('label', l.detachedAt) + t.paint('gradLow', cleanText(v.vcs.revision)) : ''
-  return t.paint('gradLow', cleanText(v.vcs.branch)) + revision
-}
-
-// A detached HEAD shows only with the option on, as in VantageHUD; off, the
-// branch fragment is left out. The operation shows only here, as there.
-function gitHead({ v, o, l, t }: FragmentInput): string | null {
+function branchName({ v, l, t }: FragmentInput): string | null {
+  if (!v.vcs.kind) return null
   if (v.vcs.branch) return t.paint('gradLow', cleanText(v.vcs.branch))
   const d = v.vcs.detached
-  if (!o.detachedHead || !d) return null
+  if (v.vcs.kind !== 'git' || !d) return null
   const name = t.paint('gradLow', cleanText(d.name))
   const head = d.onBranch ? name : t.paint('label', l.detachedAt) + name
   if (!d.operation) return head

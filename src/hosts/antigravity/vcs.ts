@@ -10,7 +10,6 @@ const HOLD_FACTOR = 10
 type VcsCache = {
   version: 1
   cwd: string
-  detachedHead: boolean
   lastEnd: number
   lastMs: number
   mutatingBySession: Record<string, number>
@@ -19,17 +18,16 @@ type VcsCache = {
 
 export async function readCachedGit(
   cwd: string,
-  detachedHead: boolean,
   sessionKey: string,
   mutatingToolsSeen: number,
   cacheDir: string,
   now = Date.now(),
 ): Promise<VcsValues> {
   if (!cwd) return initialVcs()
-  const file = cachePath(cacheDir, 'vcs', `${cwd}\0${detachedHead ? '1' : '0'}`)
+  const file = cachePath(cacheDir, 'vcs', cwd)
   const cached = await readCache<VcsCache>(file)
   const mutatingMap: Record<string, number> = { ...(cached?.mutatingBySession ?? {}) }
-  if (cached && cached.version === 1 && cached.cwd === cwd && cached.detachedHead === detachedHead) {
+  if (cached && cached.version === 1 && cached.cwd === cwd) {
     const hold = HOLD_FACTOR * Math.max(0, cached.lastMs)
     const previous = sessionKey ? cached.mutatingBySession?.[sessionKey] : undefined
     const asked = previous !== undefined && mutatingToolsSeen > previous
@@ -47,13 +45,12 @@ export async function readCachedGit(
   }
 
   const start = Date.now()
-  const vcs = await readGit(cwd, detachedHead)
+  const vcs = await readGit(cwd)
   const end = Date.now()
   if (sessionKey) mutatingMap[sessionKey] = mutatingToolsSeen
   const entry: VcsCache = {
     version: 1,
     cwd,
-    detachedHead,
     lastEnd: now + Math.max(0, end - start),
     lastMs: Math.max(0, end - start),
     mutatingBySession: trimSessionMap(mutatingMap),

@@ -75,7 +75,6 @@ export async function renderAntigravityStatusLine(
   if (collectVcs && values.core.cwd) {
     values.vcs = await readCachedGit(
       values.core.cwd,
-      options.detachedHead,
       sessionKey,
       mutatingToolsSeen,
       cacheDir,

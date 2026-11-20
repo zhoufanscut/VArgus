@@ -81,7 +81,7 @@ can exceed 100%. Each host decides which readings are current, stale or absent.
 
 [Shared defaults](src/options.ts) and the Claude manifest agree on picker keys
 and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
-The spend, detached-HEAD and stopped-line options default off.
+The spend and stopped-line options default off.
 Codex resolves its [extra options](src/hosts/codex/options.ts)
 separately. Its agent count, skill count and installed startup hooks default on.
 Explicit activation or hook installation enables its tmux integration.
@@ -164,15 +164,19 @@ display text written directly into fragments.
 uses its own [Git and SVN collector](src/hosts/claude/collect/vcs.ts) through the
 mod API. Both Git readers use porcelain status with `GIT_OPTIONAL_LOCKS=0` and
 `core.fsmonitor=false` to avoid rewriting the user's index or invoking its
-filesystem monitor. Detached names and in-progress operations use the actual
-worktree's metadata. The folder fragment keeps the session's working directory.
+filesystem monitor. When porcelain reports `# branch.head (detached)`, the
+branch fragment uses the actual worktree's metadata to name the checkout and
+show any in-progress operation. The `branch` switch controls this fragment
+for both attached and detached checkouts. Older `detachedHead` settings are
+ignored. The folder fragment keeps the session's working directory.
 
 Hosts gate polling on the repository, branch and status switches. They poll
 on a five-second baseline and hold off a slow walk by ten times its duration.
 Claude, OmO and Antigravity can request earlier work after relevant tools
 subject to that hold. A directory or worktree change invalidates old readings.
 Claude falls back to local SVN XML in a working copy outside Git, counting
-property as well as item status.
+property as well as item status. The SVN branch label shows the name from
+the repository URL, for example `branch:trunk`.
 
 ## Codex CLI
 
@@ -396,10 +400,9 @@ Session age, uncached tokens and call counts come from the active log.
 Context's input tokens measure the live window. Skill counts require known
 skill roots and deduplicate within a turn.
 
-[Git cache](src/hosts/antigravity/vcs.ts) is scoped to the working directory
-and detached-head option. Mutating tools can trigger a refresh after the
-slow-walk hold. Each Git subprocess has a four-second timeout to leave room
-inside the host's status command budget.
+[Git cache](src/hosts/antigravity/vcs.ts) is scoped to the working directory.
+Mutating tools can trigger a refresh after the slow-walk hold. Each Git subprocess
+has a four-second timeout to leave room inside the host's status command budget.
 
 Setup in the agent sandbox hands the final change to the user. The Linux
 `agy` 1.5.8 probe was denied a read of the protected settings file. The host's
@@ -556,7 +559,9 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
 
 - `npm run test:local` type-checks the Node graph and exercises shared rendering,
   import boundaries, installers and local fixtures. The Codex replay fixtures
-  check which counters belong to each thread. The suite also checks the psmux
+  check which counters belong to each thread. A separate Codex row test checks
+  out a tag in a real linked worktree and renders it with defaults and with
+  the former `detachedHead: false` setting. The suite also checks the psmux
   command contract.
 - `npm test` adds native Codex and multiplexer integration tests through the
   [platform-aware runner](tests/run-node.mjs). Codex tests with a localhost

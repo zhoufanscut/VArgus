@@ -127,7 +127,7 @@ async function readDetachedHead(cwd: string, gitDir: string, timeout: number): P
   return name ? { name, onBranch: false, operation, progress } : null
 }
 
-export async function readGit(cwd: string, detachedHead = false, timeout = GIT_TIMEOUT_MS): Promise<VcsValues> {
+export async function readGit(cwd: string, timeout = GIT_TIMEOUT_MS): Promise<VcsValues> {
   const out = initialVcs()
   if (!cwd) return out
   try {
@@ -145,7 +145,7 @@ export async function readGit(cwd: string, detachedHead = false, timeout = GIT_T
     const parsed = parseGitStatus(statusRun.stdout)
     out.counts = parsed.counts
     if (parsed.head === '(detached)') {
-      out.detached = gitDir && detachedHead ? await readDetachedHead(cwd, gitDir, timeout) : null
+      out.detached = gitDir ? await readDetachedHead(cwd, gitDir, timeout) : null
     } else {
       out.branch = parsed.head
     }

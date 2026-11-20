@@ -4,7 +4,7 @@ import { readGit } from '../../node/git.ts'
 
 const GIT_TIMEOUT_MS = 30_000
 
-export function pollGit(detachedHead: boolean): (values: Values) => void {
+export function pollGit(): (values: Values) => void {
   let gitAt = 0
   let gitCwd = ''
   let pending = false
@@ -16,7 +16,7 @@ export function pollGit(detachedHead: boolean): (values: Values) => void {
     gitCwd = cwd
     const start = Date.now()
     pending = true
-    void readGit(cwd, detachedHead, GIT_TIMEOUT_MS).then(vcs => {
+    void readGit(cwd, GIT_TIMEOUT_MS).then(vcs => {
       if (values.core.cwd === cwd) values.vcs = vcs
     }).finally(() => {
       gitAt = Date.now() + Math.max(5000, (Date.now() - start) * 10)

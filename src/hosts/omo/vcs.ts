@@ -8,7 +8,6 @@ const HOLD_FACTOR = 10
 export class OmoVcs {
   private vcs = initialVcs()
   private cwd = ''
-  private detachedHead = false
   private generation = 0
   private disposed = false
   private pending: { generation: number; done: Promise<void> } | null = null
@@ -18,11 +17,10 @@ export class OmoVcs {
     return this.vcs
   }
 
-  async refresh(cwd: string, detachedHead: boolean, now = Date.now(), force = false): Promise<VcsValues> {
+  async refresh(cwd: string, now = Date.now(), force = false): Promise<VcsValues> {
     if (this.disposed) return this.vcs
-    if (cwd !== this.cwd || detachedHead !== this.detachedHead) {
+    if (cwd !== this.cwd) {
       this.cwd = cwd
-      this.detachedHead = detachedHead
       this.generation++
       this.vcs = initialVcs()
       this.timing = null
@@ -34,7 +32,7 @@ export class OmoVcs {
       await pending.done
       if (generation !== this.generation || this.disposed) return this.vcs
       if (pending.generation === generation) return this.vcs
-      return this.refresh(cwd, detachedHead, now, force)
+      return this.refresh(cwd, now, force)
     }
     if (this.timing) {
       const hold = HOLD_FACTOR * this.timing.duration
@@ -44,7 +42,7 @@ export class OmoVcs {
       if (now >= this.timing.start && now < this.timing.end + interval) return this.vcs
     }
     const start = Date.now()
-    const pending = readGit(cwd, detachedHead).then(vcs => {
+    const pending = readGit(cwd).then(vcs => {
       if (generation !== this.generation || this.disposed) return
       const duration = Math.max(0, Date.now() - start)
       this.timing = { start: now, end: now + duration, duration }

@@ -134,7 +134,8 @@ Pass it with `!vargus on --config /absolute/path/to/vargus.json`, or with
 `!vargus reload --config /absolute/path/to/vargus.json` for an existing helper.
 `NO_COLOR` disables colours in the environment that starts the helper.
 Setting `repo`, `branch` and `status` all to `false` stops the row's Git polling.
-Set `detachedHead` to `true` to show detached tags or commits and Git operations.
+On a detached HEAD, the branch label shows the checkout ref or short commit ID
+and any detected Git operation. During a rebase it shows the branch being rebased when available.
 
 Codex always displays known model families as `astra`, `sol`, `terra` or `luna`, for example
 `sol:xhigh`. Both `gpt-6-sol` and `gpt-6.1-sol` display `sol`; unfamiliar IDs remain

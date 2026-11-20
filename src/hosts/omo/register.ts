@@ -80,7 +80,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         values.vcs = vcs.values
         output.refresh()
         if (options.repo || options.branch || options.status) {
-          void vcs.refresh(current.cwd, options.detachedHead, Date.now(), forceGit).then(reading => {
+          void vcs.refresh(current.cwd, Date.now(), forceGit).then(reading => {
             if (disposed) return
             values.vcs = reading
             output.refresh()

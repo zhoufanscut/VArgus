@@ -12,7 +12,6 @@ export const DEFAULTS = {
   spendLimit: false,
   repo: true,
   branch: true,
-  detachedHead: false,
   status: true,
   blankStopped: false,
   theme: 'graphite',

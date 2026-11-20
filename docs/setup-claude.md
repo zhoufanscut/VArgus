@@ -154,7 +154,9 @@ without a shared checkout or options file uses Claude's own plugin settings.
 Rate-limit API reads stop when `rateLimits` is off. Git/svn polling stops when
 `repo`, `branch` and `status` are all off.
 
-The spend limit (`spendLimit`) and detached-HEAD naming (`detachedHead`) default to off.
+On a detached Git HEAD, the branch label shows the checkout ref or short commit ID.
+During a rebase it shows the branch being rebased when available.
+The spend limit (`spendLimit`) defaults to off.
 Claude shows the account-wide five-hour and seven-day limits when available.
 
 - **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only the usage

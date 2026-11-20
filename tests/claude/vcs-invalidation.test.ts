@@ -47,7 +47,7 @@ test('worktree changes invalidate completed, in-flight and clock-pending Git wal
     },
   } as unknown as EngineInterface
   const values = initialVcs()
-  startVcs($, values, { isInteractive: true } as never, false)
+  startVcs($, values, { isInteractive: true } as never)
   await flush()
   expect(statusCalls).toBe(1)
 

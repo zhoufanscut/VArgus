@@ -17,8 +17,7 @@
 
   // Repository display
   // "repo": true,           // Show the repository name.
-  // "branch": true,         // Show the branch name.
-  // "detachedHead": false,  // Identify a detached Git HEAD by tag or commit.
+  // "branch": true,         // Show the branch name, detached checkout ref, or short commit ID.
   // "status": true,         // Show working-tree changes and ahead/behind counts.
 
   // Codex

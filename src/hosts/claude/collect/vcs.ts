@@ -40,14 +40,12 @@ type Pump = {
   lastMs: number
   generation: number
   timer: { cancel: () => void } | null
-  // the detachedHead option: name a detached HEAD only when it is on
-  detachedHead: boolean
 }
 
 // One per loaded copy of the module; a hot reload starts it over, and runs
 // session.start (so startVcs) again.
 const p: Pump = {
-  started: false, running: false, asked: false, lastEnd: -Infinity, lastMs: 0, generation: 0, timer: null, detachedHead: false,
+  started: false, running: false, asked: false, lastEnd: -Infinity, lastMs: 0, generation: 0, timer: null,
 }
 
 // The validator refuses a second hook on one event without a matcher, so
@@ -55,10 +53,9 @@ const p: Pump = {
 
 // From session.start: interactive sessions only (DESIGN, "When the line is
 // written"). Starts the first read and does not wait for it.
-export function startVcs($: EngineInterface, values: VcsValues, e: SessionStartInput, detachedHead: boolean): void {
+export function startVcs($: EngineInterface, values: VcsValues, e: SessionStartInput): void {
   if (!e.isInteractive) return
   p.started = true
-  p.detachedHead = detachedHead
   p.asked = true
   p.timer?.cancel()
   p.timer = $.clock.every(TICK_MS, () => {
@@ -100,7 +97,7 @@ async function pump($: EngineInterface, values: VcsValues, p: Pump): Promise<voi
     const generation = p.generation
     // A command that can't start or outlives $.process.run's 30 s keeps the
     // last good counts. A non-zero exit is an answer and blanks its fields.
-    const next = await readVcs($, p.detachedHead).catch(() => null)
+    const next = await readVcs($).catch(() => null)
     const end = await $.clock.now()
     if (generation !== p.generation) {
       // The tool hook already cleared the old folder's values and hold. Do
@@ -120,12 +117,10 @@ async function pump($: EngineInterface, values: VcsValues, p: Pump): Promise<voi
 // The choice: git when the engine says the folder is in a repository, svn only
 // outside one when a `.svn` is found above the folder, else nothing. Git wins
 // ties: a git clone inside an svn working copy is git (VantageHUD render.js).
-// A detached HEAD is named only with the detachedHead option on (VantageHUD
-// read it only then): off, the branch fragment hides it anyway.
 
-export async function readVcs($: EngineInterface, detachedHead: boolean): Promise<VcsValues> {
+export async function readVcs($: EngineInterface): Promise<VcsValues> {
   const repo = await $.session.repo()
-  if (repo) return readGit($, repo.remote, detachedHead)
+  if (repo) return readGit($, repo.remote)
   const cwd = await $.session.cwd()
   if (await findSvnRoot($, cwd)) return readSvn($)
   return initialVcs()
@@ -152,7 +147,7 @@ const GIT_ENV = { GIT_OPTIONAL_LOCKS: '0' }
 // The engine's repo() gives whether this is git and the origin URL (so no
 // `git remote get-url`), but its root is the main working tree's even in a
 // linked worktree, so the worktree and branch still need git.
-async function readGit($: EngineInterface, remote: string | null, detachedHead: boolean): Promise<VcsValues> {
+async function readGit($: EngineInterface, remote: string | null): Promise<VcsValues> {
   const out = initialVcs()
   out.kind = 'git'
   out.repo = remote ? repoNameFromUrl(remote) : null
@@ -169,7 +164,7 @@ async function readGit($: EngineInterface, remote: string | null, detachedHead: 
   const status = parseGitStatus(run.stdout)
   out.counts = status.counts
   if (status.head === '(detached)') {
-    out.detached = gitDir && detachedHead ? await readDetachedHead($, gitDir) : null
+    out.detached = gitDir ? await readDetachedHead($, gitDir) : null
   } else {
     out.branch = status.head
   }

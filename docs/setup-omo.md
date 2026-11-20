@@ -113,6 +113,9 @@ Removal touches only the owned loader. The separate experimental
 
 ## Readings and limits
 
+On a detached Git HEAD, the branch label shows the checkout ref or short commit ID.
+During a rebase it shows the branch being rebased when available.
+
 Tokens count persisted main-session assistant input plus output across the whole
 session history, including earlier branches and compaction history. Cache reads,
 cache writes and child/tool-result usage are excluded. Native assistant edits made

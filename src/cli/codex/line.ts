@@ -8,7 +8,7 @@ import { en } from '../../i18n/en.ts'
 import type { FragmentInput } from '../../core/types.ts'
 
 export function codexLine(collector: CodexCollector, o: CodexOptions, t: ReturnType<typeof makeTheme>) {
-  const refreshGit = o.repo || o.branch || o.status ? pollGit(o.detachedHead) : undefined
+  const refreshGit = o.repo || o.branch || o.status ? pollGit() : undefined
   let confirmed: FragmentInput | undefined
   const line = async (width: number): Promise<string> => {
     const v = collector.snapshot()

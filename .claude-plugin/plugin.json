@@ -73,14 +73,8 @@
     "branch": {
       "type": "boolean",
       "title": "Branch",
-      "description": "Show the branch (branch:main)",
+      "description": "Show the branch name, detached checkout ref, or short commit ID",
       "default": true
-    },
-    "detachedHead": {
-      "type": "boolean",
-      "title": "Branch: detached HEAD",
-      "description": "On a detached HEAD, name its commit or tag instead of hiding the branch",
-      "default": false
     },
     "status": {
       "type": "boolean",

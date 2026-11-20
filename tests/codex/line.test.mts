@@ -68,7 +68,7 @@ test('hidden Git fragments leave the Codex collector untouched', async () => {
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
-test('Codex renders a detached tag and linked worktree when detachedHead is on', async () => {
+test('Codex renders a detached tag and linked worktree by default and with a legacy setting', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-line-worktree-'))
   try {
     const cwd = await repository(dir, 'main')
@@ -81,16 +81,15 @@ test('Codex renders a detached tag and linked worktree when detachedHead is on',
     await exec('git', ['checkout', 'v1'], { cwd: linked })
     await writeFile(join(linked, 'untracked.txt'), 'local fixture\n')
 
-    for (const detachedHead of [false, true]) {
+    for (const options of [{}, { detachedHead: false }]) {
       const collector = new CodexCollector(linked, undefined)
       collector.start(linked, 0)
-      const line = codexLine(collector, resolveCodexOptions({ detachedHead }), theme)
+      const line = codexLine(collector, resolveCodexOptions(options), theme)
       await line(500)
       await ready(collector, 'main')
       const row = await line(500)
       assert.match(row, /repo:main.*\?1/)
-      if (detachedHead) assert.match(row, /branch:@v1 \(wt:linked\)/)
-      else assert.doesNotMatch(row, /branch:/)
+      assert.match(row, /branch:@v1 \(wt:linked\)/)
     }
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

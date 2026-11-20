@@ -26,8 +26,6 @@ type World = {
   svnInfo: string
   svnStatus: string
   runs: string[][]
-  // every fs.read path, in order
-  reads: string[]
   writes: string[]
 }
 
@@ -43,7 +41,6 @@ function world(on: On, clock: MockClock): World {
     svnInfo: '',
     svnStatus: '',
     runs: [],
-    reads: [],
     writes: [],
   }
   mock.env(on, { HOME: '/home/u', NO_COLOR: '1' }) // plain text to match
@@ -61,7 +58,6 @@ function world(on: On, clock: MockClock): World {
   })
   on('fs.read', async ($, e) => {
     const path = fixtureFsPath(e.path)
-    w.reads.push(path)
     const text = w.files[path]
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
     return { value: text }
@@ -155,7 +151,7 @@ describe('vcs collector', () => {
     w.svnStatus = '<status><target path="."><entry path="a"><wc-status item="unversioned" props="none"></wc-status></entry></target></status>'
     await $.session.start(start)
     await clock.advance(1000)
-    expect(line(w)).toContain('repo:proj | branch:trunk@7 | ?1')
+    expect(line(w)).toContain('repo:proj | branch:trunk | ?1')
     expect(w.runs).toEqual([['svn', '--non-interactive', 'info', '--xml'], ['svn', '--non-interactive', 'status', '--xml']])
   })
 
@@ -169,7 +165,7 @@ describe('vcs collector', () => {
     expect(line(w)).not.toContain('branch:')
   })
 
-  test('detached at a tag: named from the reflog and refs, with the option on', { options: { detachedHead: true } }, async ($, on) => {
+  test('detached at a tag: named from the reflog and refs', async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     w.status = `# branch.oid ${SHA}\n# branch.head (detached)\n`
@@ -181,7 +177,7 @@ describe('vcs collector', () => {
     expect(line(w)).toContain('branch:@v1.0')
   })
 
-  test('detached, the reflog moved on: 7 sha digits; a loose ref in the common dir names it', { options: { detachedHead: true } }, async ($, on) => {
+  test('detached, the reflog moved on: 7 sha digits; a loose ref in the common dir names it', async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     w.status = `# branch.oid ${SHA}\n# branch.head (detached)\n`
@@ -205,7 +201,7 @@ describe('vcs collector', () => {
     expect(line(w)).toContain('branch:@origin/main (wt:w)')
   })
 
-  test('mid-rebase: the branch from head-name with the step; am when rebase-apply has no rebasing', { options: { detachedHead: true } }, async ($, on) => {
+  test('mid-rebase: the branch from head-name with the step; am when rebase-apply has no rebasing', async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     w.status = `# branch.oid ${SHA}\n# branch.head (detached)\nu UU N... 1 2 3 4 a b c f\n`
@@ -232,7 +228,7 @@ describe('vcs collector', () => {
     expect(line(w)).toContain('branch:feat (am 1/4)')
   })
 
-  test('bisect on a detached sha: no ref name, the operation shown', { options: { detachedHead: true } }, async ($, on) => {
+  test('bisect on a detached sha: no ref name, the operation shown', async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     w.status = `# branch.oid ${SHA}\n# branch.head (detached)\n`
@@ -245,7 +241,7 @@ describe('vcs collector', () => {
     expect(line(w)).toContain('branch:@18f67cd (bisect)')
   })
 
-  test('a reftable HEAD asks git for the short sha', { options: { detachedHead: true } }, async ($, on) => {
+  test('a reftable HEAD asks git for the short sha', async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     w.status = '# branch.oid 1\n# branch.head (detached)\n'
@@ -255,7 +251,7 @@ describe('vcs collector', () => {
     expect(line(w)).toContain('branch:@a1b2c3d')
   })
 
-  test('with the detachedHead option off a detached HEAD is not read', async ($, on) => {
+  test('hiding the branch also hides a detached HEAD', { options: { branch: false } }, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     w.status = '# branch.oid 1\n# branch.head (detached)\n? a\n'
@@ -263,11 +259,9 @@ describe('vcs collector', () => {
     await $.session.start(start)
     await clock.advance(1000)
     expect(line(w)).toContain('repo:proj | ?1')
-    expect(w.runs.some(r => r.includes('--short'))).toBe(false)
-    expect(w.reads.filter(r => r.startsWith(GIT_DIR))).toEqual([])
   })
 
-  test('an attached HEAD in the file while status says detached: no branch shown', { options: { detachedHead: true } }, async ($, on) => {
+  test('an attached HEAD in the file while status says detached: no branch shown', async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     w.status = '# branch.oid 1\n# branch.head (detached)\n? a\n'

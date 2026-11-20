@@ -149,9 +149,10 @@ The explicit file accepts JSON or JSONC and uses the keys and defaults in
   Switch to a model in the other group to see its limits.
 - **Call counts** show `🔧` for `tool_calls`, `🤖` for `invoke_subagent` and `swarm` `add`
   spawns, and `⚡` for Antigravity `SKILL.md` reads once per skill path per user turn.
-- **Git & colours**: `"detachedHead": true` names detached tags/commits and rebase/merge
-  operations; setting `repo`, `branch` and `status` all to `false` disables Git checks;
-  setting `NO_COLOR` in the shell environment disables ANSI colours.
+- On a detached Git HEAD, the branch label shows the checkout ref or short commit ID
+  and any detected Git operation. During a rebase it shows the branch being rebased
+  when available. Setting `repo`, `branch` and `status` all to `false` disables
+  Git checks. Setting `NO_COLOR` in the shell environment disables ANSI colours.
 
 ## Update
 

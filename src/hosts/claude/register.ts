@@ -59,7 +59,7 @@ function configure($: EngineInterface, e: SessionStartInput, next: Options, noCo
   if (writer) writer.heartbeatMs = next.blankStopped ? 30_000 : null
   const hasVcs = next.repo || next.branch || next.status
   const hadVcs = previous?.repo || previous?.branch || previous?.status
-  if (hasVcs && (!hadVcs || previous?.detachedHead !== next.detachedHead)) startVcs($, values.vcs, e, next.detachedHead)
+  if (hasVcs && !hadVcs) startVcs($, values.vcs, e)
   if (!hasVcs && hadVcs) stopVcs()
   if (next.rateLimits && !previous?.rateLimits) startLimits($, quota, e)
   if (!next.rateLimits && previous?.rateLimits) stopLimits()

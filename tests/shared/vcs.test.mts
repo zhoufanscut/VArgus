@@ -6,7 +6,7 @@ import { displaySession, shortModelName } from '../../src/render/session.ts'
 import { initialVcs, parseGitStatus, repoNameFromUrl, type VcsValues } from '../../src/core/vcs.ts'
 import type { FragmentInput, Theme } from '../../src/core/types.ts'
 import { en, type Labels } from '../../src/i18n/en.ts'
-import { DEFAULTS, type Options } from '../../src/options.ts'
+import { DEFAULTS } from '../../src/options.ts'
 import { branch, repo, status } from '../../src/render/fragments/vcs.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 
@@ -73,7 +73,7 @@ describe('repo name from the remote URL', () => {
 
 // Fragments.
 
-function input(vcs: Partial<VcsValues>, o: Partial<Options> = {}, l: Labels = en, t?: Theme): FragmentInput {
+function input(vcs: Partial<VcsValues>, l: Labels = en, t?: Theme): FragmentInput {
   return {
     v: {
       core: { cwd: '/w', home: '/h', columns: undefined, isWsl: false },
@@ -82,7 +82,7 @@ function input(vcs: Partial<VcsValues>, o: Partial<Options> = {}, l: Labels = en
       vcs: { ...initialVcs(), ...vcs },
     },
     display: displaySession(initialSession(), shortModelName),
-    o: { ...DEFAULTS, ...o },
+    o: DEFAULTS,
     l,
     t: t ?? makeTheme('graphite', true),
     now: 0,
@@ -108,20 +108,19 @@ describe('vcs fragments', () => {
     assert.equal(status(input({ kind: 'git', counts: null })), null)
   })
 
-  test('a detached HEAD is named only with the detachedHead option', () => {
+  test('a detached HEAD shows its name and any operation', () => {
     const at = { kind: 'git' as const, detached: { name: 'v1.0', onBranch: false, operation: null, progress: '' } }
-    assert.equal(branch(input(at)), null)
-    assert.equal(branch(input(at, { detachedHead: true })), 'branch:@v1.0')
+    assert.equal(branch(input(at)), 'branch:@v1.0')
     const sha = { kind: 'git' as const, detached: { name: 'a1b2c3d', onBranch: false, operation: 'gitBisect' as const, progress: '' } }
-    assert.equal(branch(input(sha, { detachedHead: true })), 'branch:@a1b2c3d (bisect)')
+    assert.equal(branch(input(sha)), 'branch:@a1b2c3d (bisect)')
     const rebase = { kind: 'git' as const, worktree: 'w', detached: { name: 'feat', onBranch: true, operation: 'gitRebase' as const, progress: '2/3' } }
-    assert.equal(branch(input(rebase, { detachedHead: true })), 'branch:feat (rebase 2/3) (wt:w)')
+    assert.equal(branch(input(rebase)), 'branch:feat (rebase 2/3) (wt:w)')
   })
 
-  test('svn: branch with the revision after @, no worktree; nothing outside a repo', () => {
+  test('SVN shows the branch name alone, even with a revision and worktree present', () => {
     const f = input({ kind: 'svn', repo: 'proj', branch: 'trunk', revision: '12345', worktree: 'x', counts: counts({ staged: 1 }) })
     assert.equal(repo(f), 'repo:proj')
-    assert.equal(branch(f), 'branch:trunk@12345')
+    assert.equal(branch(f), 'branch:trunk')
     assert.equal(status(f), '+1')
     const none = input({ kind: null, repo: 'x', branch: 'y', counts: counts({ staged: 1 }) })
     assert.deepEqual([repo(none), branch(none), status(none)], [null, null, null])
@@ -136,25 +135,25 @@ describe('vcs fragments', () => {
   test('every word and mark comes from the labels', () => {
     const marked = Object.fromEntries(Object.keys(en).map(k => [k, `⟦${k}⟧`])) as Labels
     const all = counts({ staged: 1, modified: 1, untracked: 1, conflicted: 1, ahead: 1, behind: 1 })
-    const g = input({ kind: 'git', repo: 'R', branch: 'B', worktree: 'W', counts: all }, {}, marked)
+    const g = input({ kind: 'git', repo: 'R', branch: 'B', worktree: 'W', counts: all }, marked)
     assert.equal(repo(g), '⟦repo⟧:R')
     assert.equal(branch(g), '⟦branch⟧:B ⟦worktree⟧W)')
     assert.equal(status(g), '⟦conflict⟧1 ⟦staged⟧1 ⟦modified⟧1 ⟦untracked⟧1 ⟦ahead⟧1 ⟦behind⟧1')
     const d = input({ kind: 'git', detached: { name: 'N', onBranch: false, operation: 'gitCherryPick', progress: '' } },
-      { detachedHead: true }, marked)
+      marked)
     assert.equal(branch(d), '⟦branch⟧:⟦detachedAt⟧N (⟦gitCherryPick⟧)')
-    assert.equal(branch(input({ kind: 'svn', branch: 'T', revision: '9' }, {}, marked)), '⟦branch⟧:T⟦detachedAt⟧9')
+    assert.equal(branch(input({ kind: 'svn', branch: 'T', revision: '9' }, marked)), '⟦branch⟧:T')
   })
 
   test('colours as VantageHUD git.js', () => {
     const tag: Theme = { ...makeTheme('graphite', true), paint: (c, s) => `<${String(c)}>${s}</>` }
     const all = counts({ staged: 1, modified: 1, untracked: 1, conflicted: 1, ahead: 1, behind: 1 })
-    const f = input({ kind: 'git', repo: 'R', branch: 'B', worktree: 'W', counts: all }, {}, en, tag)
+    const f = input({ kind: 'git', repo: 'R', branch: 'B', worktree: 'W', counts: all }, en, tag)
     assert.equal(repo(f), '<label>repo:</><gradLow>R</>')
     assert.equal(branch(f), '<label>branch:</><gradLow>B</> <label>(wt:</><gradLow>W</><label>)</>')
     assert.equal(status(f), '<gradHigh>✗1</> <add>+1</> <del>!1</> <track>?1</> <add>⇡1</> <del>⇣1</>')
     const d = input({ kind: 'git', detached: { name: 'N', onBranch: false, operation: 'gitMerge', progress: '' } },
-      { detachedHead: true }, en, tag)
+      en, tag)
     assert.equal(branch(d), '<label>branch:</><label>@</><gradLow>N</> <gradMid>(merge)</>')
   })
 })

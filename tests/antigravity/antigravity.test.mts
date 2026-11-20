@@ -380,7 +380,7 @@ test('readTranscriptState incrementally counts uncached tokens, tools, agents an
   }
 })
 
-test('readCachedGit honours 5s polling, mutating-tool invalidation, linked worktrees and detachedHead', async () => {
+test('readCachedGit honours 5s polling, mutating-tool invalidation, linked worktrees and detached refs', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vargus-agy-git-'))
   try {
     const cacheDir = join(root, 'cache')
@@ -405,7 +405,7 @@ test('readCachedGit honours 5s polling, mutating-tool invalidation, linked workt
     await git(repoDir, ['tag', 'v1.0.0'])
 
     const t0 = 1_000_000
-    const first = await readCachedGit(repoDir, false, 'session-a', 0, cacheDir, t0)
+    const first = await readCachedGit(repoDir, 'session-a', 0, cacheDir, t0)
     assert.equal(first.kind, 'git')
     assert.equal(first.repo, 'VArgus')
     assert.equal(first.branch, 'main')
@@ -413,47 +413,43 @@ test('readCachedGit honours 5s polling, mutating-tool invalidation, linked workt
 
     // Create an untracked file; within POLL_MS with no mutating tool, cached counts stay.
     await writeFile(join(repoDir, 'untracked.txt'), 'new\n')
-    const cachedHit = await readCachedGit(repoDir, false, 'session-a', 0, cacheDir, t0 + 500)
+    const cachedHit = await readCachedGit(repoDir, 'session-a', 0, cacheDir, t0 + 500)
     assert.equal(cachedHit.counts?.untracked, 0)
 
     // A mutating tool in the same session invalidates the poll window (past 10x lastMs).
-    const afterTool = await readCachedGit(repoDir, false, 'session-a', 1, cacheDir, t0 + 2000)
+    const afterTool = await readCachedGit(repoDir, 'session-a', 1, cacheDir, t0 + 2000)
     assert.equal(afterTool.counts?.untracked, 1)
 
     // Past POLL_MS, external changes also show without a tool call.
     await rm(join(repoDir, 'untracked.txt'))
     const tAfterPoll = t0 + 2000 + POLL_MS + 2000
-    const afterPoll = await readCachedGit(repoDir, false, 'session-a', 1, cacheDir, tAfterPoll)
+    const afterPoll = await readCachedGit(repoDir, 'session-a', 1, cacheDir, tAfterPoll)
     assert.equal(afterPoll.counts?.untracked, 0)
 
     // Lowering `mutatingToolsSeen` (after `/rewind`) updates the baseline in cache so the
     // next mutating tool (`0 -> 1`) invalidates immediately within `POLL_MS`.
-    await readCachedGit(repoDir, false, 'session-a', 0, cacheDir, tAfterPoll + 500)
+    await readCachedGit(repoDir, 'session-a', 0, cacheDir, tAfterPoll + 500)
     await writeFile(join(repoDir, 'after-rewind.txt'), 'new\n')
-    const afterRewindTool = await readCachedGit(repoDir, false, 'session-a', 1, cacheDir, tAfterPoll + 2000)
+    const afterRewindTool = await readCachedGit(repoDir, 'session-a', 1, cacheDir, tAfterPoll + 2000)
     assert.equal(afterRewindTool.counts?.untracked, 1)
 
     // Backward wall-clock jump (`now < cached.lastEnd`) refreshes instead of freezing.
     await rm(join(repoDir, 'after-rewind.txt'))
-    const afterClockJump = await readCachedGit(repoDir, false, 'session-a', 1, cacheDir, t0)
+    const afterClockJump = await readCachedGit(repoDir, 'session-a', 1, cacheDir, t0)
     assert.equal(afterClockJump.counts?.untracked, 0)
 
     // Linked worktree + detached HEAD: worktree add --detach shows short SHA;
     // `git checkout v1.0.0` records the reflog entry and names `v1.0.0`.
     const wtDir = join(root, 'wt-feature')
     await git(repoDir, ['worktree', 'add', '--detach', wtDir, 'v1.0.0'])
-    const detachedOff = await readCachedGit(wtDir, false, 'session-b', 0, cacheDir, t0 + 20_000)
-    assert.equal(detachedOff.worktree, 'wt-feature')
-    assert.equal(detachedOff.branch, null)
-    assert.equal(detachedOff.detached, null)
-
-    const detachedSha = await readCachedGit(wtDir, true, 'session-b', 0, cacheDir, t0 + 20_000)
+    const detachedSha = await readCachedGit(wtDir, 'session-b', 0, cacheDir, t0 + 20_000)
     assert.equal(detachedSha.worktree, 'wt-feature')
+    assert.equal(detachedSha.branch, null)
     assert.match(detachedSha.detached?.name ?? '', /^[0-9a-f]{7}$/)
 
     await git(wtDir, ['checkout', '-B', 'temp-branch'])
     await git(wtDir, ['checkout', 'v1.0.0'])
-    const detachedTag = await readCachedGit(wtDir, true, 'session-b', 1, cacheDir, t0 + 30_000)
+    const detachedTag = await readCachedGit(wtDir, 'session-b', 1, cacheDir, t0 + 30_000)
     assert.deepEqual(detachedTag.detached, { name: 'v1.0.0', onBranch: false, operation: null, progress: '' })
   } finally {
     await rm(root, { recursive: true, force: true })

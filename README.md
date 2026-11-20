@@ -126,7 +126,7 @@ Illustrative output from Claude Code.
 | `token:` | uncached input plus output tokens in the scope described by the host guide |
 | `session:` | age of the session or active conversation |
 | `🔧` `🤖` `⚡` | tool, agent and skill counts described in the host guides |
-| `repo:` `branch:` | Git repository and branch. Claude Code also supports SVN. |
+| `repo:` `branch:` | Git repository and branch. On a detached HEAD, the label shows the checkout ref or short commit ID. During a rebase it shows the branch being rebased when available. Claude Code also supports SVN. |
 | `?4` | Working-tree marks include staged `+`, modified `!`, untracked `?`, conflicts `✗`, ahead `⇡`, and behind `⇣`. |
 
 Effort uses the selected theme's Calm colour at or above the model's default
