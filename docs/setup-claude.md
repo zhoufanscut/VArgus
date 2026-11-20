@@ -194,8 +194,7 @@ install or replace the command in the original scope using the manual setup abov
 ## Limits
 
 - Teammates that run in their own tmux pane are not seen.
-- Data that only Claude Code's status-line input carries is not shown: lines changed, PR state,
-  session name. The prompt-cache lifetime (`cache:`) is not shown.
+- The row omits lines changed, PR state, session name and prompt-cache lifetime.
 - A session that ends without its end event (a crash, `kill -9`) leaves its small folder in the
   plugin's data folder until a later session removes it, 14 days after its last write. Where an
   organization refuses the mod's processes, every session's folder stays.
@@ -222,8 +221,11 @@ is experimental, so its response shape may change.
 
 Claude's token total includes the main conversation and subagents since the mod
 first loaded, or since the last `/clear` or in-session resume. Cache reads and
-writes are excluded. Its tool, agent and skill counts come from main-loop tool
-starts. Separate teammates in their own panes are outside that collector.
+writes are excluded. The `(cache:…%)` suffix follows the latest main-conversation
+request. Claude Code counts missing provider cache counters as zero.
+Subagent replies contribute only to the token total. Tool, agent and
+skill counts come from main-loop tool starts. Separate teammates in their own
+panes are outside that collector.
 
 See the [Claude design](../DESIGN.md#scope) for data sources and verification
 limits, and [VantageHUD's presentation rules](../DESIGN.md#rules-carried-over-from-vantagehud)

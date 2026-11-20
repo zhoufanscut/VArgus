@@ -1,8 +1,7 @@
 import type { Fragment } from '../../core/types.ts'
 
-// 6. tokens: `token:69.5k`, the session's input + output tokens
-// (src/hosts/claude/collect/session.ts says what counts) (DESIGN, "Fragments"; VantageHUD's
-// elements/token-usage.js). Hidden while nothing is counted.
+// Session token total with the latest request's cache-hit percentage when known.
+// Hidden while nothing is counted (DESIGN, "Fragments").
 
 // Raw under 1k, one decimal of k under 1M, two decimals of M beyond. The k/M
 // switch is at 999,950, where one decimal of k would round to `1000.0k`
@@ -16,5 +15,7 @@ export function formatTokenCount(tokens: number): string {
 export const tokens: Fragment = ({ v, l, t }) => {
   const total = v.session.counts.tokens
   if (!(total > 0)) return null
-  return t.paint('label', `${l.tokens}:`) + t.paint('gradLow', formatTokenCount(total))
+  const percent = v.session.cacheHitPercent
+  const suffix = percent === undefined ? '' : t.paint('faint', `(${l.cache}:${Math.round(percent)}%)`)
+  return t.paint('label', `${l.tokens}:`) + t.paint('gradLow', formatTokenCount(total)) + suffix
 }

@@ -224,6 +224,9 @@ returning brings VArgus back. On Linux/macOS, another pane using VArgus keeps th
 extra row in its window; windows without VArgus keep the original height. `status` reports the current view or pause.
 Without the optional startup hook, after `/new` or `/resume` run `!vargus on` again (with pane selection if needed)
 to bind the new conversation. Its token total covers recorded uncached input and output.
+The `(cache:…%)` suffix uses the latest request's cached and total input tokens in the displayed thread.
+Codex can record zero when the provider omits cache details. If a new response
+finishes without fresh input usage, the suffix disappears.
 Tool counts replay completed visible items and exclude `!` controls. `🤖2` counts
 recorded subagent starts in the displayed conversation; `⚡3` counts observed skill
 loads, once per skill path per user turn. Missing readings stay hidden.

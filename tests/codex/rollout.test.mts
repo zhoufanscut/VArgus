@@ -43,6 +43,21 @@ test('official rollout readings replay cumulative usage, settings and limits wit
   r.observe(count); assert.equal(v.session.contextPercent, 18)
 })
 
+test('a tool request without fresh usage clears the cache suffix while a duplicate quota update keeps it', () => {
+  const r = new RolloutReader('/unused', 'thread-a', '/repo', '/home/user')
+  r.observe(meta)
+  r.observe(count)
+  const session = r.collector.snapshot()!.session
+  const hit = session.cacheHitPercent
+  assert.equal(Math.round(hit!), 94)
+  r.observe(count)
+  assert.equal(session.cacheHitPercent, hit)
+  r.observe({ type: 'response_item', payload: { type: 'function_call', name: 'tool', call_id: 'c' } })
+  r.observe(count)
+  r.observe(count)
+  assert.equal(session.cacheHitPercent, undefined)
+})
+
 test('rollout polling waits for complete UTF-8 JSONL records and selects the exact thread filename', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-rollout-'))
   try {

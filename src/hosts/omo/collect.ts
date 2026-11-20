@@ -1,7 +1,7 @@
 import { isRecentUsage, resetTime, type QuotaWindow } from '../../core/limits.ts'
 import { en, type Labels } from '../../i18n/en.ts'
 import { DEFAULTS } from '../../options.ts'
-import { initialCounts, initialSession, type Counts } from '../../core/session.ts'
+import { cacheHitFromSplitInput, initialCounts, initialSession, type Counts } from '../../core/session.ts'
 import type { Values } from '../../core/types.ts'
 import { initialVcs } from '../../core/vcs.ts'
 import type { AccountLimits, HistoryReducer, NativeContext } from './contracts.ts'
@@ -16,12 +16,15 @@ export type OmoSettings = {
   options: Record<string, unknown>
 }
 
+type AssistantUsage = { tokens: number; cacheHitPercent: number | undefined }
+
 export type OmoHistory = {
   counts: Counts
   entries: Set<string>
   calls: Set<string>
   agents: Set<string>
-  usage: Map<string, number>
+  usage: Map<string, AssistantUsage>
+  latestUsage?: AssistantUsage
   edits: Set<string>
 }
 
@@ -68,7 +71,13 @@ export const omoHistoryReducer: HistoryReducer<OmoHistory> = {
       const data = record(entry.data)
       if (typeof data?.entryId === 'string' && !state.edits.has(data.entryId)) {
         state.edits.add(data.entryId)
-        state.counts.tokens -= state.usage.get(data.entryId) ?? 0
+        const copy = state.usage.get(data.entryId)
+        if (copy) {
+          state.counts.tokens -= copy.tokens
+          state.usage.delete(data.entryId)
+          // Edits are rare. Normal appends and rendering use the saved latest reading.
+          if (state.latestUsage === copy) state.latestUsage = Array.from(state.usage.values()).at(-1)
+        }
       }
       return state
     }
@@ -81,8 +90,11 @@ export const omoHistoryReducer: HistoryReducer<OmoHistory> = {
       // belongs to nested work and is deliberately excluded.
       const tokens = (nonnegative(usage?.input) ? usage.input : 0)
         + (nonnegative(usage?.output) ? usage.output : 0)
-      state.usage.set(entry.id, tokens)
-      if (!state.edits.has(entry.id)) state.counts.tokens += tokens
+      if (!state.edits.has(entry.id)) {
+        state.latestUsage = { tokens, cacheHitPercent: cacheHitFromSplitInput(usage?.cacheRead, usage?.input, usage?.cacheWrite) }
+        state.usage.set(entry.id, state.latestUsage)
+        state.counts.tokens += tokens
+      }
       if (Array.isArray(message.content)) {
         for (const [index, value] of message.content.entries()) {
           const call = record(value)
@@ -123,6 +135,7 @@ export function collectOmo(
   const history = ctx.sessionManager.reduceHistory(omoHistoryReducer)
   const session = initialSession()
   session.counts = { ...history.counts }
+  session.cacheHitPercent = history.latestUsage?.cacheHitPercent
   session.model = ctx.model?.id
   session.effort = ctx.thinkingLevel
   session.defaultEffort = ctx.model?.defaultThinkingLevel

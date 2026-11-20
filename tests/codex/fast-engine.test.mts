@@ -22,6 +22,7 @@ test('official Codex Fast settings update the saved-log model fragment without a
   const cfg = join(dir, 'codex'), project = join(dir, 'project')
   await mkdir(cfg); await mkdir(project)
   let posts = 0
+  let reportUsage = true
   const provider = createServer(async (req, res) => {
     if (req.method !== 'POST') { res.end('{}'); return }
     for await (const part of req) { /* consume the local request */ }
@@ -30,7 +31,8 @@ test('official Codex Fast settings update the saved-log model fragment without a
       { type: 'response.created', response: { id } },
       { type: 'response.output_item.done', item: { type: 'message', role: 'assistant', id: `msg_${id}`,
         content: [{ type: 'output_text', text: 'LOCAL FAST FIXTURE COMPLETE' }] } },
-      { type: 'response.completed', response: { id, usage: { input_tokens: 1000, output_tokens: 5, total_tokens: 1005 } } },
+      { type: 'response.completed', response: { id, usage: reportUsage ? { input_tokens: 1000, input_tokens_details: { cached_tokens: 285 },
+        output_tokens: 5, total_tokens: 1005 } : undefined } },
     ]
     res.writeHead(200, { 'Content-Type': 'text/event-stream', Connection: 'close' })
     res.end(events.map(e => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join(''))
@@ -106,6 +108,7 @@ trust_level = "trusted"
       assert.equal(reader.collector.snapshot()!.session.model, 'gpt-6.1-sol')
     }
     await turn(); await row('sol:max')
+    await row('token:720(cache:29%)')
     const before = posts
     await rpc('thread/settings/update', { threadId, serviceTier: 'fast' })
     await row('sol:max(fast)')
@@ -115,6 +118,9 @@ trust_level = "trusted"
     await row('sol:max(fast)')
     assert.equal(posts, before, 'settings changes must not send another provider request')
     await turn(); await row('sol:max(fast)')
+    await row('token:1.4k(cache:29%)')
+    reportUsage = false
+    await turn(); await row('token:1.4k')
     const replay = new RolloutReader(started.thread.path, threadId, project, dir)
     await replay.poll()
     assert.equal(replay.collector.snapshot()!.session.fast, true)

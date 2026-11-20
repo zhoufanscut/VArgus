@@ -57,6 +57,7 @@ export class RolloutReader {
   private offset = 0
   private pending = ''
   private selected = false
+  private modelOutputPending = false
   private decoder = new TextDecoder()
   private skills = new SkillLoads()
   private countersAttributed = true
@@ -106,7 +107,16 @@ export class RolloutReader {
     }
     if (!this.selected) return
     const v = this.collector.snapshot()!
+    if (record.type === 'response_item' && (p.role === 'assistant' || p.type === 'agent_message'
+      || p.type === 'reasoning' || p.type?.endsWith('_call'))) this.modelOutputPending = true
+    // Codex can finish a response without usage and re-emit the old token_count.
+    // A quota refresh alone has no new model output and keeps its reading.
+    if (this.modelOutputPending && record.type === 'event_msg' && (p.type === 'token_count' || p.type === 'task_complete')) {
+      v.session.cacheHitPercent = undefined
+      this.modelOutputPending = false
+    }
     if (record.type === 'event_msg' && p.type === 'task_started') {
+      this.modelOutputPending = false
       this.skills.start(p.turn_id)
     } else if (record.type === 'response_item' && p.type === 'message') {
       if (this.countersAttributed) {

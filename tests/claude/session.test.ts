@@ -22,6 +22,7 @@ type World = {
   releaseUsage: (() => void) | undefined
   // the usage each turn.step's response reports
   usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number } | null
+  stopReason: 'end_turn' | null
   // what the mod last saved to $.state, and what a state read answers
   saved: unknown
   restore: unknown
@@ -36,6 +37,7 @@ function world(on: On, clock: MockClock): World {
   const w: World = {
     lines: [], model: 'claude-opus-5-5[1m]', startedAt: 0, percent: 20, usageRefused: false, usageCalls: 0, usageHeld: false, releaseUsage: undefined, saved: undefined, restore: undefined, compactSkipped: false, id: 'S1',
     usage: { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 90000, cache_creation_input_tokens: 7000 },
+    stopReason: 'end_turn',
   }
   mock.env(on, { HOME: '/home/u', NO_COLOR: '1' })
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
@@ -57,7 +59,7 @@ function world(on: On, clock: MockClock): World {
     value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
   }))
   on('turn.step', async function* ($, e) {
-    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: w.usage && { ...w.usage, model: e.model } }
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: w.stopReason, usage: w.usage && { ...w.usage, model: e.model } }
   })
   on('tool.call', async () => ({ result: 'ok' }) as never)
   on('session.measure', async ($, e) => ({ changed: e.changed }))
@@ -103,10 +105,11 @@ describe('session collector', () => {
     await step($, { effort: 'high' })
     // a subagent's response neither sets effort nor reads the main window
     w.percent = 22
+    w.usage = { ...w.usage!, cache_read_input_tokens: 0 }
     const calls = w.usageCalls
     await step($, { effort: 'low', agentId: 'a1' })
     expect(w.usageCalls).toBe(calls)
-    expect(await line(clock, w)).toBe('opus:high | ctx:21% | token:3.0k | session:0m')
+    expect(await line(clock, w)).toBe('opus:high | ctx:21% | token:3.0k(cache:92%) | session:0m')
   })
 
   test('tokens: input + output of every step, subagents too; cache tokens left out', MINE, async ($, on) => {
@@ -116,9 +119,10 @@ describe('session collector', () => {
     w.usage = { input_tokens: 12000, output_tokens: 300, cache_read_input_tokens: 500000, cache_creation_input_tokens: 4000 }
     await step($)
     await step($, { agentId: 'a1' })
+    expect(await line(clock, w)).toContain('token:24.6k(cache:97%)')
     w.usage = null
     await step($)
-    expect(await line(clock, w)).toContain('token:24.6k')
+    expect(await line(clock, w)).toContain('token:24.6k |')
     // the step's response is passed on unchanged
     w.usage = { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 3, cache_creation_input_tokens: 4 }
     expect((await step($)).usage).toEqual({ ...w.usage, model: 'claude-opus-5-5' })
@@ -182,7 +186,7 @@ describe('session collector', () => {
     w.startedAt = 1000
     expect(await line(clock, w)).toBe('opus | ctx:0%')
     await step($)
-    expect(await line(clock, w)).toBe('opus | ctx:3% | token:1.5k | session:0m')
+    expect(await line(clock, w)).toBe('opus | ctx:3% | token:1.5k(cache:92%) | session:0m')
   })
 
   test('a usage response from before /clear cannot restore the old session start', MINE, async ($, on) => {
@@ -220,16 +224,16 @@ describe('session collector', () => {
     expect(await line(clock, w)).toBe('opus | ctx:0%')
     expect(w.usageCalls).toBe(calls)
     await step($)
-    expect(await line(clock, w)).toBe('opus | ctx:64% | token:1.5k | session:3h0m')
+    expect(await line(clock, w)).toBe('opus | ctx:64% | token:1.5k(cache:92%) | session:3h0m')
     // a later tick takes no reading of its own; the turn-end push still stands
     w.percent = 65
-    expect(await line(clock, w)).toBe('opus | ctx:64% | token:1.5k | session:3h0m')
+    expect(await line(clock, w)).toBe('opus | ctx:64% | token:1.5k(cache:92%) | session:3h0m')
     await $.session.measure({ context: { window: 200000, percent: 66 }, rateLimits: [], changed: ['context'] })
     w.percent = 67
-    expect(await line(clock, w)).toBe('opus | ctx:66% | token:1.5k | session:3h0m')
+    expect(await line(clock, w)).toBe('opus | ctx:66% | token:1.5k(cache:92%) | session:3h0m')
     const afterMeasure = w.usageCalls
     w.percent = 99
-    expect(await line(clock, w)).toBe('opus | ctx:66% | token:1.5k | session:3h0m')
+    expect(await line(clock, w)).toBe('opus | ctx:66% | token:1.5k(cache:92%) | session:3h0m')
     expect(w.usageCalls).toBe(afterMeasure)
   })
 
@@ -251,17 +255,17 @@ describe('session collector', () => {
     expect(await line(clock, w)).toBe('opus | ctx:0% | session:0m')
     expect(w.usageCalls).toBe(calls)
     await step($)
-    expect(await line(clock, w)).toBe('opus | ctx:3% | token:1.5k | session:0m')
+    expect(await line(clock, w)).toBe('opus | ctx:3% | token:1.5k(cache:92%) | session:0m')
     // each later main response replaces the fill, with no polling between
     w.percent = 4
     await step($)
-    expect(await line(clock, w)).toBe('opus | ctx:4% | token:3.0k | session:0m')
+    expect(await line(clock, w)).toBe('opus | ctx:4% | token:3.0k(cache:92%) | session:0m')
     // with the first main response read, the ordinary push path stands again
     await $.session.measure({ context: { window: 200000, percent: 5 }, rateLimits: [], changed: ['context'] })
-    expect(await line(clock, w)).toBe('opus | ctx:5% | token:3.0k | session:0m')
+    expect(await line(clock, w)).toBe('opus | ctx:5% | token:3.0k(cache:92%) | session:0m')
     const afterSteps = w.usageCalls
     w.percent = 99
-    expect(await line(clock, w)).toBe('opus | ctx:5% | token:3.0k | session:0m')
+    expect(await line(clock, w)).toBe('opus | ctx:5% | token:3.0k(cache:92%) | session:0m')
     expect(w.usageCalls).toBe(afterSteps)
   })
 
@@ -295,7 +299,25 @@ describe('session collector', () => {
     await $.session.end({ reason: 'clear', sessionId: 'S1', resume: { id: 'S1' } })
     w.id = 'S2'
     expect((await step($)).stopReason).toBe('end_turn')
-    expect(await line(clock, w)).toBe('opus | ctx:0% | token:1.5k')
+    expect(await line(clock, w)).toBe('opus | ctx:0% | token:1.5k(cache:92%)')
+  })
+
+  test('an interrupted request keeps the last cache reading and an installed compaction clears it across reload', MINE, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    await step($)
+    expect(await line(clock, w)).toContain('token:1.5k(cache:92%)')
+    w.usage = null
+    w.stopReason = null
+    await step($)
+    expect(await line(clock, w)).toContain('token:1.5k(cache:92%)')
+    await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
+    expect(await line(clock, w)).toContain('token:1.5k |')
+    await clock.settle()
+    w.restore = w.saved
+    await $.session.start(start)
+    expect(await line(clock, w)).toContain('token:1.5k |')
   })
 
   test('counts saved in $.state are taken back at session.start (a hot reload)', MINE, async ($, on) => {
@@ -304,12 +326,15 @@ describe('session collector', () => {
     await $.session.start(start)
     await step($)
     await clock.settle()
-    expect(w.saved).toEqual({ tokens: 1500, tools: 0, agents: 0, skills: 0 })
+    expect(w.saved).toEqual({ tokens: 1500, tools: 0, agents: 0, skills: 0, cacheHitPercent: 9000 / 98 })
+    w.restore = w.saved
+    await $.session.start(start)
+    expect(await line(clock, w)).toContain('token:1.5k(cache:92%)')
     w.restore = { tokens: 70000, tools: 9, agents: 2, skills: 1, workflows: 3 }
     await $.session.start(start)
     expect(await line(clock, w)).toContain('token:70.0k | session:0m | 🔧9 🤖2 ⚡1')
     await step($)
     await clock.settle()
-    expect(w.saved).toEqual({ tokens: 71500, tools: 9, agents: 2, skills: 1 })
+    expect(w.saved).toEqual({ tokens: 71500, tools: 9, agents: 2, skills: 1, cacheHitPercent: 9000 / 98 })
   })
 })

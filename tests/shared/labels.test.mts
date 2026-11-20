@@ -48,7 +48,7 @@ const cases: [string, Fragment, FragmentInput, string[], string[]][] = [
   ['context', context, input({ contextPercent: 20 }), [], ['context']],
   ['context compress', context, input({ contextPercent: 82 }), [], ['context', 'compress']],
   ['context critical', context, input({ contextPercent: 90 }), [], ['context', 'critical']],
-  ['tokens', tokens, input({ counts }), [], ['tokens']],
+  ['tokens', tokens, input({ counts, cacheHitPercent: 23 }), [], ['tokens', 'cache']],
   ['session', session, input({ startedAt: 0 }), [], ['session']],
   ['calls emoji', calls, input({ counts }), [], []],
   ['calls text', calls, input({ counts }, true), [], ['tool', 'agent', 'skill']],

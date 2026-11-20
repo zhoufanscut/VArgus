@@ -34,11 +34,24 @@ test('saved-log readings keep cumulative totals per view, short display and nati
   assert.match(text, /sol:high/)
   assert.equal(v.session.model, 'gpt-6.1-sol')
   assert.match(text, /ctx:15%/)
-  assert.match(text, /token:4\.4k/)
+  assert.match(text, /token:4\.4k\(cache:77%\)/)
   c.completeItem({ id: 'compact1', type: 'contextCompaction' })
   assert.equal(c.snapshot()!.session.contextPercent, undefined)
+  assert.equal(c.snapshot()!.session.cacheHitPercent, undefined)
   c.updateUsage(usage())
   assert.equal(c.snapshot()!.session.contextPercent, 15)
+})
+
+test('latest prompt with zero cache reads is distinct from a context-only estimate', () => {
+  const c = new CodexCollector('/repo', undefined)
+  start(c)
+  const update = usage()
+  update.last.cachedInputTokens = 0
+  c.updateUsage(update)
+  assert.equal(c.snapshot()!.session.cacheHitPercent, 0)
+  update.last.inputTokens = 0
+  c.updateUsage(update)
+  assert.equal(c.snapshot()!.session.cacheHitPercent, undefined)
 })
 
 test('separate saved-log collectors isolate usage, counters and metadata', () => {

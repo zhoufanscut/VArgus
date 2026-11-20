@@ -124,6 +124,14 @@ describe('tokens', () => {
     assert.equal(tokens(input({ counts: counts({ tokens: 69_500 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(gradLow, '69.5k'))
     assert.equal(tokens(input({})), null)
   })
+
+  test('cache suffix rounds to a whole percent and preserves a reported zero', () => {
+    const total = counts({ tokens: 103_200 })
+    for (const [percent, shown] of [[0, '0'], [7.2, '7'], [22.75, '23'], [100, '100']] as const) {
+      assert.equal(tokens(input({ counts: total, cacheHitPercent: percent })), `token:103.2k(cache:${shown}%)`)
+    }
+    assert.equal(tokens(input({ counts: total })), 'token:103.2k')
+  })
 })
 
 describe('session time', () => {

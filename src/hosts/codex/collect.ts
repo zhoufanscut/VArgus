@@ -1,4 +1,4 @@
-import { initialSession } from '../../core/session.ts'
+import { cacheHitPercent, initialSession } from '../../core/session.ts'
 import type { QuotaWindow } from '../../core/limits.ts'
 import { initialVcs } from '../../core/vcs.ts'
 import type { Values } from '../../core/types.ts'
@@ -14,6 +14,7 @@ export class CodexCollector {
   private seen = new Set<string>()
   private agentItems = new Set<string>()
   private usage = 0
+  private lastCumulativeInput?: number
   private limits = new Map<string, Limits>()
 
   constructor(cwd: string, home: string | undefined) {
@@ -32,6 +33,11 @@ export class CodexCollector {
   updateUsage(usage: TokenUsage): void {
     this.usage = Math.max(0, usage.total.inputTokens - usage.total.cachedInputTokens) + usage.total.outputTokens
     const v = this.values.session
+    const percent = cacheHitPercent(usage.last.cachedInputTokens, usage.last.inputTokens)
+    // A repeated snapshot can carry the previous request's counters. Only new
+    // prompt input can supply a fresh percentage after the reader clears it.
+    if (percent === undefined || usage.total.inputTokens !== this.lastCumulativeInput) v.cacheHitPercent = percent
+    this.lastCumulativeInput = usage.total.inputTokens
     v.contextTokens = usage.last.totalTokens
     v.contextWindow = usage.modelContextWindow ?? undefined
     // Match Codex's own context gauge, including its baseline allowance.
@@ -57,6 +63,7 @@ export class CodexCollector {
   }
 
   compact(): void {
+    this.values.session.cacheHitPercent = undefined
     this.values.session.contextPercent = undefined
     this.values.session.contextTokens = undefined
   }

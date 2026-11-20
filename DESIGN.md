@@ -71,6 +71,12 @@ The renderer drops whole trailing fragments to fit the terminal, keeping the
 first if it is the only one left. Width counts terminal columns. A host output
 can fit the result further, as OmO does at grapheme boundaries.
 
+The [token fragment](src/render/fragments/tokens.ts) keeps the session's token
+total and appends the latest request's cache-read share of prompt input, rounded
+to a whole percent. Zero cache reads in the host's usage show `(cache:0%)`.
+The suffix is omitted when the host leaves a required counter unavailable or
+reports a zero prompt size. The existing `tokens` switch governs both.
+
 Hosts produce ordered [quota readings](src/core/limits.ts), including labels
 and error badges. The [limits fragment](src/render/fragments/limits.ts) rounds
 and colours percentages, formats amounts and reset times, skips expired
@@ -252,7 +258,12 @@ Unsupported mixed histories can yield an identity error and lose attributed
 agent and skill counts. The row only replays data the engine saved.
 
 [The collector](src/hosts/codex/collect.ts) takes cumulative uncached input
-plus output from token counts. The context gauge uses the last context
+plus output from token counts. For the cache percentage it divides
+`last_token_usage.cached_input_tokens` by `last_token_usage.input_tokens`
+in the selected log. A Codex 0.170.0 localhost probe recorded zero for
+missing cache details and repeated the preceding counters when a response
+omitted usage entirely. After new model output, a repeated cumulative input
+count cannot establish a fresh cache reading. The context gauge uses the last context
 reading with Codex's baseline allowance, and compaction clears that reading.
 Quota selection prefers the active model's exact recorded slug, then the
 general Codex bucket. Labels follow the recorded window duration.
@@ -364,8 +375,10 @@ subscriptions. Other native widgets and dialogs still belong to OmO.
 
 [History reducers](src/hosts/omo/collect.ts) fold persisted main-session
 assistant entries across branches and compaction history. Tokens sum
-uncached input and output. Tool counts use outer calls, and agent counts use
-distinct task IDs from accepted spawns. Skills lack a canonical load receipt.
+uncached input and output. The latest assistant request supplies cache reads
+divided by the sum of input, cache reads and cache writes. Removing an observed
+edit copy also removes its cache reading. Tool counts use outer calls, and
+agent counts use distinct task IDs from accepted spawns. Skills lack a canonical load receipt.
 For a native assistant edit that copies usage,
 registration writes a receipt naming the new entry. Older unobserved copies
 remain in the total, and equal usage amounts alone do not identify copies.
@@ -420,6 +433,12 @@ Session age, uncached tokens and call counts come from the active log.
 Context's input tokens measure the live window. Skill counts require known
 skill roots and deduplicate within a turn.
 
+The status-line payload supplies the cache reading in `context_window.current_usage`.
+A saved Linux 1.5.8 payload reported 2,669 uncached input tokens, 8,113 cache
+reads and zero cache writes for the request. Its enclosing `total_input_tokens`
+was 15,295, so that field would give a different denominator.
+[Google status-line payload](https://antigravity.google/docs/cli/statusline)
+
 [Git cache](src/hosts/antigravity/vcs.ts) is scoped to the working directory.
 Mutating tools can trigger a refresh after the slow-walk hold. Each Git subprocess
 has a four-second timeout to leave room inside the host's status command budget.
@@ -439,8 +458,8 @@ reads the file. The [setup guide](docs/setup-claude.md) covers scope, settings
 precedence, Windows Git Bash, and platform-specific paths.
 
 The line reports what the mod collects from engine events and supported usage
-sources. Teammates in their own panes and payload-only fields such as PR state,
-lines changed and prompt-cache lifetime are outside that collection.
+sources. Teammates in their own panes, PR state, lines changed and prompt-cache
+lifetime are outside that collection.
 
 ### The host
 
@@ -464,6 +483,11 @@ state shapes. [Mod reference](https://code.claude.com/docs/en/plugins/mods/refer
 
 - [Session collector](src/hosts/claude/collect/session.ts) sums uncached
   input plus output from `turn.step` usage, including observed subagents.
+  The cache reading follows completed main-loop requests. Claude Code 2.1.323's
+  `ModelUsage` describes `input_tokens` as “the part of the
+  prompt neither read from nor written to the prompt cache.” The denominator
+  therefore includes uncached input, cache reads and cache creation. In
+  `ModelUsage`, “a count the response left out reads as zero.”
   Each main-loop `tool.call` increments the tool total. Calls to `Agent` and
   `Skill` also increment their own totals. Claude Code 2.1.323 describes
   `AgentLoop.agentId` as “absent on the main loop.”
@@ -582,6 +606,8 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   import boundaries, installers and local fixtures. The Codex replay fixtures
   check which counters belong to each thread. Display fixtures cover legacy
   counter settings, the shared `callCounts` switch and counts held while typing.
+  The collector fixture distinguishes per-request cache reads from cumulative
+  usage, an explicit miss and a context-only estimate.
   A separate Codex row test checks
   out a tag in a real linked worktree and renders it with defaults and with
   the former `detachedHead: false` setting. The suite also checks the psmux
@@ -589,7 +615,11 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
 - `npm test` adds native Codex and multiplexer integration tests through the
   [platform-aware runner](tests/run-node.mjs). Codex tests with a localhost
   provider exercise the stock engine, saved events and TUI. The supplied
-  responses test handling of provider data and tool calls. The native skill
+  responses test handling of provider data and tool calls. On Linux with Codex
+  0.170.0, the Fast-mode fixture supplied 285 cached tokens in a 1,000-token
+  prompt and the saved-log reader rendered `(cache:29%)`. Repeating that
+  usage preserved the suffix. A response without usage cleared it. The standalone
+  fixture observed `token:3.2k(cache:94%)` in the tmux row. The native skill
   test checks a child thread's token, tool, agent and skill totals. Model choice,
   billing and different provider timing need their own evidence.
 - `npm run test:claude` validates the plugin, type-checks against generated

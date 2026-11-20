@@ -1,6 +1,6 @@
 import { resetTime, type QuotaWindow } from '../../core/limits.ts'
 import { en, type Labels } from '../../i18n/en.ts'
-import { initialSession } from '../../core/session.ts'
+import { cacheHitFromSplitInput, initialSession } from '../../core/session.ts'
 import type { Values } from '../../core/types.ts'
 import { initialVcs } from '../../core/vcs.ts'
 
@@ -11,6 +11,12 @@ export type AntigravityModel = {
 }
 
 export type AntigravityContextWindow = {
+  current_usage?: {
+    input_tokens?: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+    output_tokens?: number
+  } | null
   total_input_tokens?: number
   total_output_tokens?: number
   context_window_size?: number
@@ -170,6 +176,12 @@ export function collectAntigravityPayload(payload: AntigravityPayload, env: Anti
   session.defaultEffort = antigravityDefaultEffort(id) ?? antigravityDefaultEffort(model)
 
   const cw = payload.context_window
+  const usage = cw?.current_usage
+  if (usage) {
+    session.cacheHitPercent = cacheHitFromSplitInput(
+      usage.cache_read_input_tokens, usage.input_tokens, usage.cache_creation_input_tokens,
+    )
+  }
   if (cw && typeof cw === 'object' && typeof cw.context_window_size === 'number' && cw.context_window_size > 0) {
     session.contextWindow = cw.context_window_size
     const tokens = typeof cw.total_input_tokens === 'number' && Number.isFinite(cw.total_input_tokens)

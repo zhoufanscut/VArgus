@@ -202,6 +202,7 @@ trust_level = "trusted"
     await wait(screen, /LOCAL CONTROL RESPONSE/)
     const metrics = await wait(row, new RegExp('sol:low.*5h:28%.*ctx:18%.*token:' + expectedTokens.replace('.', '\\.')))
     assert.doesNotMatch(metrics, /gpt-6\.1-sol/)
+    assert.ok(metrics.includes(`token:${expectedTokens}(cache:94%)`), metrics)
     await delay(1000); let afterTurn = posts
     assert.ok(afterTurn > 0, 'Positive control: a user turn reaches the same local model counter')
     if (!initialPrompt) {

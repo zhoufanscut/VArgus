@@ -7,7 +7,7 @@
   // "model": true,          // Show the model name.
   // "effort": true,         // Include reasoning effort beside the model.
   // "context": true,        // Show the percentage of the context window used.
-  // "tokens": true,         // Show the session's token count.
+  // "tokens": true,         // Show the session token count and latest prompt-cache hit rate.
   // "session": true,        // Show elapsed session time.
   // "callCounts": true,     // Show tool, agent and skill counts where available.
 

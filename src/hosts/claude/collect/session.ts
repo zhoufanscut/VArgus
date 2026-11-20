@@ -20,13 +20,12 @@
 // from it; the tool names are the 2.1.300 tool table's (VantageHUD also
 // counted `Task`, `proxy_Task`, `proxy_Skill`, which that table lacks).
 
-import { initialCounts, type SessionValues } from '../../../core/session'
+import { cacheHitFromSplitInput, initialCounts, type SessionValues } from '../../../core/session'
 export { initialSession, type SessionValues } from '../../../core/session'
 import type {
   EngineInterface, SessionCompactInput, SessionCompactResult, SessionContextUsage, SessionEndInput,
   SessionMeasureInput, ToolCallInput, TurnStepInput, TurnStepResult,
 } from 'claude-code'
-
 import type { VargusCounts } from '../state'
 
 const COUNTS = { plugin: 'vargus', key: 'counts' } as const
@@ -53,7 +52,11 @@ let saving: Promise<unknown> = Promise.resolve()
 let sessionGeneration = 0
 
 function save($: EngineInterface, values: SessionValues): void {
-  saving = saving.then(() => $.state.set(COUNTS, { ...values.counts })).catch(() => {})
+  saving = saving.then(() => {
+    const saved: VargusCounts = { ...values.counts }
+    if (values.cacheHitPercent !== undefined) saved.cacheHitPercent = values.cacheHitPercent
+    return $.state.set(COUNTS, saved)
+  }).catch(() => {})
 }
 
 // Model and session start, and the context when no event pushed it. Called
@@ -86,7 +89,10 @@ async function readSession($: EngineInterface, values: SessionValues, withContex
 export async function startSession($: EngineInterface, values: SessionValues): Promise<void> {
   try {
     const saved = (await $.state.get(COUNTS)).value
-    if (saved) values.counts = initialCounts(saved)
+    if (saved) {
+      values.counts = initialCounts(saved)
+      values.cacheHitPercent = saved.cacheHitPercent
+    }
   } catch {
     // nothing saved
   }
@@ -121,10 +127,15 @@ export function stepStarting(e: TurnStepInput, values: SessionValues): void {
 // subagent's response is not the main conversation's window. Read after every
 // main step, even one without usage: a failed response then keeps the last fill.
 export async function stepDone($: EngineInterface, e: TurnStepInput, r: TurnStepResult, values: SessionValues): Promise<void> {
-  if (r.usage) {
-    values.counts.tokens += r.usage.input_tokens + r.usage.output_tokens
-    save($, values)
+  const usage = r.usage
+  if (usage) values.counts.tokens += usage.input_tokens + usage.output_tokens
+  const mainResponse = e.agentId === undefined && (usage !== null || r.stopReason !== null)
+  if (mainResponse) {
+    values.cacheHitPercent = cacheHitFromSplitInput(
+      usage?.cache_read_input_tokens, usage?.input_tokens, usage?.cache_creation_input_tokens,
+    )
   }
+  if (usage || mainResponse) save($, values)
   if (e.agentId !== undefined) return
   values.compactPending = false
   try {
@@ -152,6 +163,7 @@ export function sessionEnding($: EngineInterface, e: SessionEndInput, values: Se
   if (e.reason !== 'clear' && e.reason !== 'resume') return
   sessionGeneration += 1
   values.counts = initialCounts()
+  values.cacheHitPercent = undefined
   values.contextPercent = undefined
   values.startedAt = undefined
   values.compactPending = false
@@ -164,8 +176,10 @@ export function sessionEnding($: EngineInterface, e: SessionEndInput, values: Se
 // compaction, so drop the old fill here; the next main-loop step reads the new
 // window's first response. A hook's skip, a precompute (nothing installed) and
 // a subagent's own transcript leave the main conversation's fill alone.
-export function compacted(e: SessionCompactInput, r: SessionCompactResult, values: SessionValues): void {
+export function compacted($: EngineInterface, e: SessionCompactInput, r: SessionCompactResult, values: SessionValues): void {
   if (e.agentId !== undefined || e.trigger === 'precompute' || r.skip !== undefined) return
   values.contextPercent = undefined
   values.compactPending = true
+  values.cacheHitPercent = undefined
+  save($, values)
 }

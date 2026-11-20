@@ -146,32 +146,37 @@ test('native assistant edits preserve consumed tokens across live updates and re
   const original: SessionEntry = {
     id: 'original', type: 'message', timestamp: '',
     message: { role: 'assistant', content: [{ type: 'text', text: 'Original' }],
-      usage: { input: 100, output: 20, cacheRead: 40 } },
+      usage: { input: 100, output: 20, cacheRead: 40, cacheWrite: 60 } },
   }
   const edited: SessionEntry = {
     id: 'edited', type: 'message', timestamp: '',
     message: { role: 'assistant', content: [{ type: 'text', text: 'Edited' }],
-      usage: { input: 100, output: 20, cacheRead: 40 } },
+      usage: { input: 100, output: 20, cacheRead: 40, cacheWrite: 60 } },
   }
   const text = () => h.row?.render(200).join('').replace(/\x1b\[[0-9;]*m/g, '') ?? ''
   h.append(original)
   h.load(); h.event('session_start')
   try {
-    assert.match(text(), /token:120/)
+    assert.match(text(), /token:120\(cache:20%\)/)
+    h.append({ id: 'miss', type: 'message', timestamp: '', message: {
+      role: 'assistant', usage: { input: 25, output: 5, cacheRead: 0, cacheWrite: 0 },
+    } })
+    h.event('message_end')
+    assert.match(text(), /token:150\(cache:0%\)/)
     h.event('session_before_tree', { preparation: { targetId: 'original' } })
     h.append(edited)
     h.event('session_tree', { newLeafId: 'edited', oldLeafId: 'original' })
-    assert.match(text(), /token:120/)
+    assert.match(text(), /token:150\(cache:0%\)/)
     h.event('session_shutdown')
     h.load(); h.event('session_start')
-    assert.match(text(), /token:120/)
+    assert.match(text(), /token:150\(cache:0%\)/)
     // A navigation to an existing response, and another actual response with
     // identical usage, must not be mistaken for an edit.
     h.event('session_before_tree', { preparation: { targetId: 'original' } })
     h.event('session_tree', { newLeafId: 'original', oldLeafId: 'edited' })
     h.append({ ...original, id: 'second-response' })
     h.event('message_end')
-    assert.match(text(), /token:240/)
+    assert.match(text(), /token:270\(cache:20%\)/)
   } finally { h.event('session_shutdown') }
 })
 

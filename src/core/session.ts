@@ -16,12 +16,28 @@ export type SessionValues = {
   // Tokens in use and window size, where provided by the host collector.
   contextTokens: number | undefined
   contextWindow: number | undefined
+  // Share of the latest request's prompt input served from cache, from 0 to 100.
+  cacheHitPercent?: number
   // Session start as Unix milliseconds; undefined until read.
   startedAt: number | undefined
   // a standing compaction until the next main-loop step: a measure in this
   // gap can still carry the pre-compact fill and must not restore it
   compactPending: boolean
   counts: Counts
+}
+
+function tokenCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+export function cacheHitPercent(read: number, totalInput: number): number | undefined {
+  if (!tokenCount(read) || !tokenCount(totalInput) || totalInput === 0 || read > totalInput) return undefined
+  return (100 * read) / totalInput
+}
+
+export function cacheHitFromSplitInput(read: unknown, input: unknown, written: unknown): number | undefined {
+  if (!tokenCount(read) || !tokenCount(input) || !tokenCount(written)) return undefined
+  return cacheHitPercent(read, input + read + written)
 }
 
 

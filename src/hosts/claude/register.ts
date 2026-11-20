@@ -114,7 +114,7 @@ export const register: Register = (on, given) => {
   // until the next turn's end (DESIGN, "Data sources").
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
-    compacted(e, r, values.session)
+    compacted($, e, r, values.session)
     return r
   })
 
