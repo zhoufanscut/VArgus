@@ -282,9 +282,17 @@ at an empty composer also discards its snapshot, so typing in a new conversation
 cannot revive old readings.
 Reloading discards the snapshot until a view is recognized again.
 
-Side chats opened with `/btw` or `/side` keep the last confirmed readings while
-the side chat prompt or its draft hint is visible. Live readings resume when you
-return to a recognized saved conversation.
+When `/btw` opens a side chat on Codex 0.170.0, the native statusline can
+reappear alongside the VArgus tmux row. VArgus clears the main thread's footer
+with `/statusline --clear`. The side chat opens with its own footer layout
+and Codex shows `/statusline` as disabled in the command menu. Entering the
+command there returns “'/statusline' is unavailable in side conversations.”
+Even with the side thread's ID, VArgus cannot use that command to hide its footer.
+
+VArgus controls the tmux row directly. In a side chat opened with `/btw` or
+`/side`, the row keeps the last confirmed readings while the side chat prompt
+or its draft hint is visible. Live readings resume when you return to a
+recognized saved conversation.
 
 See [Narrow terminals and SSH](#narrow-terminals-and-ssh) for
 footer clipping and restore commands that would wrap. A visible native statusline error
