@@ -34,7 +34,7 @@ test('saved-log readings keep cumulative totals per view, short display and nati
   assert.match(text, /sol:high/)
   assert.equal(v.session.model, 'gpt-6.1-sol')
   assert.match(text, /ctx:15%/)
-  assert.match(text, /token:4\.4k\(cache:77%\)/)
+  assert.match(text, /token:4\.4k\(76\.9%\)/)
   c.completeItem({ id: 'compact1', type: 'contextCompaction' })
   assert.equal(c.snapshot()!.session.contextPercent, undefined)
   assert.equal(c.snapshot()!.session.cacheHitPercent, undefined)

@@ -114,7 +114,7 @@ After removing the host integration, check these paths separately.
 Illustrative output from Claude Code.
 
 ```
-~/proj/VArgus | opus:high | 5h:4%(4h37m) 7d:39%(5d6h) | ctx:20% | token:69.5k(cache:23%) | session:24m | 🔧73 🤖2 ⚡1 | repo:VArgus | branch:main | ?4
+~/proj/VArgus | opus:high | 5h:4%(4h37m) 7d:39%(5d6h) | ctx:20% | token:69.5k(99.4%) | session:24m | 🔧73 🤖2 ⚡1 | repo:VArgus | branch:main | ?4
 ```
 
 | Fragment | What it is |
@@ -123,7 +123,7 @@ Illustrative output from Claude Code.
 | `opus:high` / `carbon:high` / `sol:xhigh` | the model and effort level |
 | `5h:` `7d:` `1m:` | rate-limit windows with used percent and time until reset. `1m` is Kimi Code's membership monthly total. |
 | `ctx:` | how full the context window is |
-| `token:` | uncached input plus output tokens in the scope described by the host guide. `(cache:23%)` means the host reports that the cache served 23% of the latest request’s input tokens. The suffix is omitted when the host provides no usable reading. |
+| `token:` | uncached input plus output tokens in the scope described by the host guide. The percentage in parentheses is the share of the latest prompt served from cache. The rate shows up to one decimal place. Only fully cached input shows `100%`. The suffix is omitted when the host provides no usable reading. |
 | `session:` | age of the session or active conversation |
 | `🔧` `🤖` `⚡` | tool, agent and skill counts described in the host guides |
 | `repo:` `branch:` | Git repository and branch. On a detached HEAD, the label shows the checkout ref or short commit ID. During a rebase it shows the branch being rebased when available. Claude Code also supports SVN. |

@@ -12,10 +12,15 @@ export function formatTokenCount(tokens: number): string {
   return `${(tokens / 1000000).toFixed(2)}M`
 }
 
+function formatCachePercent(percent: number): number {
+  if (percent === 100) return 100
+  return Math.min(99.9, Math.round(percent * 10) / 10)
+}
+
 export const tokens: Fragment = ({ v, l, t }) => {
   const total = v.session.counts.tokens
   if (!(total > 0)) return null
   const percent = v.session.cacheHitPercent
-  const suffix = percent === undefined ? '' : t.paint('faint', `(${l.cache}:${Math.round(percent)}%)`)
+  const suffix = percent === undefined ? '' : t.paint('faint', `(${formatCachePercent(percent)}%)`)
   return t.paint('label', `${l.tokens}:`) + t.paint('gradLow', formatTokenCount(total)) + suffix
 }

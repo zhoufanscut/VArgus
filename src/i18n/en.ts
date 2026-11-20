@@ -4,7 +4,6 @@
 export const en = {
   context: 'ctx',
   tokens: 'token',
-  cache: 'cache',
   session: 'session',
   spendLimit: 'spend',
   critical: 'CRITICAL',

@@ -221,7 +221,7 @@ is experimental, so its response shape may change.
 
 Claude's token total includes the main conversation and subagents since the mod
 first loaded, or since the last `/clear` or in-session resume. Cache reads and
-writes are excluded. The `(cache:…%)` suffix follows the latest main-conversation
+writes are excluded. The cache-hit percentage in parentheses follows the latest main-conversation
 request. Claude Code counts missing provider cache counters as zero.
 Subagent replies contribute only to the token total. Tool, agent and
 skill counts come from main-loop tool starts. Separate teammates in their own

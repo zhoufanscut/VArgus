@@ -73,9 +73,11 @@ can fit the result further, as OmO does at grapheme boundaries.
 
 The [token fragment](src/render/fragments/tokens.ts) keeps the session's token
 total and appends the latest request's cache-read share of prompt input, rounded
-to a whole percent. Zero cache reads in the host's usage show `(cache:0%)`.
-The suffix is omitted when the host leaves a required counter unavailable or
-reports a zero prompt size. The existing `tokens` switch governs both.
+to one decimal place with trailing zeros omitted. A partial hit displays at
+most `99.9%`, so `100%` means every input token was cached. Zero cache reads in
+the host's usage show `(0%)`. The suffix is omitted when the host leaves
+a required counter unavailable or reports a zero prompt size. The existing
+`tokens` switch governs both.
 
 Hosts produce ordered [quota readings](src/core/limits.ts), including labels
 and error badges. The [limits fragment](src/render/fragments/limits.ts) rounds
@@ -617,9 +619,9 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   provider exercise the stock engine, saved events and TUI. The supplied
   responses test handling of provider data and tool calls. On Linux with Codex
   0.170.0, the Fast-mode fixture supplied 285 cached tokens in a 1,000-token
-  prompt and the saved-log reader rendered `(cache:29%)`. Repeating that
+  prompt and the saved-log reader rendered `(28.5%)`. Repeating that
   usage preserved the suffix. A response without usage cleared it. The standalone
-  fixture observed `token:3.2k(cache:94%)` in the tmux row. The native skill
+  fixture observed `token:3.2k(94.3%)` in the tmux row. The native skill
   test checks a child thread's token, tool, agent and skill totals. Model choice,
   billing and different provider timing need their own evidence.
 - `npm run test:claude` validates the plugin, type-checks against generated

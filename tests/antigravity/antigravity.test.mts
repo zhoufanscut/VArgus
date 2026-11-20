@@ -537,7 +537,7 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
       noColor: true,
       cacheDir,
     })
-    assert.match(wslLine, /^  ~\/proj\/demo \| carbon:high \| 5h:4%\(4h3\dm\) 7d:39%\(5d6h\) \| ctx:20% \| token:12\.4k\(cache:75%\) \| session:24m \| T:1$/)
+    assert.match(wslLine, /^  ~\/proj\/demo \| carbon:high \| 5h:4%\(4h3\dm\) 7d:39%\(5d6h\) \| ctx:20% \| token:12\.4k\(75\.2%\) \| session:24m \| T:1$/)
 
     const narrowLine = await renderAntigravityStatusLine({ ...payload, terminal_width: 32 }, {
       home,
@@ -590,7 +590,7 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
     const noColor = await runStatusline(['--config', configPath], JSON.stringify(payload), { NO_COLOR: '1' })
     assert.equal(noColor.code, 0, noColor.stderr)
     assert.ok(!noColor.stdout.includes('\x1b['), 'NO_COLOR must strip all ANSI codes')
-    assert.match(noColor.stdout.replace(/\r?\n$/, ''), /^  ~\/proj\/demo \| carbon:high \| 5h:4%\(4h3\dm\) 7d:39%\(5d6h\) \| ctx:20% \| token:12\.4k\(cache:75%\)$/)
+    assert.match(noColor.stdout.replace(/\r?\n$/, ''), /^  ~\/proj\/demo \| carbon:high \| 5h:4%\(4h3\dm\) 7d:39%\(5d6h\) \| ctx:20% \| token:12\.4k\(75\.2%\)$/)
 
     // Empty stdin and JSON array payloads exit 0 quietly so Antigravity never counts them as failures.
     const emptyRes = await runStatusline([], '')

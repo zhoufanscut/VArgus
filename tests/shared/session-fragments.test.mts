@@ -125,10 +125,13 @@ describe('tokens', () => {
     assert.equal(tokens(input({})), null)
   })
 
-  test('cache suffix rounds to a whole percent and preserves a reported zero', () => {
+  test('cache suffix shows up to one decimal and reserves 100% for a full hit', () => {
     const total = counts({ tokens: 103_200 })
-    for (const [percent, shown] of [[0, '0'], [7.2, '7'], [22.75, '23'], [100, '100']] as const) {
-      assert.equal(tokens(input({ counts: total, cacheHitPercent: percent })), `token:103.2k(cache:${shown}%)`)
+    for (const [percent, shown] of [
+      [0, '0'], [7, '7'], [7.2, '7.2'], [22.75, '22.8'],
+      [99.5, '99.5'], [99.99, '99.9'], [100, '100'],
+    ] as const) {
+      assert.equal(tokens(input({ counts: total, cacheHitPercent: percent })), `token:103.2k(${shown}%)`)
     }
     assert.equal(tokens(input({ counts: total })), 'token:103.2k')
   })

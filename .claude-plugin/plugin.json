@@ -37,7 +37,7 @@
     "tokens": {
       "type": "boolean",
       "title": "Tokens",
-      "description": "Show tokens since the mod loaded, the last /clear or resume, with the latest request’s cache hit rate (token:69.5k(cache:23%))",
+      "description": "Show tokens since the mod loaded, the last /clear or resume, with the latest request’s cache hit rate (token:69.5k(23%))",
       "default": true
     },
     "session": {

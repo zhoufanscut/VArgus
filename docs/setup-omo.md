@@ -128,7 +128,7 @@ while this extension is loaded are recorded as non-billable copies, so editing a
 response does not increase its token total. OmO does not persist edit provenance
 itself: copies made before installation or through another client without VArgus
 cannot be distinguished reliably and remain in the recorded total.
-The `(cache:…%)` suffix uses the latest recorded main-session assistant request.
+The cache-hit percentage in parentheses uses the latest recorded main-session assistant request.
 An edit identified by VArgus preserves the preceding request's percentage.
 Tools count persisted outer
 assistant tool calls; calls hidden inside `eval` are not added. Agents count distinct

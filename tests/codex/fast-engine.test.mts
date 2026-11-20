@@ -108,7 +108,7 @@ trust_level = "trusted"
       assert.equal(reader.collector.snapshot()!.session.model, 'gpt-6.1-sol')
     }
     await turn(); await row('sol:max')
-    await row('token:720(cache:29%)')
+    await row('token:720(28.5%)')
     const before = posts
     await rpc('thread/settings/update', { threadId, serviceTier: 'fast' })
     await row('sol:max(fast)')
@@ -118,7 +118,7 @@ trust_level = "trusted"
     await row('sol:max(fast)')
     assert.equal(posts, before, 'settings changes must not send another provider request')
     await turn(); await row('sol:max(fast)')
-    await row('token:1.4k(cache:29%)')
+    await row('token:1.4k(28.5%)')
     reportUsage = false
     await turn(); await row('token:1.4k')
     const replay = new RolloutReader(started.thread.path, threadId, project, dir)
