@@ -98,7 +98,7 @@ trust_level = "trusted"
         await reader.poll()
         const v = reader.collector.snapshot()!
         const o = resolveCodexOptions({})
-        text = render({ v, display: codexDisplay(v.session, o), o, l: en, t: makeTheme('graphite', true), now: Date.now() })
+        text = render({ v, display: codexDisplay(v.session), o, l: en, t: makeTheme('graphite', true), now: Date.now() })
         if (text.split(' | ').includes(expected)) break
         await delay(50)
       } while (Date.now() < until)

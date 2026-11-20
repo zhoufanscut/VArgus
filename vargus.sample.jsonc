@@ -21,8 +21,6 @@
   // "status": true,         // Show working-tree changes and ahead/behind counts.
 
   // Codex
-  // "codexAgentCounts": true, // Include subagents in the call counts.
-  // "codexSkillCounts": true, // Include skill loads in the call counts.
   // "codexAutoStart": true,   // Let the installed startup hooks activate VArgus.
 
   // Claude Code

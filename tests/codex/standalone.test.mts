@@ -155,9 +155,9 @@ trust_level = "trusted"
       await tmux('set-option', '-u', '-t', 'test', 'status')
     }
     const optionsFile = join(dir, 'options.json')
-    await writeFile(optionsFile, JSON.stringify({ session: false, codexAgentCounts: false }))
+    await writeFile(optionsFile, JSON.stringify({ session: false, callCounts: false }))
     const sharedFile = join(install, 'vargus.jsonc')
-    if (selection === null) await writeFile(sharedFile, '// shared checkout\n{"codexSkillCounts":false}')
+    if (selection === null) await writeFile(sharedFile, '// shared checkout\n{"callCounts":false}')
     await submit(command('on', '--socket ' + quote(socket)))
     await wait(screen, /VArgus is on/)
     await wait(footer, /for shortcuts/)
@@ -184,11 +184,11 @@ trust_level = "trusted"
     if (selection === null) {
       const controlDir = join(footerDir, '..')
       const record = (await readdir(controlDir)).find(name => name.endsWith('.json'))!
-      const skillCounts = async () => JSON.parse(await readFile(join(controlDir, record), 'utf8')).reload.options.codexSkillCounts
-      assert.equal(await skillCounts(), false)
+      const callCounts = async () => JSON.parse(await readFile(join(controlDir, record), 'utf8')).reload.options.callCounts
+      assert.equal(await callCounts(), false)
       await writeFile(sharedFile, '{}')
       await exec(entry, ['reload'], { cwd: project, env: controlEnv })
-      assert.equal(await skillCounts(), true)
+      assert.equal(await callCounts(), true)
     }
     assert.match((await exec(entry, ['status'], { cwd: project, env: controlEnv })).stdout, /VArgus is on/)
     assert.match((await exec(entry, ['on'], { cwd: project, env: controlEnv })).stdout, /already on/)
@@ -282,7 +282,7 @@ trust_level = "trusted"
       assert.equal(active.reload.home, legacy.reload.home)
       assert.equal(active.reload.options.theme, 'ember')
       assert.equal(active.reload.options.session, false)
-      assert.equal(active.reload.options.codexAgentCounts, false)
+      assert.equal(active.reload.options.callCounts, false)
       assert.equal('codexDraftHold' in active.reload.options, false)
       assert.equal(await readFile(join(footerDir, backupName), 'utf8'), backup)
       assert.equal(posts, afterTurn)
@@ -368,14 +368,14 @@ trust_level = "trusted"
       assert.equal(second.transcript, first.transcript)
       assert.equal(second.reload.options.theme, 'ember')
       assert.equal(second.reload.options.session, false)
-      assert.equal(second.reload.options.codexAgentCounts, false)
+      assert.equal(second.reload.options.callCounts, false)
       assert.equal('codexDraftHold' in second.reload.options, false)
       assert.match(await row(), /token:6\.4k/)
       assert.equal(await readFile(join(footerDir, backupName), 'utf8'), original)
       await writeFile(optionsFile, JSON.stringify({ session: true }))
       await control('reload', ['--config', optionsFile, '--theme', 'graphite'])
       assert.equal((await runtime()).reload.options.session, true)
-      assert.equal((await runtime()).reload.options.codexAgentCounts, false)
+      assert.equal((await runtime()).reload.options.callCounts, false)
       assert.equal((await runtime()).reload.options.theme, 'graphite')
       // Replacement failure keeps the handoff and backups for the next command.
       await writeFile(entryPath, 'if (process.argv[2] === "__row") throw new Error("CONTROLLED_START_FAILURE");\n' + entrySource)

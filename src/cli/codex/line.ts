@@ -15,9 +15,9 @@ export function codexLine(collector: CodexCollector, o: CodexOptions, t: ReturnT
     if (!v) return ''
     v.core.columns = width
     refreshGit?.(v)
-    const frame = { v, display: codexDisplay(v.session, o), o, l: en, t, now: Date.now() }
+    const frame = { v, display: codexDisplay(v.session), o, l: en, t, now: Date.now() }
     const result = render(frame)
-    if (result) confirmed = { ...frame, v: structuredClone(v), o: { ...o } }
+    if (result) confirmed = { ...frame, ...structuredClone({ v, display: frame.display }), o: { ...o } }
     return result
   }
   return Object.assign(line, {

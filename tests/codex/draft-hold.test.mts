@@ -15,22 +15,24 @@ test('paused readings clone the last rendered values and time by default', async
   value.session.model = 'gpt-6.1-sol'
   value.session.effort = 'xhigh'
   value.session.contextPercent = 18
-  const options = resolveCodexOptions({ folder: false, rateLimits: false, tokens: false, callCounts: false,
+  value.session.counts.agents = 1
+  const options = resolveCodexOptions({ folder: false, rateLimits: false, tokens: false,
     repo: false, branch: false, status: false })
   const line = codexLine(collector, options, makeTheme('graphite', true))
   assert.equal(line.paused(200), '', 'no confirmed reading exists before the first render')
   const original = await line(200)
-  assert.match(original, /sol:xhigh.*ctx:18%/)
+  assert.match(original, /sol:xhigh.*ctx:18%.*🤖1/)
   assert.equal(line.paused(200), original)
   now = 180000
   value.core.cwd = '/changed'
   value.session.model = 'gpt-6.1-terra'
   value.session.contextPercent = 90
+  value.session.counts.agents = 2
   value.session.startedAt = Date.now()
   assert.equal(line.paused(200), original, 'mutable collector state cannot change paused readings')
   assert.ok(stringWidth(line.paused(24)) <= 24, 'the frozen values can reflow within the current width')
   const changed = await line(200)
-  assert.match(changed, /terra:xhigh.*ctx:90%/)
+  assert.match(changed, /terra:xhigh.*ctx:90%.*🤖2/)
   assert.equal(line.paused(200), changed, 'a new confirmed render replaces the snapshot')
 })
 

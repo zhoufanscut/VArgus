@@ -133,7 +133,7 @@ trust_level = "trusted"
       counts.push(v.session.counts.skills)
       assert.equal(v.session.counts.skills, fixture.count)
       const o = resolveCodexOptions({})
-      const row = render({ v, display: codexDisplay(v.session, o), o, l: en, t: makeTheme('graphite', true), now: Date.now() })
+      const row = render({ v, display: codexDisplay(v.session), o, l: en, t: makeTheme('graphite', true), now: Date.now() })
       assert.match(row, new RegExp('⚡' + fixture.count + '(?: |$)'))
       assert.match(row, /sol:low/)
       assert.doesNotMatch(row, /⚡~/)

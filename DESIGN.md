@@ -82,8 +82,8 @@ can exceed 100%. Each host decides which readings are current, stale or absent.
 [Shared defaults](src/options.ts) and the Claude manifest agree on picker keys
 and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
 The spend and stopped-line options default off.
-Codex resolves its [extra options](src/hosts/codex/options.ts)
-separately. Its agent count, skill count and installed startup hooks default on.
+The shared `callCounts` setting controls the tool, agent and skill counts together.
+Codex's [startup hook option](src/hosts/codex/options.ts) defaults on.
 Explicit activation or hook installation enables its tmux integration.
 
 The recommended install runs from one checkout. Its optional
@@ -559,7 +559,9 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
 
 - `npm run test:local` type-checks the Node graph and exercises shared rendering,
   import boundaries, installers and local fixtures. The Codex replay fixtures
-  check which counters belong to each thread. A separate Codex row test checks
+  check which counters belong to each thread. Display fixtures cover legacy
+  counter settings, the shared `callCounts` switch and counts held while typing.
+  A separate Codex row test checks
   out a tag in a real linked worktree and renders it with defaults and with
   the former `detachedHead: false` setting. The suite also checks the psmux
   command contract.
@@ -584,8 +586,8 @@ ran in Claude Code 2.1.323 with a saved native `model: true` and a shared
 omitted the model initially, showed it after `/config vargus.model=true`,
 and omitted it after `/config vargus.model=false`. The probe used the native
 Claude TUI and supplied Antigravity's stdin payload. The checkout-file case
-in the Linux Codex standalone suite used the stock TUI, removed a shared
-`codexSkillCounts: false` setting, and observed the built-in value on reload.
+in the Linux Codex standalone suite used the stock TUI, removed a checkout
+setting, and observed the built-in value on reload.
 The native Claude panel and open-session reload were also exercised with
 conflicting native and checkout values, including a case in which Claude
 reported a successful plugin reload while keeping the current module.

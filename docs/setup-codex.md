@@ -140,9 +140,7 @@ and any detected Git operation. During a rebase it shows the branch being rebase
 Codex always displays known model families as `astra`, `sol`, `terra` or `luna`, for example
 `sol:xhigh`. Both `gpt-6-sol` and `gpt-6.1-sol` display `sol`; unfamiliar IDs remain
 whole. The former `codexShortModel` option is ignored in existing options files.
-Subagent counts and skill counts default to on for Codex; set `codexAgentCounts`
-or `codexSkillCounts` to `false` in the shared or explicit options file to
-disable either. `model` and `callCounts` control their whole fragments.
+The shared `callCounts` setting controls tool, agent and skill counts together.
 
 Codex Fast mode adds `(fast)` beside the model and effort, such as `sol:max(fast)`.
 The suffix is on by default when the displayed thread's saved settings select

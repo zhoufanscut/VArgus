@@ -221,7 +221,7 @@ describe('register: the line as the host sets it up', () => {
     const w = world(on, clock, undefined, false)
     const row: ConfigRow = { key: 'vargus.model', label: 'Model', kind: 'boolean', value: true,
       provider: { plugin: 'vargus@vargus', tier: 'user' }, isLocked: false }
-    let file = '{ /* shared */ "model": false, "codexSkillCounts": false }\n'
+    let file = '{ /* shared */ "model": false, "codexAutoStart": false }\n'
     let staged = ''
     const operations: string[] = []
     on('fs.exists', async ($, e) => ({ value: e.path.endsWith('/vargus.jsonc') }))
@@ -246,7 +246,7 @@ describe('register: the line as the host sets it up', () => {
     expect(await line(clock, w)).not.toContain('opus')
     const set = { key: row.key, previous: false, value: true, provider: row.provider, origin: { kind: 'composer' } } as const
     expect(await $.config.set(set)).toEqual({ value: true })
-    expect(file).toBe('{ /* shared */ "model": true, "codexSkillCounts": false }\n')
+    expect(file).toBe('{ /* shared */ "model": true, "codexAutoStart": false }\n')
     expect(await line(clock, w)).toContain('opus')
     expect(operations).toEqual(['prepare', 'commit'])
     row.isLocked = true

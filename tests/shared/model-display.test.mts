@@ -8,7 +8,7 @@ import { codexDisplay } from '../../src/hosts/codex/display.ts'
 import { resolveCodexOptions, type CodexOptions } from '../../src/hosts/codex/options.ts'
 import { omoDisplay } from '../../src/hosts/omo/display.ts'
 import { effortColor, model } from '../../src/render/fragments/model.ts'
-import { calls } from '../../src/render/fragments/calls.ts'
+import { render } from '../../src/render/index.ts'
 import { context } from '../../src/render/fragments/context.ts'
 import { DEFAULTS } from '../../src/options.ts'
 import { en } from '../../src/i18n/en.ts'
@@ -19,7 +19,7 @@ const defaults = resolveCodexOptions({})
 const plain = makeTheme('graphite', true)
 
 function codexInput(v: Values, o: CodexOptions = defaults, t = plain) {
-  return { v, display: codexDisplay(v.session, o), o, l: en, t, now: 0 }
+  return { v, display: codexDisplay(v.session), o, l: en, t, now: 0 }
 }
 
 test('each palette uses calm at or above the model default or high cutoff', () => {
@@ -63,10 +63,10 @@ test('Codex short names retain full IDs internally and preserve unfamiliar model
   assert.deepEqual(resolveCodexOptions({ codexShortModel: false }), defaults)
   assert.equal(model(codexInput(v, { ...defaults, effort: false })), 'sol')
   Object.assign(v.session.counts, { tools: 7, agents: 2, skills: 3 })
-  assert.equal(calls(codexInput(v)), '🔧7 🤖2 ⚡3')
-  assert.equal(calls(codexInput(v, resolveCodexOptions({ codexAgentCounts: false }))), '🔧7 ⚡3')
-  assert.equal(calls(codexInput(v, resolveCodexOptions({ codexSkillCounts: false }))), '🔧7 🤖2')
-  assert.equal(calls(codexInput(v)), '🔧7 🤖2 ⚡3')
+  const oldOptions = resolveCodexOptions({ codexAgentCounts: false, codexSkillCounts: false })
+  assert.deepEqual(oldOptions, defaults)
+  assert.match(render(codexInput(v, oldOptions)), /🔧7 🤖2 ⚡3/)
+  assert.doesNotMatch(render(codexInput(v, { ...defaults, callCounts: false })), /🔧|🤖|⚡/)
   assert.equal(context(codexInput(v)), null)
   v.session.contextPercent = 0
   assert.equal(context(codexInput(v)), 'ctx:0%')
@@ -157,7 +157,7 @@ test('OmO speed suffixes follow effort and stay visible when effort is hidden', 
     t.paint('label', 'sol:') + t.paint(t.rgb.gradLow, 'high') + t.paint('faint', '(ultrafast)'))
   v.session.fast = false
   for (const [display, id, name] of [
-    [(session: Values['session']) => codexDisplay(session, defaults), 'gpt-6.1-sol-fast', 'gpt-6.1-sol-fast'],
+    [codexDisplay, 'gpt-6.1-sol-fast', 'gpt-6.1-sol-fast'],
     [claudeDisplay, 'claude-opus-5-5-fast', 'opus'],
     [antigravityDisplay, 'gemini-4-pro-fast', 'pro-fast'],
   ] as const) {

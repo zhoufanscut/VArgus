@@ -30,7 +30,7 @@ test('saved-log readings keep cumulative totals per view, short display and nati
   assert.equal(c.snapshot()!.session.contextPercent, 15)
   const v = c.snapshot()!
   const o = resolveCodexOptions({})
-  const text = render({ v, display: codexDisplay(v.session, o), o, l: en, t: makeTheme('graphite', true), now: 60000 })
+  const text = render({ v, display: codexDisplay(v.session), o, l: en, t: makeTheme('graphite', true), now: 60000 })
   assert.match(text, /sol:high/)
   assert.equal(v.session.model, 'gpt-6.1-sol')
   assert.match(text, /ctx:15%/)
