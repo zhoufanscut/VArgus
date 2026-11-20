@@ -146,8 +146,7 @@ The explicit file accepts JSON or JSONC and uses the keys and defaults in
   other provider names stay whole (`GPT-OSS 120B (Medium)` → `gpt-oss-120b:medium`).
 - **Quota groups**: Gemini and Orchestrator models show the `"Gemini Models"` `5h:` and `7d:`
   buckets; Claude and GPT models show the `"Claude and GPT models"` `5h:` and `7d:` buckets.
-  Setting `"otherModelWeekly": true` also shows the non-active group's weekly bucket (`3p:`
-  or `gm:`) once it reaches 80% used.
+  Switch to a model in the other group to see its limits.
 - **Call counts** show `🔧` for `tool_calls`, `🤖` for `invoke_subagent` and `swarm` `add`
   spawns, and `⚡` for Antigravity `SKILL.md` reads once per skill path per user turn.
 - **Git & colours**: `"detachedHead": true` names detached tags/commits and rebase/merge

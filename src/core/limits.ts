@@ -18,10 +18,6 @@ export function isRecentUsage(lastSuccessAt: number | null, now: number): boolea
   return lastSuccessAt !== null && now - lastSuccessAt <= MAX_STALE_MS
 }
 
-export function showModelWeekly(percent: number): boolean {
-  return Math.round(percent) >= 80
-}
-
 export function resetTime(iso: string | undefined): number | null {
   const ms = iso ? Date.parse(iso) : NaN
   return Number.isNaN(ms) ? null : ms

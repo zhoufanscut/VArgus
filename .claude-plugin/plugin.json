@@ -64,12 +64,6 @@
       "description": "Add a gateway's spend limit (spend:63%(25d3h))",
       "default": false
     },
-    "otherModelWeekly": {
-      "type": "boolean",
-      "title": "Rate limits: other models' weekly",
-      "description": "Add weekly limits of models other than Sonnet and Opus",
-      "default": false
-    },
     "repo": {
       "type": "boolean",
       "title": "Repository",

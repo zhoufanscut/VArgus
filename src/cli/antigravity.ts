@@ -42,7 +42,6 @@ export async function renderAntigravityStatusLine(
   const labels = resolveLabels('en')
   const values = collectAntigravityPayload(payload, {
     labels,
-    otherModelWeekly: options.otherModelWeekly,
     home,
     isWsl,
     now,

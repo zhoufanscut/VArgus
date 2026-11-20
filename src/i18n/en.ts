@@ -30,8 +30,6 @@ export const en = {
   fiveHour: '5h',
   sevenDay: '7d',
   monthly: '1m',
-  sonnetWeekly: 'sn',
-  opusWeekly: 'op',
   detachedAt: '@',
   apiRateLimited: '[API 429]',
   apiAuth: '[API auth]',

@@ -27,7 +27,7 @@ const KIMI_BODY = JSON.stringify({
 const BODY = JSON.stringify({
   five_hour: { utilization: 50, resets_at: null },
   seven_day: { utilization: 60, resets_at: null },
-  seven_day_opus: null,
+  extra_usage: { spent_usd: 12, limit_usd: 100 },
   limits: [{ kind: 'weekly_scoped', percent: 12, resets_at: null, scope: { model: { display_name: 'Opus' } } }],
 })
 
@@ -100,7 +100,7 @@ describe('limits collector', () => {
     expect(w.fetches).toHaveLength(1)
     expect(line(w)).toBe('5h:4%')
     await clock.advance(5 * SEC)
-    expect(line(w)).toBe('5h:4% op:12%')
+    expect(line(w)).toBe('5h:4% extra:12%($12.00/$100.00)')
     // never a token or a refresh: only the engine's handle rides the request
     expect(w.fetches[0]).toEqual({ url: URL, init: { headers: { 'anthropic-beta': 'oauth-2025-04-20' }, auth: 'h1' } })
   })
@@ -149,7 +149,7 @@ describe('limits collector', () => {
       rateLimits: [{ kind: 'five_hour', percentUsed: 7 }, { kind: 'seven_day', percentUsed: 40 }],
     })
     await clock.advance(SEC)
-    expect(line(w)).toBe('5h:7% 7d:40% op:12%')
+    expect(line(w)).toBe('5h:7% 7d:40% extra:12%($12.00/$100.00)')
   })
 
   test('one read at a time: a read held past the 15 s check is not started again', opts, async ($, on) => {
@@ -161,7 +161,7 @@ describe('limits collector', () => {
     expect(w.fetches).toHaveLength(1)
     await clock.advance(5 * SEC)
     expect(w.fetches).toHaveLength(1)
-    expect(line(w)).toBe('5h:4% op:12%')
+    expect(line(w)).toBe('5h:4% extra:12%($12.00/$100.00)')
   })
 
   test('the API is read every 90 s, and a fresh cache in the store is used without a read', opts, async ($, on) => {
@@ -179,14 +179,15 @@ describe('limits collector', () => {
   test('one cache per account: keyed by CLAUDE_CONFIG_DIR', opts, async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const cached = {
-      data: { sonnet: null, opus: { percent: 33, resetsAt: null }, others: [], extra: null },
+      // A pre-upgrade cache can also contain model-specific weekly limits.
+      data: { sonnet: { percent: 99, resetsAt: null }, opus: { percent: 45, resetsAt: null }, others: [], extra: { percent: 33, resetsAt: null, spentUsd: 33, limitUsd: 100 } },
       lastSuccessAt: T0 - 10 * SEC, error: null, retryAt: T0 + 80 * SEC, rateLimitedCount: 0,
     }
     const w = world(on, clock, { CLAUDE_CONFIG_DIR: '/cfg/a' }, { 'usage:/cfg/a': cached, 'usage:/cfg/b': { ...cached, retryAt: 0 } })
     await $.session.start(start)
     await clock.advance(SEC)
     expect(w.fetches).toHaveLength(0)
-    expect(line(w)).toBe('5h:4% op:33%')
+    expect(line(w)).toBe('5h:4% extra:33%($33.00/$100.00)')
     await clock.advance(89 * SEC)
     expect(w.fetches).toHaveLength(1)
   })
@@ -194,14 +195,14 @@ describe('limits collector', () => {
   test('a cache of another account is not read', opts, async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const cached = {
-      data: { sonnet: null, opus: { percent: 33, resetsAt: null }, others: [], extra: null },
+      data: { extra: { percent: 33, resetsAt: null, spentUsd: 33, limitUsd: 100 } },
       lastSuccessAt: T0, error: null, retryAt: T0 + 80 * SEC, rateLimitedCount: 0,
     }
     const w = world(on, clock, { CLAUDE_CONFIG_DIR: '/cfg/b' }, { 'usage:/cfg/a': cached })
     await $.session.start(start)
     await clock.advance(SEC)
     expect(w.fetches).toHaveLength(1)
-    expect(line(w)).toBe('5h:4% op:12%')
+    expect(line(w)).toBe('5h:4% extra:12%($12.00/$100.00)')
   })
 
   test('401 is an auth error, 403 a network error; each shown when there is no data', opts, async ($, on) => {
@@ -237,13 +238,13 @@ describe('limits collector', () => {
     const w = world(on, clock)
     await $.session.start(start)
     await clock.advance(SEC)
-    expect(line(w)).toBe('5h:4% op:12%')
+    expect(line(w)).toBe('5h:4% extra:12%($12.00/$100.00)')
     w.answer = () => reply(401)
     await clock.advance(90 * SEC)
-    expect(line(w)).toBe('5h:4% op:12%*')
+    expect(line(w)).toBe('5h:4% extra:12%*($12.00/$100.00)')
     // at 15 min after the good read: still shown
     await clock.advance(15 * MIN - 91 * SEC)
-    expect(line(w)).toBe('5h:4% op:12%*')
+    expect(line(w)).toBe('5h:4% extra:12%*($12.00/$100.00)')
     await clock.advance(SEC)
     expect(line(w)).toBe('5h:4% [API auth]')
   })
@@ -260,7 +261,7 @@ describe('limits collector', () => {
     w.answer = () => reply(200, BODY)
     await clock.advance(16 * SEC)
     expect(w.fetches).toHaveLength(2)
-    expect(line(w)).toBe('5h:4% op:12%')
+    expect(line(w)).toBe('5h:4% extra:12%($12.00/$100.00)')
   })
 
   // An hour of mock clock in 1 s ticks takes past the kit's 5000 ms default.
@@ -321,7 +322,7 @@ describe('limits collector', () => {
   // show the numbers another login left there.
   const freshCache = {
     'usage:': {
-      data: { sonnet: null, opus: { percent: 33, resetsAt: null }, others: [], extra: null },
+      data: { extra: { percent: 33, resetsAt: null, spentUsd: 33, limitUsd: 100 } },
       lastSuccessAt: T0, error: null, retryAt: T0 + 80 * SEC, rateLimitedCount: 0,
     },
   }

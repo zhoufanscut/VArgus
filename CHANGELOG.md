@@ -9,6 +9,8 @@ Notable changes to this project. The format follows
 ### Removed
 
 - The workflow run counter and its `workflowRuns` setting.
+- The `otherModelWeekly` setting, Claude’s per-model weekly readings (including
+  Sonnet and Opus), and Antigravity’s inactive-group weekly reading.
 
 ## [0.7.0] - 2026-11-19
 

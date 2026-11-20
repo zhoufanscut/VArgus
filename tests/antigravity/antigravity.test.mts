@@ -87,10 +87,10 @@ test('Antigravity colour follows the published default or the high cutoff', () =
   }
 })
 
-test('Antigravity quota maps active model group, skips disabled or expired windows, and supports otherModelWeekly', () => {
+test('Antigravity quota maps active model group and skips disabled or expired windows', () => {
   const now = Date.parse('2026-11-14T01:00:00Z')
-  function draw(payload: AntigravityPayload, otherModelWeekly = false) {
-    const v = collectAntigravityPayload(payload, { now, otherModelWeekly })
+  function draw(payload: AntigravityPayload) {
+    const v = collectAntigravityPayload(payload, { now })
     return limits({ v, display: antigravityDisplay(v.session), o: DEFAULTS, l: en, t: plain, now })
   }
   const quota: NonNullable<AntigravityPayload['quota']> = {
@@ -105,24 +105,14 @@ test('Antigravity quota maps active model group, skips disabled or expired windo
     quota,
   }
   assert.equal(draw(gemini), '5h:4%(4h37m) 7d:39%(6d6h)')
-  assert.equal(
-    draw(gemini, true),
-    '5h:4%(4h37m) 7d:39%(6d6h) 3p:85%(4d0h)',
-  )
 
   const claude = {
     model: { display_name: 'Claude Opus 5.5 (High)', effort: 'high' },
     quota,
   }
   assert.equal(draw(claude), '5h:25%(3h0m) 7d:85%(4d0h)')
-  // Gemini weekly is 39% (< 80%), so `otherModelWeekly` leaves `gm` hidden until 80%.
-  assert.equal(
-    draw(claude, true),
-    '5h:25%(3h0m) 7d:85%(4d0h)',
-  )
 
-  // When a known model group's own buckets (`3p-*`) are disabled or missing, it never
-  // falls back to `gemini-*` for `5h:`/`7d:` or duplicates `gm:` alongside `7d:`.
+  // A known model group with disabled buckets has no quota to display.
   const disabled3p = {
     model: { display_name: 'Claude Opus 5.5 (High)', effort: 'high' },
     quota: {
@@ -133,10 +123,6 @@ test('Antigravity quota maps active model group, skips disabled or expired windo
     },
   }
   assert.equal(draw(disabled3p), null)
-  assert.equal(
-    draw(disabled3p, true),
-    'gm:90%(6d6h)',
-  )
 
   // Disabled buckets and windows already past reset (`reset_time <= now` or `reset_in_seconds <= 0`)
   // are omitted; custom single suffix falls back cleanly; out-of-range `reset_in_seconds` never throws.
@@ -157,10 +143,7 @@ test('Antigravity quota maps active model group, skips disabled or expired windo
       '3p-weekly': { remaining_fraction: 0.05, reset_time: '2026-11-14T00:59:59Z' },
     },
   }
-  assert.equal(
-    draw(expiredAndHuge, true),
-    '7d:70%',
-  )
+  assert.equal(draw(expiredAndHuge), '7d:70%')
 })
 
 test('resolveTranscriptPath handles Antigravity 1.5.8 antigravity-vs-antigravity-cli path mismatch and rejects unsafe IDs', async () => {

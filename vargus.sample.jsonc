@@ -14,7 +14,6 @@
   // Rate limits
   // "rateLimits": true,        // Show usage and reset times for available limits.
   // "spendLimit": false,       // Include a spend limit when the provider reports one.
-  // "otherModelWeekly": false, // Include available weekly limits for other models.
 
   // Repository display
   // "repo": true,           // Show the repository name.

@@ -1,17 +1,13 @@
 import type { SessionRateLimit } from 'claude-code'
-import { isRecentUsage, resetTime, showModelWeekly, type ApiError, type Bucket, type QuotaReading, type QuotaWindow } from '../../core/limits.ts'
+import { isRecentUsage, resetTime, type ApiError, type Bucket, type QuotaReading, type QuotaWindow } from '../../core/limits.ts'
 import type { KimiUsage } from '../../core/kimi.ts'
 import type { Labels } from '../../i18n/en.ts'
 import type { Options } from '../../options.ts'
 
-export type ModelBucket = Bucket & { label: string }
 export type ExtraBucket = Bucket & { spentUsd: number; limitUsd: number }
 
 // Persisted in Claude's per-account usage cache, also read by older plugin sessions.
 export type UsageData = KimiUsage & {
-  sonnet: Bucket | null
-  opus: Bucket | null
-  others: ModelBucket[]
   extra: ExtraBucket | null
 }
 
@@ -47,11 +43,6 @@ export function claudeQuotaReadings(state: ClaudeLimits, options: Options, label
 
   if (api) {
     if (api.monthly) readings.push({ label: labels.monthly, ...api.monthly, stale })
-    if (api.sonnet && showModelWeekly(api.sonnet.percent)) readings.push({ label: labels.sonnetWeekly, ...api.sonnet, stale })
-    if (api.opus) readings.push({ label: labels.opusWeekly, ...api.opus, stale })
-    if (options.otherModelWeekly) {
-      for (const w of api.others) if (showModelWeekly(w.percent)) readings.push({ ...w, stale })
-    }
     if (api.extra) {
       const { percent, resetsAt, spentUsd, limitUsd } = api.extra
       readings.push({ label: labels.extra, percent, resetsAt, stale, cost: { spentUsd, limitUsd } })

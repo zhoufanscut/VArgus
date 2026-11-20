@@ -10,7 +10,6 @@ export const DEFAULTS = {
   callCounts: true,
   rateLimits: true,
   spendLimit: false,
-  otherModelWeekly: false,
   repo: true,
   branch: true,
   detachedHead: false,

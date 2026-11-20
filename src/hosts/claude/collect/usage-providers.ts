@@ -13,10 +13,9 @@ export type DirectUsageProvider = {
   parse: (body: unknown) => UsageData | null
 }
 
-// Keep the cache readable by other Claude sessions during a rolling plugin update.
 function kimiUsage(body: unknown): UsageData | null {
   const usage = parseKimiUsage(body)
-  return usage ? { ...usage, sonnet: null, opus: null, others: [], extra: null } : null
+  return usage ? { ...usage, extra: null } : null
 }
 
 const DIRECT_PROVIDERS: DirectUsageProvider[] = [

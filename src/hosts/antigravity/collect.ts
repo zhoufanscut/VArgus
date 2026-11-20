@@ -1,6 +1,5 @@
-import { resetTime, showModelWeekly, type QuotaWindow } from '../../core/limits.ts'
+import { resetTime, type QuotaWindow } from '../../core/limits.ts'
 import { en, type Labels } from '../../i18n/en.ts'
-import { DEFAULTS } from '../../options.ts'
 import { initialSession } from '../../core/session.ts'
 import type { Values } from '../../core/types.ts'
 import { initialVcs } from '../../core/vcs.ts'
@@ -42,7 +41,6 @@ export type AntigravityPayload = {
 }
 
 export type AntigravityEnv = {
-  otherModelWeekly?: boolean
   labels?: Labels
   home?: string
   isWsl?: boolean
@@ -128,7 +126,6 @@ export function collectAntigravityLimits(
   quota: AntigravityPayload['quota'],
   model: string | undefined,
   now: number,
-  otherModelWeekly = DEFAULTS.otherModelWeekly,
   labels: Labels = en,
 ): QuotaWindow[] {
   const limits: QuotaWindow[] = []
@@ -152,15 +149,6 @@ export function collectAntigravityLimits(
     limits.push({ label: labels.sevenDay, percent: bucketPercentUsed(weeklyBucket), resetsAt: bucketResetTime(weeklyBucket, now) })
   }
 
-  const otherPrefix = prefix === 'gemini' ? '3p' : prefix === '3p' ? 'gemini' : null
-  const otherWeekly = otherPrefix ? quota[`${otherPrefix}-weekly`] : undefined
-  if (otherModelWeekly && validBucket(otherWeekly) && showModelWeekly(bucketPercentUsed(otherWeekly))) {
-    limits.push({
-      label: otherPrefix === 'gemini' ? 'gm' : '3p',
-      percent: bucketPercentUsed(otherWeekly),
-      resetsAt: bucketResetTime(otherWeekly, now),
-    })
-  }
   return limits
 }
 
@@ -203,7 +191,7 @@ export function collectAntigravityPayload(payload: AntigravityPayload, env: Anti
       isWsl: env.isWsl ?? false,
     },
     session,
-    limits: collectAntigravityLimits(payload.quota, model, now, env.otherModelWeekly, env.labels),
+    limits: collectAntigravityLimits(payload.quota, model, now, env.labels),
     vcs: initialVcs(),
   }
 }

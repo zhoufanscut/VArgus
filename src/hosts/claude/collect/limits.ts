@@ -7,15 +7,11 @@
 // - Kimi Code's five-hour and monthly-total windows come from its direct
 //   usage API after an exact coding base-URL match, using the existing env
 //   credential; session.authorize() is not called.
-// - Per-model weekly (sn, op, others) and extra usage come only from the OAuth
-//   usage API, read every 90 s and cached in `$.store` per account.
-//
-// Left as they are: two sessions of one account can fetch at the same moment
-// (no lock; the store's last write wins, both results are good); the first
-// API read of a session shows nothing for sn/op/extra until it answers.
+// - Extra usage comes from the OAuth usage API, read every 90 s and cached
+//   in `$.store` per account. Concurrent sessions can each refresh the cache.
 
-import type { ApiError, Bucket } from '../../../core/limits'
-import type { ClaudeLimits, ExtraBucket, ModelBucket, UsageData } from '../quota'
+import type { ApiError } from '../../../core/limits'
+import type { ClaudeLimits, ExtraBucket, UsageData } from '../quota'
 import type { EngineInterface, HttpInit, SessionMeasureInput, SessionStartInput, Timer } from 'claude-code'
 import { directUsageProvider } from './usage-providers'
 
@@ -42,9 +38,6 @@ export const RETRY_MS = 120_000
 // Sustained 429s back off up to this; a Retry-After counts up to an hour.
 export const MAX_429_BACKOFF_MS = 5 * 60_000
 export const MAX_RETRY_AFTER_MS = 60 * 60_000
-// At most this many other models' buckets (VantageHUD's MAX_MODEL_WEEKLY).
-const MAX_OTHERS = 4
-
 // Module values start over on a hot reload, which runs session.start again
 // (DESIGN, "The host"); the cache in $.store carries the numbers across.
 let timer: Timer | null = null
@@ -172,7 +165,8 @@ async function readUsage($: EngineInterface, values: ClaudeLimits): Promise<void
     if (cache && now < cache.retryAt) return show(values, cache)
     const next = await fetchUsage($, cache, now, request)
     show(values, next)
-    await $.store.set(key, next)
+    // Older plugin sessions sharing this store iterate data.others when enabled.
+    await $.store.set(key, next.data ? { ...next, data: { others: [], ...next.data } } : next)
   } finally {
     reading = false
   }
@@ -230,22 +224,6 @@ export function retryAfterMs(value: string | undefined): number {
   return Math.min(parseInt(value, 10) * 1000, MAX_RETRY_AFTER_MS)
 }
 
-// A model's short label: the first letter and the first consonant after it,
-// letters only, so Sonnet → sn, Opus → op, Fable → fb (VantageHUD's rule).
-// The name is server text; null when no ASCII letter is left.
-// Escape sequences go whole before the letters are picked: the final byte of a
-// CSI (`m` of ESC[31m) is a letter. A one-letter name gives a one-letter label.
-export function modelLabel(name: unknown): string | null {
-  if (typeof name !== 'string') return null
-  const [first, ...rest] = name.replace(ESCAPES, '').toLowerCase().match(/[a-z]/g) ?? []
-  if (first === undefined) return null
-  return first + (rest.find(c => !VOWELS.has(c)) ?? rest[0] ?? '')
-}
-
-// CSI (ESC [ … final byte) and OSC (ESC ] … BEL or ST, or cut off).
-const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g
-const VOWELS = new Set(['a', 'e', 'i', 'o', 'u'])
-
 type Json = Record<string, any>
 
 function percentOf(value: unknown): number | null {
@@ -262,10 +240,6 @@ function timeOf(value: unknown): number | null {
 // body is not the usage shape (no five_hour, seven_day or limits): counted as
 // a failed read, keeping the last good numbers.
 //
-// - Per-model weekly caps come only from `limits[]` entries of kind
-//   `weekly_scoped` naming a model: the flat `seven_day_sonnet` /
-//   `seven_day_opus` are null on current accounts (measured, DESIGN "Data
-//   sources"). A surface-scoped entry is skipped; per label the highest wins.
 // - extra: the `limit_usd` / `spent_usd` form, and none at all when the
 //   answer carries `used_credits`: VantageHUD showed no extra: for
 //   `used_credits` on an Enterprise or unknown plan, and a mod cannot read the
@@ -274,21 +248,6 @@ export function parseUsage(body: unknown): UsageData | null {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null
   const b = body as Json
   if (!('five_hour' in b) && !('seven_day' in b) && !Array.isArray(b.limits)) return null
-  const scoped = new Map<string, ModelBucket>()
-  for (const l of Array.isArray(b.limits) ? (b.limits as Json[]) : []) {
-    if (!l || l.kind !== 'weekly_scoped' || !l.scope || typeof l.scope !== 'object' || l.scope.surface != null) continue
-    const percent = percentOf(l.percent)
-    const label = modelLabel(l.scope.model?.display_name)
-    if (percent === null || !label) continue
-    const prev = scoped.get(label)
-    if (!prev || percent > prev.percent) scoped.set(label, { label, percent, resetsAt: timeOf(l.resets_at) })
-  }
-  const bucket = (m: ModelBucket | undefined): Bucket | null => (m ? { percent: m.percent, resetsAt: m.resetsAt } : null)
-  const sonnet = bucket(scoped.get('sn'))
-  const opus = bucket(scoped.get('op'))
-  scoped.delete('sn')
-  scoped.delete('op')
-
   let extra: ExtraBucket | null = null
   const x = b.extra_usage as Json | null | undefined
   if (x && x.is_enabled !== false && x.used_credits == null && typeof x.limit_usd === 'number' && x.limit_usd > 0) {
@@ -300,5 +259,5 @@ export function parseUsage(body: unknown): UsageData | null {
       limitUsd: x.limit_usd,
     }
   }
-  return { sonnet, opus, others: [...scoped.values()].slice(0, MAX_OTHERS), extra }
+  return { extra }
 }

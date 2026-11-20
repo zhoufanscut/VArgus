@@ -81,8 +81,8 @@ can exceed 100%. Each host decides which readings are current, stale or absent.
 
 [Shared defaults](src/options.ts) and the Claude manifest agree on picker keys
 and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
-The spend, other-model weekly, detached-HEAD and stopped-line options default
-off. Codex resolves its [extra options](src/hosts/codex/options.ts)
+The spend, detached-HEAD and stopped-line options default off.
+Codex resolves its [extra options](src/hosts/codex/options.ts)
 separately. Its agent count, skill count and installed startup hooks default on.
 Explicit activation or hook installation enables its tmux integration.
 
@@ -385,8 +385,8 @@ refreshes, which is why transcript and Git state are cached across invocations.
 model, terminal width and quota. The model label can supply effort before the
 explicit field arrives. Gemini and Orchestrator models use the Gemini quota
 group. Claude and GPT models use the third-party group. An unknown model uses
-a suffix fallback only if the matching bucket is unique. The optional
-other-group weekly reading appears once rounded usage reaches 80%.
+a suffix fallback only if the matching bucket is unique. Switching groups changes
+the displayed five-hour and weekly windows.
 
 [Transcript lookup](src/hosts/antigravity/transcript.ts) scopes supplied paths
 to a normalized `brain/<id>` segment and has a CLI-directory fallback for
@@ -455,8 +455,9 @@ state shapes. [Mod reference](https://code.claude.com/docs/en/plugins/mods/refer
   engine resolved it for this step,” which can differ from the display model.
 - [Claude quota assembly](src/hosts/claude/quota.ts) combines engine windows
   with provider-specific results. The engine's five-hour and seven-day
-  windows take precedence. OAuth supplies per-model weekly and extra usage.
-  Kimi can supply five-hour and monthly windows. Shared formatting consumes
+  windows take precedence. Claude Code 2.1.323 describes `SessionRateLimit.kind`
+  as “`five_hour`, `seven_day`, or a Claude gateway's `spend_limit`.” OAuth supplies extra
+  usage. Kimi can supply five-hour and monthly windows. Shared formatting consumes
   those readings while the persisted cache keeps its host-specific shape.
 
 ### Usage cache and staleness
