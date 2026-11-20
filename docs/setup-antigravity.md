@@ -116,7 +116,10 @@ command was disabled, run `/statusline on` in `agy`.
 
 ## Configure
 
-Defaults work without flags or files. To set `--config FILE` or `--theme NAME`,
+Antigravity reads the checkout's `vargus.jsonc` on every status-line invocation.
+An edit takes effect on the next refresh. [Shared configuration](../README.md#shared-configuration)
+
+To override shared options with `--config FILE` or `--theme NAME`,
 append the flags to your existing `statusLine.command`. With `vargus` on PATH,
 use the JSON string for your platform as the `command` value. Substitute the path
 to your options file.
@@ -133,7 +136,8 @@ to your options file.
 "vargus statusline --config \"C:\\Users\\Pat Lee\\.config\\vargus.json\" --theme ember"
 ```
 
-The JSON file uses the keys and defaults in [`src/options.ts`](../src/options.ts).
+The explicit file accepts JSON or JSONC and uses the keys and defaults in
+[`src/options.ts`](../src/options.ts).
 
 - **Model names**: Gemini and Claude display labels shorten to their family with effort
   (`Gemini 4 Carbon (High)` → `carbon:high`, `Gemini 4 Hydrogen (XHigh)` → `hydrogen:xhigh`,

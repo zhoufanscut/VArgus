@@ -6,10 +6,9 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 fails=0
 fail() { echo "FAIL: $*"; fails=$((fails + 1)); }
 
-cmd='cat "$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null'
-cmd2='f="$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line"; [ -n "$(find "$f" -mmin -2 2>/dev/null)" ] && cat "$f"'
+cmd='f="$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line"; { [ ! -s "$f.blank" ] || [ -n "$(find "$f" -mmin -2 2>/dev/null)" ]; } && cat "$f" 2>/dev/null'
 
-node --input-type=module - "$root/docs/setup-claude.md" "$cmd" "$cmd2" <<'JS' || exit 1
+node --input-type=module - "$root/docs/setup-claude.md" "$cmd" <<'JS' || exit 1
 import { readFileSync } from "node:fs"
 const [file, ...commands] = process.argv.slice(2)
 const guide = readFileSync(file, "utf8")
@@ -46,16 +45,20 @@ done
 ago() { date -d "-$1 seconds" +%Y%m%d%H%M.%S 2>/dev/null || date -v-"$1"S +%Y%m%d%H%M.%S; }
 for shell in sh bash; do
   command -v "$shell" >/dev/null || continue
+  printf 1 > "$data/S1/line.blank"
   touch "$data/S1/line"
-  out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID=S1 "$shell" -c "$cmd2"; echo "rc=$?")
+  out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID=S1 "$shell" -c "$cmd"; echo "rc=$?")
   [ "$out" = "$want" ] || fail "$shell: blankStopped, fresh line: $out"
   touch -t "$(ago 180)" "$data/S1/line"
-  out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID=S1 "$shell" -c "$cmd2" 2>&1; echo "rc=$?")
+  out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID=S1 "$shell" -c "$cmd" 2>&1; echo "rc=$?")
   [ "$out" = "rc=1" ] || fail "$shell: blankStopped, 3 min old: $out"
-  out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID=S2 "$shell" -c "$cmd2" 2>&1; echo "rc=$?")
+  out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID=S2 "$shell" -c "$cmd" 2>&1; echo "rc=$?")
   [ "$out" = "rc=1" ] || fail "$shell: blankStopped, missing file: $out"
-  out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID= "$shell" -c "$cmd2" 2>&1; echo "rc=$?")
+  out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID= "$shell" -c "$cmd" 2>&1; echo "rc=$?")
   [ "$out" = "rc=1" ] || fail "$shell: blankStopped, empty id: $out"
+  : > "$data/S1/line.blank"
+  out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID=S1 "$shell" -c "$cmd"; echo "rc=$?")
+  [ "$out" = "$want" ] || fail "$shell: an idle session with blankStopped off: $out"
 done
 
 [ "$fails" -eq 0 ] && echo "reader: all pass" || exit 1

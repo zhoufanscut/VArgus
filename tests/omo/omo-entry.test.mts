@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { lstat, mkdir, mkdtemp, readFile, writeFile, readdir, rm, symlink } from 'node:fs/promises'
+import { fixtureCheckout } from '../checkout.mts'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -45,7 +46,10 @@ function host(mode = 'tui') {
     registerCommand(_name, value) { command = value },
   }
   return {
-    load(factory: typeof vargus = vargus) { factory(api) },
+    load(factory?: typeof vargus) {
+      if (factory) factory(api)
+      else vargus(api, {})
+    },
     event(name: string, event: unknown = {}) { handlers.get(name)?.(event, ctx) },
     append(entry: SessionEntry) { entries.push(entry) },
     async command(args: string) {
@@ -199,13 +203,21 @@ test('OmO options file applies on reload and keeps session overrides', async () 
   const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-config-'))
   const first = host()
   const fresh = host()
-  const config = join(dir, 'shared options.json')
+  const config = join(dir, 'shared options.jsonc')
   const extensions = join(dir, 'extensions')
   const loader = join(extensions, 'vargus.ts')
   const readRow = (h: ReturnType<typeof host>) => h.row?.render(200).join('') ?? ''
   try {
-    await writeFile(config, '{"model":false,"rateLimits":false}')
+    const checkout = await fixtureCheckout(dir)
+    const { main } = await import(pathToFileURL(join(checkout, 'src/cli.ts')).href)
+    await writeFile(join(checkout, 'vargus.jsonc'), '// checkout default\n{"model":false, "context":false}')
+    await writeFile(config, '{/* from a shared file */ "model":false,"rateLimits":false}')
     await main(['install', 'omo', '--dir', extensions])
+    const unconfigured = await import(pathToFileURL(loader).href + '?default')
+    first.load(unconfigured.default); first.event('session_start')
+    assert.ok(readRow(first).includes('/repo'))
+    assert.doesNotMatch(readRow(first), /sol|ctx:/)
+    first.event('session_shutdown')
     await main(['install', 'omo', '--config', relative(process.cwd(), config), '--dir', extensions])
     const installed = await readFile(loader, 'utf8')
     await main(['install', 'omo', '--dir', extensions])
@@ -218,6 +230,7 @@ test('OmO options file applies on reload and keeps session overrides', async () 
     assert.equal(first.listeners, 0)
     await first.command('config {"model":true}')
     assert.match(readRow(first), /sol/)
+    assert.doesNotMatch(readRow(first), /ctx:/)
     assert.equal(first.listeners, 0)
 
     await writeFile(config, '{"model":false,"rateLimits":true}')

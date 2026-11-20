@@ -11,6 +11,11 @@ export const DATA_FOLDER = 'vargus-vargus'
 
 export const DRIVE_PATH = /^[A-Za-z]:[\\/]/
 
+// Git Bash accepts forward slashes on a Windows drive. A backslash in a
+// POSIX path is part of the filename passed to sh.
+export function shellPath(path: string): string {
+  return DRIVE_PATH.test(path) ? path.replace(/\\/g, '/') : path
+}
 
 // The home folder Claude Code keeps `.claude` in. On Windows that is
 // USERPROFILE whatever HOME says (measured with HOME set to another folder:
@@ -29,5 +34,5 @@ export function dataDir(config: string | undefined, home: string | undefined): s
   const base = config || (home ? `${DRIVE_PATH.test(home) ? home.replace(/[\\/]+$/, '') : home}/.claude` : '')
   const drive = DRIVE_PATH.test(base)
   if (!base.startsWith('/') && !drive) return null
-  return `${(drive ? base.replace(/\\/g, '/') : base).replace(/\/+$/, '')}/plugins/data/${DATA_FOLDER}`
+  return `${shellPath(base).replace(/\/+$/, '')}/plugins/data/${DATA_FOLDER}`
 }

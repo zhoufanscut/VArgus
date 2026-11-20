@@ -4,9 +4,9 @@ import { omoDisplay } from './display.ts'
 import type { AccountLimits, NativeContext, SessionEntry } from './contracts.ts'
 import { OmoVcs } from './vcs.ts'
 import { OmoKimi, type ProviderAuth } from './kimi.ts'
-import { parseOmoOptions, readOmoOptions } from './options.ts'
+import { readCheckoutOptions, readOptionsFile } from '../../node/options.ts'
 import { mountOmo, type OmoUi } from '../../outputs/omo.ts'
-import { resolveOptions } from '../../options.ts'
+import { parseOptions, resolveOptions } from '../../options.ts'
 import { resolveLabels } from '../../i18n/index.ts'
 import { makeTheme } from '../../theme/index.ts'
 import { render } from '../../render/index.ts'
@@ -40,10 +40,10 @@ export type OmoApi = {
 }
 
 export function configuredVargus(file: string): (pi: OmoApi) => void {
-  return pi => vargus(pi, readOmoOptions(file))
+  return pi => vargus(pi, { ...readCheckoutOptions(), ...readOptionsFile(file) })
 }
 
-export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> = {}): void {
+export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> = readCheckoutOptions()): void {
   let active: { ctx: Context; stop(): void; update(forceGit?: boolean): void } | undefined
   let treeTarget: string | undefined
 
@@ -175,7 +175,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
       }
       if (text.startsWith('config ')) {
         let given: Record<string, unknown>
-        try { given = parseOmoOptions(text.slice(7)) }
+        try { given = parseOptions(text.slice(7)) }
         catch {
           ctx.ui.notify('VArgus config must be a JSON object.', 'error')
           return

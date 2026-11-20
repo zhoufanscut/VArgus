@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process'
+import { fixtureCheckout } from '../checkout.mts'
+import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
-import { resolve } from 'node:path'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm } from 'node:fs/promises'
@@ -8,6 +8,24 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hookSession, footerThread } from '../../src/hosts/codex/hooks.ts'
 import { resolveCodexOptions } from '../../src/hosts/codex/options.ts'
+
+test('checkout codexAutoStart gates both hooks before stdin and explicit JSONC can enable them', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-hook-checkout-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const checkout = await fixtureCheckout(dir)
+  await writeFile(join(checkout, 'vargus.jsonc'), '// checkout\n{"codexAutoStart":false}')
+  const explicit = join(dir, 'other.jsonc')
+  await writeFile(explicit, '{/* explicit */ "codexAutoStart":true}')
+  for (const event of ['session-start', 'prompt']) {
+    const args = [join(checkout, 'src/cli.ts'), 'hook', event]
+    const opts = { cwd: dir, env: { ...process.env, CODEX_HOME: dir, VARGUS_CLI_MAIN: '1' }, input: 'invalid hook input', encoding: 'utf8' as const, timeout: 5000 }
+    const disabled = spawnSync(process.execPath, args, opts)
+    assert.equal(disabled.status, 0, disabled.stderr)
+    const enabled = spawnSync(process.execPath, [...args, '--config', explicit], opts)
+    assert.equal(enabled.status, 1)
+    assert.match(enabled.stderr, /JSON/)
+  }
+})
 
 test('SessionStart derives identity from the transcript independently of creation metadata', async () => {
   const home = await mkdtemp(join(tmpdir(), 'vargus-hook-input-'))
@@ -36,10 +54,11 @@ test('SessionStart derives identity from the transcript independently of creatio
 
 for (const command of ['session-start', 'prompt']) test(`disabled ${command} exits without reading an unavailable transcript`, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hook-disabled-'))
+  const checkout = await fixtureCheckout(dir)
   const options = join(dir, 'options.json')
   await writeFile(options, JSON.stringify({ codexAutoStart: false }))
   try {
-    const child = spawn(process.execPath, [resolve('src/cli.ts'), 'hook', command, '--config', options], {
+    const child = spawn(process.execPath, [join(checkout, 'src/cli.ts'), 'hook', command, '--config', options], {
       env: { ...process.env, VARGUS_CLI_MAIN: '1' }, stdio: ['pipe', 'pipe', 'pipe'],
     })
     let output = '', errors = ''
@@ -158,6 +177,7 @@ const a=process.argv;if(a.includes('list-panes'))console.log('/scratch/socket\\t
 
 test('prompt fallback skips config reads when the native ID is hidden or off is remembered', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hook-fast-'))
+  const checkout = await fixtureCheckout(dir)
   const home = join(dir, 'home'), marker = join(dir, 'config-read'), display = join(dir, 'display.json')
   const { startupDirectory, startupControl } = await import('../../src/cli/codex/startup.ts')
   try {
@@ -173,7 +193,7 @@ const fs=require('node:fs');if(process.argv.includes('list-panes'))console.log('
 require('node:fs').appendFileSync(${JSON.stringify(marker)},'read\\n');process.exit(91);
 `, { mode: 0o755 })
     const invoke = async () => {
-      const child = spawn(process.execPath, [resolve('src/cli.ts'), 'hook', 'prompt'], {
+      const child = spawn(process.execPath, [join(checkout, 'src/cli.ts'), 'hook', 'prompt'], {
         env: { ...process.env, PATH: dir + ':' + process.env.PATH, CODEX_HOME: home, VARGUS_CLI_MAIN: '1' },
         stdio: ['pipe', 'pipe', 'pipe'],
       })
@@ -200,8 +220,9 @@ require('node:fs').appendFileSync(${JSON.stringify(marker)},'read\\n');process.e
 
 for (const command of ['session-start', 'prompt']) test(`${command} rejects an explicit missing options file`, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hook-missing-'))
+  const checkout = await fixtureCheckout(dir)
   try {
-    const child = spawn(process.execPath, [resolve('src/cli.ts'), 'hook', command, '--config', join(dir, 'missing.json')], {
+    const child = spawn(process.execPath, [join(checkout, 'src/cli.ts'), 'hook', command, '--config', join(dir, 'missing.json')], {
       env: { ...process.env, VARGUS_CLI_MAIN: '1' }, stdio: ['pipe', 'pipe', 'pipe'],
     })
     let errors = ''; child.stderr.on('data', data => { errors += data }); child.stdin.end('{}')

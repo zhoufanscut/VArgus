@@ -5,13 +5,14 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename, cp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 import { PaneInput } from '../../src/outputs/tmux/input.ts'
 import { startupDirectory, startupSuppressed, startupControl } from '../../src/cli/codex/startup.ts'
 import { codexComposer } from '../../src/hosts/codex/footer.ts'
 import { nativeFixtureEnv, removeNativeFixture, startTestDaemon } from './native-fixture.mts'
+import { fixtureCheckout } from '../checkout.mts'
 
 const exec = promisify(execFile)
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
@@ -26,8 +27,7 @@ for (const fixture of [
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
   for (const folder of [cfg, project, temporary]) await mkdir(folder)
   // Exercise a source-only install: no dist or node_modules is copied.
-  const install = join(dir, 'install')
-  for (const name of ['src', 'bin', 'package.json']) await cp(resolve(name), join(install, name), { recursive: true })
+  const install = await fixtureCheckout(dir)
   const entry = join(install, 'bin/vargus')
   const env = nativeFixtureEnv(dir, { CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
     NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', TMUX: '', TMUX_PANE: '' })
@@ -156,6 +156,8 @@ trust_level = "trusted"
     }
     const optionsFile = join(dir, 'options.json')
     await writeFile(optionsFile, JSON.stringify({ session: false, codexAgentCounts: false }))
+    const sharedFile = join(install, 'vargus.jsonc')
+    if (selection === null) await writeFile(sharedFile, '// shared checkout\n{"codexSkillCounts":false}')
     await submit(command('on', '--socket ' + quote(socket)))
     await wait(screen, /VArgus is on/)
     await wait(footer, /for shortcuts/)
@@ -179,6 +181,15 @@ trust_level = "trusted"
     const unfinished = join(footerDir, backups[0] + '.' + process.pid + '.tmp')
     await writeFile(unfinished, '')
     const controlEnv = { ...env, CODEX_THREAD_ID: originalBackup.thread }
+    if (selection === null) {
+      const controlDir = join(footerDir, '..')
+      const record = (await readdir(controlDir)).find(name => name.endsWith('.json'))!
+      const skillCounts = async () => JSON.parse(await readFile(join(controlDir, record), 'utf8')).reload.options.codexSkillCounts
+      assert.equal(await skillCounts(), false)
+      await writeFile(sharedFile, '{}')
+      await exec(entry, ['reload'], { cwd: project, env: controlEnv })
+      assert.equal(await skillCounts(), true)
+    }
     assert.match((await exec(entry, ['status'], { cwd: project, env: controlEnv })).stdout, /VArgus is on/)
     assert.match((await exec(entry, ['on'], { cwd: project, env: controlEnv })).stdout, /already on/)
     assert.match((await exec(entry, ['off'], { cwd: project, env: controlEnv })).stdout, /VArgus is off/)

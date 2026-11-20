@@ -108,8 +108,11 @@ If the row is blank and the current view is unknown, see
 
 ## Configure
 
-Defaults work without an options file. For a different theme or fragment switches,
-pass `--theme NAME` or `--config /absolute/path/to/vargus.json` on first activation.
+The installed hooks and manual activation both read `vargus.jsonc` from the
+VArgus checkout. Edit it and run `!vargus reload` to update a running helper.
+To override individual shared settings, pass `--theme NAME` or
+`--config /absolute/path/to/vargus.json` on first activation.
+[Shared configuration](../README.md#shared-configuration)
 To change a running helper's options, use `reload` with those flags:
 
 ```text
@@ -117,7 +120,7 @@ To change a running helper's options, use `reload` with those flags:
 !vargus reload --theme graphite
 ```
 
-An optional JSON config uses the [shared defaults](../src/options.ts) and
+An explicit JSON or JSONC file uses the [shared defaults](../src/options.ts) and
 [Codex defaults](../src/hosts/codex/options.ts).
 
 ```json
@@ -137,7 +140,7 @@ Codex always displays known model families as `astra`, `sol`, `terra` or `luna`,
 `sol:xhigh`. Both `gpt-6-sol` and `gpt-6.1-sol` display `sol`; unfamiliar IDs remain
 whole. The former `codexShortModel` option is ignored in existing options files.
 Subagent counts and skill counts default to on for Codex; set `codexAgentCounts`
-or `codexSkillCounts` to `false` in a JSON options file passed with `--config` to
+or `codexSkillCounts` to `false` in the shared or explicit options file to
 disable either. `model` and `callCounts` control their whole fragments.
 
 Codex Fast mode adds `(fast)` beside the model and effort, such as `sol:max(fast)`.
@@ -164,11 +167,12 @@ check out the release you want. Then, in Codex:
 ```
 
 This replaces the standalone helper with the current source while Codex, its daemon
-and conversation keep running. It retains effective options, replays recorded readings,
+and conversation keep running. It rereads the checkout file, retains explicit overrides, replays recorded readings,
 rediscovers the displayed view, and keeps the
 original footer backups. Plain `on` also upgrades an older helper with reload
 metadata, preserving those options and backups; the retired draft-hold setting
-cannot disable paused readings. Reload flags override retained options: `--config` merges
+cannot disable paused readings. Helpers created before shared-file support
+retain their full saved options until a fresh activation. Reload flags override retained options. `--config` merges
 only supplied keys, and `--theme`/`--config` are applied in command order. A reload
 while off stays off, including pending footer restoration and manual-off suppression
 recorded by an interrupted off command.

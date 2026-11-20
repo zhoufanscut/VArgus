@@ -2,8 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { appendFile, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
+import { fixtureCheckout } from '../checkout.mts'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { renderAntigravityStatusLine } from '../../src/cli/antigravity.ts'
 import { collectAntigravityPayload, type AntigravityPayload } from '../../src/hosts/antigravity/collect.ts'
@@ -544,9 +545,10 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
     assert.equal(tightLine, '  ~/proj/demo')
 
     // Subprocess check through bin/vargus statusline with --config and --theme.
-    const configPath = join(root, 'vargus.json')
-    await writeFile(configPath, JSON.stringify({ callCounts: false, session: false }))
-    const bin = resolve('bin/vargus')
+    const configPath = join(root, 'explicit.jsonc')
+    await writeFile(configPath, '{ /* explicit file */ "callCounts": false, "session": false, "model": true }')
+    const install = await fixtureCheckout(root)
+    const bin = join(install, 'bin', 'vargus')
     const runStatusline = (args: string[], stdinText: string, extraEnv: NodeJS.ProcessEnv = {}) =>
       new Promise<{ code: number | null; stdout: string; stderr: string }>((resolvePromise, reject) => {
         const child = spawn(bin, ['statusline', ...args], {
@@ -562,8 +564,14 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
         child.stdin.end(stdinText)
       })
 
+    await writeFile(join(install, 'vargus.jsonc'), '// checkout default\n{"model":false}')
+    const fromCheckout = await runStatusline([], JSON.stringify(payload), { NO_COLOR: '1' })
+    assert.equal(fromCheckout.code, 0, fromCheckout.stderr)
+    assert.match(fromCheckout.stdout, /ctx:20%/)
+    assert.doesNotMatch(fromCheckout.stdout, /carbon/)
     const colored = await runStatusline(['--theme', 'aurora', '--config', configPath], JSON.stringify(payload), { NO_COLOR: '' })
     assert.equal(colored.code, 0, colored.stderr)
+    assert.match(colored.stdout, /carbon/)
     assert.ok(colored.stdout.includes('\x1b[38;2;'), 'expected 24-bit ANSI SGR output')
     assert.ok(!colored.stdout.includes('session:'), 'config should disable session fragment')
     assert.ok(!colored.stdout.includes('🔧'), 'config should disable callCounts fragment')

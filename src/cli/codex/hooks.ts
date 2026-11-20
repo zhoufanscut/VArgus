@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findRollout } from '../../hosts/codex/rollout.ts'
 import { resolveCodexOptions } from '../../hosts/codex/options.ts'
+import { readCheckoutOptions, readOptionsFile } from '../../node/options.ts'
 import { hookSession } from '../../hosts/codex/hooks.ts'
 import { setTimeout as delay } from 'node:timers/promises'
 import { savedFooter, footerIdentity } from '../../hosts/codex/footer.ts'
@@ -17,11 +18,11 @@ export async function hook(args: string[]): Promise<number> {
   const event = args[0] === 'session-start' ? 'SessionStart' : args[0] === 'prompt' ? 'UserPromptSubmit' : undefined
   if (!event) throw new Error('Use vargus hook session-start|prompt [--config FILE].')
   const flags = args.slice(1)
-  let given: Record<string, unknown> = {}, socket: string | undefined, pane: string | undefined
+  let given = readCheckoutOptions(), socket: string | undefined, pane: string | undefined
   for (let i = 0; i < flags.length; i += 2) {
     const flag = flags[i], value = flags[i + 1]
     if (value === undefined) throw new Error(`Missing value for ${flag}.`)
-    if (flag === '--config') given = { ...given, ...JSON.parse(await readFile(value, 'utf8')) }
+    if (flag === '--config') given = { ...given, ...readOptionsFile(value) }
     else if (flag === '--socket') socket = value
     else if (flag === '--pane') pane = value
     else if (flag !== '--theme') throw new Error(`Unknown VArgus hook option: ${flag}.`)

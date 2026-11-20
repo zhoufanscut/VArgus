@@ -23,11 +23,12 @@ Antigravity CLI runs \`vargus statusline\` from PATH and pipes session JSON on s
 The tmux row is opt-in for Codex. Standalone on/off hide/restore Codex's saved footer
 through tmux /statusline commands. Off removes the row; inactive views restore
 on their next empty-composer visit. The helper exits after restoration or TUI exit.
-FILE is a JSON object of VArgus options. The tmux controls leave saved Codex settings alone.
+VArgus reads vargus.jsonc from its checkout. --config FILE overlays a JSON or JSONC options object.
+The tmux controls leave saved Codex settings alone.
 Standalone drafts keep last-confirmed readings by default. Installed
 Codex startup hooks are enabled by default; neither needs an options file.
-After updating, reload replaces the standalone helper and retains its options
-and on/off mode. Supplied options override retained values. Codex keeps running.
+After updating, reload replaces the helper, rereads checkout defaults, and retains
+explicit overrides and on/off mode. Supplied options override retained values. Codex keeps running.
 Exit Codex to restore the original tmux bar. After a helper crash, tmux-reset
 cleans up an abandoned row when no VArgus helper is still running.
 `

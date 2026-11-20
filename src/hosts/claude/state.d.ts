@@ -12,6 +12,6 @@ export type VargusCounts = {
 
 declare module 'claude-code' {
   interface PluginState {
-    vargus: { counts: VargusCounts | null }
+    vargus: { counts: VargusCounts | null; savingOption: string | null }
   }
 }

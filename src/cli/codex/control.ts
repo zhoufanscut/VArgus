@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { readFile, rm, mkdir, writeFile, readdir, rename } from 'node:fs/promises'
+import { rm, mkdir, writeFile, readdir, rename } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { savedFooter, restoreFooter, footerIdentity } from '../../hosts/codex/footer.ts'
-import { resolveCodexOptions } from '../../hosts/codex/options.ts'
+import { resolveCodexOptions, workerOptions } from '../../hosts/codex/options.ts'
+import { readCheckoutOptions, readOptionsFile } from '../../node/options.ts'
 import { findRollout, RolloutReader } from '../../hosts/codex/rollout.ts'
 import { TmuxOutput } from '../../outputs/tmux/client.ts'
 import { applicationArguments } from '../../outputs/tmux/process.ts'
@@ -86,10 +87,11 @@ export async function standalone(args: string[], automatic = false): Promise<num
     if (flag === '--pane') pane = value
     else if (flag === '--socket') socket = value
     else if (flag === '--theme') options.theme = value
-    else if (flag === '--config') options = { ...options, ...JSON.parse(await readFile(value, 'utf8')) }
+    else if (flag === '--config') options = { ...options, ...readOptionsFile(value) }
     else throw new Error(`Unknown VArgus option: ${flag}.`)
   }
-  if (automatic && !resolveCodexOptions(options).codexAutoStart) return 0
+  const checkout = action === 'on' || action === 'reload' ? readCheckoutOptions() : {}
+  if (automatic && !resolveCodexOptions({ ...checkout, ...options }).codexAutoStart) return 0
   const thread = process.env.CODEX_THREAD_ID
   const home = process.env.CODEX_HOME ?? join(homedir(), '.codex')
   if (action === 'on' && !thread) throw new Error('Inside Codex, run !vargus on. CODEX_THREAD_ID identifies the conversation.')
@@ -139,7 +141,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
       throw new Error('This older helper has no reload options metadata. It is still running. Run !vargus off, then !vargus on with your original --config/--theme options once to enable reload.')
     }
     const retained: Spec = current ? { target, thread: current.thread, transcript: current.transcript!, home: current.reload!.home,
-      options: current.reload!.options, mode: current.mode!, token: current.token } : recovery!.spec
+      options: current.reload!.options, overrideKeys: current.reload!.overrideKeys, mode: current.mode!, token: current.token } : recovery!.spec
     if (!current && recovery?.version !== 1) throw new Error('Reload stopped: unsupported recovery metadata. Run !vargus off, then on with your options.')
     if (!sameTarget(retained.target, target) || retained.home !== home) throw new Error('Reload stopped: saved helper binding or CODEX_HOME differs.')
     // Resolve and replay before stopping a healthy helper. Readings are rebuilt by
@@ -149,7 +151,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
     // Off admission records intent before delivery; cancellation can leave the
     // old helper on. Preserve that intent in both replacement and retry state.
     const mode = migrating ? 'on' : await startupSuppressed(home, target, retained.thread) ? 'restore' : retained.mode
-    const spec: Spec = { ...retained, mode, transcript, options: resolveCodexOptions({ ...retained.options, ...options }), token: randomBytes(16).toString('hex') }
+    const spec: Spec = { ...retained, mode, transcript, ...workerOptions(checkout, options, retained), token: randomBytes(16).toString('hex') }
     await save(recoveryPath(target), { version: 1, spec } satisfies Recovery)
     if (current) await stopWorker(current)
     try {
@@ -169,6 +171,7 @@ export async function standalone(args: string[], automatic = false): Promise<num
   }
   const requestedTranscript = action === 'on' ? await findRollout(home, thread!, process.env.VARGUS_CODEX_TRANSCRIPT) : undefined
   await rm(recoveryPath(target), { force: true })
+  let retainedOptions = action === 'off' ? current?.reload : undefined
   if (current && ((action === 'off' && (!thread || current.thread === thread) && [2, 3, 4, 5, 6, workerVersion].includes(current.version!)) || (current.version === workerVersion && current.thread === thread && current.transcript === requestedTranscript))) {
     const reply = await request(current, action as 'on' | 'off')
     if (reply) {
@@ -177,12 +180,11 @@ export async function standalone(args: string[], automatic = false): Promise<num
     }
     // Restoration can finish after on has read the worker but before it reads
     // the request. Continue normal startup under the same pane admission lock.
-    options = { ...current.reload?.options, ...options }
+    retainedOptions = current.reload
     await rm(requestPath(current), { force: true })
     current = undefined
   }
   const saved = await backups(target)
-  const retainedOptions = action === 'off' ? current?.reload?.options : undefined
   const root = thread ?? current?.thread ?? saved[0]?.thread
   if (!root) { await new TmuxOutput(target.socket, target.pane).cleanupAbandoned(); console.log('VArgus is off.'); return 0 }
   // Off must release abandoned row ownership even when history cannot be read.
@@ -206,7 +208,8 @@ export async function standalone(args: string[], automatic = false): Promise<num
     await save(file, { target, thread: root, selection })
   }
   if (current) await stopWorker(current)
-  const spec: Spec = { target, thread: root, transcript, home, options: resolveCodexOptions({ ...retainedOptions, ...options }), token: randomBytes(16).toString('hex'), mode: action === 'on' ? 'on' : 'restore' }
+  const base = action === 'off' && retainedOptions ? retainedOptions.options : checkout
+  const spec: Spec = { target, thread: root, transcript, home, ...workerOptions(base, options, retainedOptions), token: randomBytes(16).toString('hex'), mode: action === 'on' ? 'on' : 'restore' }
   try {
     const reply = await startWorker(spec)
     console.log(action === 'on' ? `VArgus is on in ${target.pane}.${reply.error ? ' ' + reply.error : ''}` : description(reply))

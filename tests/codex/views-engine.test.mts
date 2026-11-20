@@ -1,3 +1,4 @@
+import { fixtureCheckout } from '../checkout.mts'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -5,7 +6,7 @@ import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rename } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 import { PaneInput } from '../../src/outputs/tmux/input.ts'
@@ -27,6 +28,7 @@ for (const fixture of [
   const quotedTitle = !crowded && selection[0] === 'thread-name'
   const columns = crowded ? 177 : 157
   const dir = await mkdtemp(join(tmpdir(), 'vargus-standalone-test-'))
+  const checkout = await fixtureCheckout(dir)
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
   for (const folder of [cfg, project, temporary]) await mkdir(folder)
   const env = nativeFixtureEnv(dir, { CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
@@ -165,7 +167,7 @@ trust_level = "trusted"
       assert.doesNotMatch(await activity(), /^• (?:Running|Working) /m)
     }
   }
-  const command = (action: string, extra = '') => '!' + (crowded ? 'PATH=' + quote(env.PATH!) + ' ' : '') + 'COLUMNS=80 ' + quote(resolve('bin/vargus')) + ' ' + action + (extra ? ' ' + extra : '')
+  const command = (action: string, extra = '') => '!' + (crowded ? 'PATH=' + quote(env.PATH!) + ' ' : '') + 'COLUMNS=80 ' + quote(join(checkout, 'bin/vargus')) + ' ' + action + (extra ? ' ' + extra : '')
   try {
     // This daemon starts outside tmux: !command must not rely on inherited pane variables.
     await startTestDaemon(cfg, env)
@@ -221,7 +223,7 @@ if '-p' in sys.argv:
         f.write(json.dumps({'replies':[x.name for x in p.glob('*.reply')],'records':[x.name for x in p.glob('*.json')]})+'\\n')
 os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
   `, { mode: 0o700 })
-      await exec(resolve('bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread, PATH: fake + ':' + process.env.PATH } })
+      await exec(join(checkout, 'bin/vargus'), ['off'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread, PATH: fake + ':' + process.env.PATH } })
       const observations = (await readFile(trace, 'utf8')).trim().split('\n').map(l => JSON.parse(l))
       assert.ok(observations.some(o => o.replies.length > 0 && o.records.length === 0), 'reply must be present after helper exit in the forced acknowledgement race')
       await submit(command('on', activation))
@@ -350,7 +352,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
       const previous = (await records())[0]
       const footerDir = join(controlRoot, 'footers')
       const saved = new Map(await Promise.all((await readdir(footerDir)).map(async name => [name, await readFile(join(footerDir, name), 'utf8')] as const)))
-      const result = await exec(resolve('bin/vargus'), ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+      const result = await exec(join(checkout, 'bin/vargus'), ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
       assert.match(result.stdout, /helper reloaded/)
       const replacement = (await records())[0]
       assert.notEqual(replacement.pid, previous.pid)
@@ -412,7 +414,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     const draft = await new PaneInput(active.target).snapshot()
     assert.match(await row(), /token:4\.2k/, 'the Main draft keeps readings past the render interval')
     assert.equal((await records())[0].selected, active.thread)
-    const control = (action: string) => exec(resolve('bin/vargus'), [action], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+    const control = (action: string) => exec(join(checkout, 'bin/vargus'), [action], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
     assert.match((await control('off')).stdout, /VArgus is off;.*pending restoration/)
     await wait(row, /^$/)
     const afterDraft = await new PaneInput(active.target).snapshot()

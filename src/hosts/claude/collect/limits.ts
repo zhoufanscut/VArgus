@@ -48,6 +48,11 @@ const MAX_OTHERS = 4
 // Module values start over on a hot reload, which runs session.start again
 // (DESIGN, "The host"); the cache in $.store carries the numbers across.
 let timer: Timer | null = null
+
+export function stopLimits(): void {
+  timer?.cancel()
+  timer = null
+}
 let reading = false
 
 // register.ts calls these from its own hooks: the validator refuses an event

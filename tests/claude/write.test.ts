@@ -19,6 +19,7 @@ const FOLDER_ONLY = {
 
 type World = {
   writes: { path: string; text: string }[]
+  blankMarkers: { path: string; text: string }[]
   runs: string[][]
   id: string
   // mv's exit code, or 'throw' for a refused process
@@ -47,7 +48,7 @@ function world(
   pathStyle: 'posix' | 'drive' = 'posix',
 ): World {
   const w: World = {
-    writes: [], runs: [], id: 'S1', mv: 0, tmpFails: false, cwd: () => '/home/u/proj/x',
+    writes: [], blankMarkers: [], runs: [], id: 'S1', mv: 0, tmpFails: false, cwd: () => '/home/u/proj/x',
     holdMs: 0, rmHoldMs: 0, listHoldMs: 0, inFlight: 0, maxInFlight: 0, started: [], tree: {}, dirTimes: {},
   }
   mock.env(on, env)
@@ -61,6 +62,10 @@ function world(
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   const key = (path: string) => fixtureFsPath(path, pathStyle)
   on('fs.write', async ($, e) => {
+    if (e.path.endsWith('line.blank')) {
+      w.blankMarkers.push({ path: key(e.path), text: e.text })
+      return { value: undefined }
+    }
     w.inFlight += 1
     w.maxInFlight = Math.max(w.maxInFlight, w.inFlight)
     if (w.holdMs) await clock.sleep(w.holdMs)
@@ -527,6 +532,7 @@ describe('blankStopped: the heartbeat write', () => {
     expect(w.writes[1]).toEqual({ path: `${DATA}/S1/line.0.tmp`, text: '~/proj/x' })
     await clock.advance(30_000)
     expect(w.writes).toHaveLength(3)
+    expect(w.blankMarkers).toEqual([{ path: `${DATA}/S1/line.blank`, text: '1' }])
   })
 
   test('off: an unchanged line is never written again', FOLDER_ONLY, async ($, on) => {
@@ -535,6 +541,7 @@ describe('blankStopped: the heartbeat write', () => {
     await $.session.start(start)
     await clock.advance(120_000)
     expect(w.writes).toHaveLength(1)
+    expect(w.blankMarkers).toEqual([{ path: `${DATA}/S1/line.blank`, text: '' }])
   })
 
   test('not for an ended session', HEART, async ($, on) => {

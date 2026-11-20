@@ -67,6 +67,13 @@ export function startVcs($: EngineInterface, values: VcsValues, e: SessionStartI
   pump($, values, p).catch(() => {})
 }
 
+export function stopVcs(): void {
+  p.started = false
+  p.generation++
+  p.timer?.cancel()
+  p.timer = null
+}
+
 // From tool.call, after `next(e)` resolved (the tool has run). Not awaited
 // work: returns at once.
 export function toolCalledVcs($: EngineInterface, values: VcsValues, e: ToolCallInput): void {

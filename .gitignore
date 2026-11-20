@@ -1,5 +1,8 @@
 tmp/
 PLAN.md
+/vargus.jsonc
+/vargus.jsonc.*.vargus-tmp/
+/vargus.jsonc.vargus-lock/
 .aws/
 .codex/
 .agents/

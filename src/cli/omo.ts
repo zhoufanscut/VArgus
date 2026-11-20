@@ -2,7 +2,7 @@ import { mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { readOmoOptions } from '../hosts/omo/options.ts'
+import { readOptionsFile } from '../node/options.ts'
 import { writeSetupFile } from './settings.ts'
 
 const MARKER = '// VArgus OmO native extension loader.\n'
@@ -28,7 +28,7 @@ export async function omo(argv: string[]): Promise<number> {
     else if (flag === '--config' && config === undefined && action === 'install') config = resolve(value)
     else throw new Error(HELP)
   }
-  if (config !== undefined) readOmoOptions(config)
+  if (config !== undefined) readOptionsFile(config)
   if (directory === undefined) {
     const { stdout } = await promisify(execFile)('omo', ['config', 'agent-dir', '--json'], {
       timeout: 10000, windowsHide: true,

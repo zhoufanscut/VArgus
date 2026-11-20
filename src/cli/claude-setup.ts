@@ -9,16 +9,17 @@ const PLUGIN = `vargus@${MARKETPLACE}`
 const LINE = '/$CLAUDE_CODE_SESSION_ID/line'
 const exec = promisify(execFile)
 
-function reader(path: string, blankStopped: boolean): string {
-  return blankStopped
-    ? `f="${path}"; [ -n "$(find "$f" -mmin -2 2>/dev/null)" ] && cat "$f"`
-    : `cat "${path}" 2>/dev/null`
+function reader(path: string, legacyBlank: boolean): string {
+  const keep = legacyBlank ? '[ -f "$f.blank" ] && [ ! -s "$f.blank" ]' : '[ ! -s "$f.blank" ]'
+  return `f="${path}"; { ${keep} || [ -n "$(find "$f" -mmin -2 2>/dev/null)" ]; } && cat "$f" 2>/dev/null`
 }
 
 function isVargusReader(command: string): boolean {
   const path = /^(?:cat |f=)"((?:\\.|[^"\\\r\n])+)"/.exec(command)?.[1]
-  return !!path?.endsWith(`/${DATA_FOLDER}${LINE}`)
-    && (command === reader(path, false) || command === reader(path, true))
+  if (!path?.endsWith(`/${DATA_FOLDER}${LINE}`)) return false
+  return command === reader(path, false) || command === reader(path, true)
+    || command === `cat "${path}" 2>/dev/null`
+    || command === `f="${path}"; [ -n "$(find "$f" -mmin -2 2>/dev/null)" ] && cat "$f"`
 }
 
 function nextStatusLine(settings: Record<string, unknown>, file: string, data: string) {
@@ -28,7 +29,8 @@ function nextStatusLine(settings: Record<string, unknown>, file: string, data: s
     throw new Error(`A different statusLine is configured in ${file}. Back it up and remove that entry before retrying.`)
   }
   const plugins = settings.pluginConfigs as Record<string, { options?: { blankStopped?: boolean } }> | undefined
-  const command = reader(data.replace(/["\\$`]/g, '\\$&') + LINE, plugins?.[PLUGIN]?.options?.blankStopped === true)
+  const blank = plugins?.[PLUGIN]?.options?.blankStopped === true
+  const command = reader(data.replace(/["\\$`]/g, '\\$&') + LINE, blank)
   if (current?.command === command) return undefined
   return { ...current, type: 'command', command, refreshInterval: 1 }
 }

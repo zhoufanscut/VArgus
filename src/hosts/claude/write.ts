@@ -15,7 +15,7 @@ export type Writer = {
   tools: 'posix' | 'cmd'
   // line.<t>.tmp: one temp file per loaded copy of the mod.
   tmpName: string
-  last: { id: string; text: string; at: number } | null
+  last: { id: string; text: string; at: number; blankStopped: boolean } | null
   // with blankStopped: rewrite an unchanged line this often, so the reader
   // can tell a stopped mod by the file's age; null: only on a change
   heartbeatMs: number | null
@@ -32,9 +32,13 @@ export type Writer = {
 // A session id as a folder name: no `/`, `.` or `..`.
 const SAFE_ID = /^[A-Za-z0-9_-]+$/
 
-export async function createWriter($: EngineInterface): Promise<Writer> {
+export async function pluginDataDir($: EngineInterface): Promise<string | null> {
   const config = await $.env.get('CLAUDE_CONFIG_DIR')
-  const dir = dataDir(config, homeDir(await $.env.get('HOME'), await $.env.get('USERPROFILE')))
+  return dataDir(config, homeDir(await $.env.get('HOME'), await $.env.get('USERPROFILE')))
+}
+
+export async function createWriter($: EngineInterface): Promise<Writer> {
+  const dir = await pluginDataDir($)
   return {
     dir,
     tools: dir !== null && DRIVE_PATH.test(dir) ? 'cmd' : 'posix',
@@ -136,10 +140,14 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
     const id = await $.session.id()
     if (!w.dir || !id || id === w.ended) continue
     const now = w.heartbeatMs === null ? 0 : await $.clock.now()
-    const same = w.last?.id === id && w.last.text === next
+    const blankStopped = w.heartbeatMs !== null
+    const modeChanged = w.last?.id !== id || w.last.blankStopped !== blankStopped
+    const same = !modeChanged && w.last?.text === next
     if (same && (w.heartbeatMs === null || now - w.last!.at < w.heartbeatMs)) continue
     const folder = `${w.dir}/${id}`
     const line = `${folder}/line`
+    // The reader gets the effective option from this session, including policy.
+    if (modeChanged) await $.fs.write(line + '.blank', blankStopped ? '1' : '')
     const tmp = `${folder}/${w.tmpName}`
     const argv = moveArgv(w, tmp, line)
     let moved = false
@@ -154,6 +162,6 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
     }
     // Not atomic: a read can catch a half-written line for one run.
     if (!moved) await $.fs.write(line, next)
-    w.last = { id, text: next, at: now }
+    w.last = { id, text: next, at: now, blankStopped }
   }
 }

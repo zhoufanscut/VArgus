@@ -1,16 +1,17 @@
-import type { EngineInterface, Register, Timer } from 'claude-code'
+import type { EngineInterface, Register, SessionStartInput, Timer } from 'claude-code'
 
 import { initialClaudeLimits, claudeQuotaReadings } from './quota'
-import { measuredLimits, startLimits } from './collect/limits'
+import { measuredLimits, startLimits, stopLimits } from './collect/limits'
 import {
   compacted, initialSession, measured, sessionEnding, startSession, stepDone, stepStarting, toolCalled,
 } from './collect/session'
-import { initialVcs, startVcs, toolCalledVcs } from './collect/vcs'
+import { initialVcs, startVcs, stopVcs, toolCalledVcs } from './collect/vcs'
 import type { Theme, Values } from '../../core/types'
 import { resolveLabels } from '../../i18n'
 import { resolveOptions, type Options } from '../../options'
 import { render } from '../../render'
 import { claudeDisplay } from './display'
+import { claudeOptions, registerConfig } from './config'
 import { makeTheme } from '../../theme'
 import { createWriter, endSession, homeDir, pruneOld, writeLine, type Writer } from './write'
 
@@ -52,23 +53,41 @@ async function isWsl($: EngineInterface): Promise<boolean> {
   }
 }
 
+function configure($: EngineInterface, e: SessionStartInput, next: Options, noColor: boolean, previous?: Options): void {
+  options = next
+  theme = makeTheme(next.theme, noColor)
+  if (writer) writer.heartbeatMs = next.blankStopped ? 30_000 : null
+  const hasVcs = next.repo || next.branch || next.status
+  const hadVcs = previous?.repo || previous?.branch || previous?.status
+  if (hasVcs && (!hadVcs || previous?.detachedHead !== next.detachedHead)) startVcs($, values.vcs, e, next.detachedHead)
+  if (!hasVcs && hadVcs) stopVcs()
+  if (next.rateLimits && !previous?.rateLimits) startLimits($, quota, e)
+  if (!next.rateLimits && previous?.rateLimits) stopLimits()
+}
+
 export const register: Register = (on, given) => {
-  options = resolveOptions(given)
+  const native = resolveOptions(given)
+  options = native
+  let applyOptions: ((changes: Partial<Options>) => void) | undefined
+  registerConfig(on, given, changes => applyOptions?.(changes))
 
   on('session.start', async ($, e, next) => {
     await startSession($, values.session)
     // Only an interactive session shows a status line (DESIGN, "When the line is written").
     if (e.isInteractive) {
+      let initial = native
+      try { initial = await claudeOptions($, given) }
+      catch (error) { $.ui.log('Could not load vargus.jsonc. ' + String(error)) }
       writer = await createWriter($)
-      // DESIGN, "The reader": the file's age tells the reader the mod stopped
-      writer.heartbeatMs = options?.blankStopped ? 30_000 : null
-      if (options?.repo || options?.branch || options?.status) {
-        startVcs($, values.vcs, e, options?.detachedHead ?? false)
+      const noColor = !!(await $.env.get('NO_COLOR'))
+      configure($, e, initial, noColor)
+      applyOptions = changes => {
+        if (!options) return
+        configure($, e, resolveOptions({ ...options, ...changes }), noColor, options)
+        refresh($).catch(() => {})
       }
-      if (options?.rateLimits) startLimits($, quota, e)
       values.core.home = homeDir(await $.env.get('HOME'), await $.env.get('USERPROFILE'))
       values.core.isWsl = await isWsl($)
-      theme = makeTheme(options?.theme ?? 'graphite', !!(await $.env.get('NO_COLOR')))
       tick?.cancel()
       tick = $.clock.every(1000, () => {
         refresh($).catch(() => {})

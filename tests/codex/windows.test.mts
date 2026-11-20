@@ -1,3 +1,4 @@
+import { fixtureCheckout } from '../checkout.mts'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
@@ -6,7 +7,7 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { applicationProcesses, applicationArguments } from '../../src/outputs/tmux/process.ts'
 import { applicationTargets } from '../../src/outputs/tmux/target.ts'
@@ -410,6 +411,7 @@ test('Windows window-local bar formats and styles retain native rendering before
 
 test('Windows psmux preserves existing custom rows and renders, reloads and restores official Codex', { skip: !windows, timeout: 120000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-windows-test-'))
+  const checkout = await fixtureCheckout(dir)
   const home = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
   for (const folder of [home, project, temporary]) await mkdir(folder)
   let posts = 0
@@ -454,7 +456,7 @@ trust_level = "trusted"
   const socket = join(dir, 'server')
   await mkdir(join(home, 'vargus', 'autostart'), { recursive: true })
   const callback = (action: string) => ({ type: 'command',
-    command: `& ${quote(resolve('bin/vargus.cmd'))} hook ${action} --socket ${quote(socket)}`, async: true, timeout: 30 })
+    command: `& ${quote(join(checkout, 'bin/vargus.cmd'))} hook ${action} --socket ${quote(socket)}`, async: true, timeout: 30 })
   await writeFile(join(home, 'hooks.json'), JSON.stringify({ hooks: {
     SessionStart: [{ matcher: '^(startup|resume|clear|fork)$', hooks: [callback('session-start')] }],
     UserPromptSubmit: [{ hooks: [callback('prompt')] }],
@@ -468,7 +470,7 @@ trust_level = "trusted"
     do { value = await read(); if (pattern.test(value)) return value; await delay(150) } while (Date.now() < until)
     assert.match(value, pattern, await screen()); return value
   }
-  const control = async (action: string) => exec(process.execPath, [resolve('src/cli.ts'), action, '--socket', socket, '--pane', pane],
+  const control = async (action: string) => exec(process.execPath, [join(checkout, 'src/cli.ts'), action, '--socket', socket, '--pane', pane],
     { cwd: project, windowsHide: true, env: { ...env, VARGUS_CLI_MAIN: '1', CODEX_THREAD_ID: thread }, timeout: 25000 })
   const row = async () => { try { return await run('show-options', '-p', '-v', '-t', pane, '@vargus_line') } catch { return '' } }
   try {

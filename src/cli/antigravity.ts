@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { homedir, release } from 'node:os'
 import { defaultCacheDir } from '../hosts/antigravity/cache.ts'
 import { collectAntigravityPayload, type AntigravityPayload } from '../hosts/antigravity/collect.ts'
@@ -6,6 +5,7 @@ import { antigravityDisplay } from '../hosts/antigravity/display.ts'
 import { readTranscriptState, resolveTranscriptPath } from '../hosts/antigravity/transcript.ts'
 import { readCachedGit } from '../hosts/antigravity/vcs.ts'
 import { resolveLabels } from '../i18n/index.ts'
+import { readCheckoutOptions, readOptionsFile } from '../node/options.ts'
 import { resolveOptions } from '../options.ts'
 import { render } from '../render/index.ts'
 import { makeTheme } from '../theme/index.ts'
@@ -96,13 +96,13 @@ export async function renderAntigravityStatusLine(
 }
 
 export async function statusline(args: string[]): Promise<number> {
-  let given: Record<string, unknown> = {}
+  let given = readCheckoutOptions()
   for (let i = 0; i < args.length; i++) {
     const flag = args[i]!
     const value = args[++i]
     if (value === undefined) throw new Error(`Missing value for ${flag}.`)
     if (flag === '--theme') given.theme = value
-    else if (flag === '--config') given = { ...given, ...(JSON.parse(await readFile(value, 'utf8')) as Record<string, unknown>) }
+    else if (flag === '--config') given = { ...given, ...readOptionsFile(value) }
     else throw new Error(`Unknown VArgus option: ${flag}.`)
   }
 

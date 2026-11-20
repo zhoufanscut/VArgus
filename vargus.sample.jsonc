@@ -1,0 +1,36 @@
+{
+  // Copy this file to vargus.jsonc in the VArgus checkout.
+  // Uncomment the options you want to change. The values shown are the defaults.
+
+  // Session display
+  // "folder": true,         // Show the working folder.
+  // "model": true,          // Show the model name.
+  // "effort": true,         // Include reasoning effort beside the model.
+  // "context": true,        // Show the percentage of the context window used.
+  // "tokens": true,         // Show the session's token count.
+  // "session": true,        // Show elapsed session time.
+  // "callCounts": true,     // Show tool, agent and skill counts where available.
+  // "workflowRuns": false,  // Include workflow runs in the call counts where available.
+
+  // Rate limits
+  // "rateLimits": true,        // Show usage and reset times for available limits.
+  // "spendLimit": false,       // Include a spend limit when the provider reports one.
+  // "otherModelWeekly": false, // Include available weekly limits for other models.
+
+  // Repository display
+  // "repo": true,           // Show the repository name.
+  // "branch": true,         // Show the branch name.
+  // "detachedHead": false,  // Identify a detached Git HEAD by tag or commit.
+  // "status": true,         // Show working-tree changes and ahead/behind counts.
+
+  // Codex
+  // "codexAgentCounts": true, // Include subagents in the call counts.
+  // "codexSkillCounts": true, // Include skill loads in the call counts.
+  // "codexAutoStart": true,   // Let the installed startup hooks activate VArgus.
+
+  // Claude Code
+  // "blankStopped": false, // Hide a stale status line using the reader in docs/setup-claude.md.
+
+  // Choose graphite, aurora, ember, nebula or daylight.
+  "theme": "graphite"
+}

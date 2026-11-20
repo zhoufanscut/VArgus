@@ -1,3 +1,4 @@
+import { fixtureCheckout } from '../checkout.mts'
 import WebSocket from 'ws'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -6,7 +7,7 @@ import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, copyFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -43,6 +44,7 @@ for (const { identity, migration, idItem } of [
   { identity: true, migration: true, idItem: 'session-id' },
 ]) test(`official Codex SessionStart ${migration ? 'refreshes cached hooks before removing the retired options file' : identity ? 'broadcast activates in shared-daemon mode and respects manual off' : 'skips without an explicit full-ID footer'} (${idItem})`, { timeout: 90000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-hooks-test-'))
+  const checkout = await fixtureCheckout(dir)
   const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
   for (const folder of [cfg, project, temporary]) await mkdir(folder)
   const env = nativeFixtureEnv(dir, { CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
@@ -138,7 +140,7 @@ trust_level = "trusted"
       assert.doesNotMatch(await activity(), /^• (?:Running|Working) /m)
     }
   }
-  const command = (action: string, extra = '') => '!COLUMNS=80 ' + quote(resolve('bin/vargus')) + ' ' + action + (extra ? ' ' + extra : '')
+  const command = (action: string, extra = '') => '!COLUMNS=80 ' + quote(join(checkout, 'bin/vargus')) + ' ' + action + (extra ? ' ' + extra : '')
   let seededId: string | undefined, seededPath: string | undefined
   try {
     if (identity) {
@@ -182,7 +184,7 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     await tmux('set-window-option', 'remain-on-exit', 'on')
     const retiredOptions = join(cfg, 'vargus-options.json')
     if (migration) await writeFile(retiredOptions, JSON.stringify({ codexAutoStart: true }))
-    const hookCommand = quote(resolve('bin/vargus')) + ' hook session-start --socket ' + quote(socket)
+    const hookCommand = quote(join(checkout, 'bin/vargus')) + ' hook session-start --socket ' + quote(socket)
     const trace = join(dir, 'hook-result.json'), promptTrace = join(dir, 'prompt-result.json'), wrapper = join(dir, 'hook-wrapper.mjs')
     await writeFile(wrapper, `import {spawnSync} from 'node:child_process';import {writeFileSync} from 'node:fs';let raw='';for await(const p of process.stdin)raw+=p;const result=spawnSync(process.argv[2],process.argv.slice(3),{input:raw,encoding:'utf8'});writeFileSync(JSON.parse(raw).hook_event_name==='SessionStart'?${JSON.stringify(trace)}:${JSON.stringify(promptTrace)},JSON.stringify({code:result.status,stdout:result.stdout,stderr:result.stderr,input:JSON.parse(raw)}));process.stdout.write(result.stdout||'');process.stderr.write(result.stderr||'');process.exitCode=result.status??1;`)
     const callback = (command: string) => ({ type: 'command', command: quote(process.execPath) + ' ' + quote(wrapper) + ' ' + command, async: true, timeout: 30 })
@@ -239,14 +241,14 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     await submit('/statusline model-with-reasoning current-dir ' + idItem)
     await wait(footer, footerMatches)
     const staleEvent = { ...hookResult.input, transcript_path: seededPath!.replace('_11111111-1111-1111-1111-111111111111', '') }
-    const stale = exec(process.execPath, [resolve('src/cli.ts'), 'hook', 'prompt', '--socket', socket], {
+    const stale = exec(process.execPath, [join(checkout, 'src/cli.ts'), 'hook', 'prompt', '--socket', socket], {
       cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1' },
     })
     stale.child.stdin!.end(JSON.stringify({ ...staleEvent, hook_event_name: 'UserPromptSubmit' }))
     assert.equal((await stale).stdout, '')
     await wait(footer, footerMatches)
     assert.equal(JSON.parse(await readFile(runtimePath, 'utf8')).transcript, seededPath)
-    const controlOn = () => exec(resolve('bin/vargus'), ['on', '--socket', socket, '--pane', pane], {
+    const controlOn = () => exec(join(checkout, 'bin/vargus'), ['on', '--socket', socket, '--pane', pane], {
       cwd: project, env: { ...env, CODEX_THREAD_ID: state.thread },
     })
     await controlOn()
@@ -335,7 +337,7 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     assert.ok(beforeCollision.includes('…'), 'positive control: actual tail is clipped')
     assert.ok(!beforeCollision.includes(actual), 'actual complete session ID is not displayed')
     const postsBeforeReplay = posts
-    const collisionReplay = exec(process.execPath, [resolve('src/cli.ts'), 'hook', 'session-start', '--socket', socket], {
+    const collisionReplay = exec(process.execPath, [join(checkout, 'src/cli.ts'), 'hook', 'session-start', '--socket', socket], {
       cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1' },
     })
     collisionReplay.child.stdin!.end(JSON.stringify(hookResult.input))
@@ -353,7 +355,7 @@ c=sqlite3.connect(files[0]);r=c.execute('UPDATE threads SET rollout_path=? WHERE
     await submit(command('off', '--socket ' + quote(socket)))
     await wait(row, /^$/); await wait(footer, footerMatches)
     assert.equal(posts, hookedPosts)
-    const replay = exec(process.execPath, [resolve('src/cli.ts'), 'hook', 'session-start', '--socket', socket], {
+    const replay = exec(process.execPath, [join(checkout, 'src/cli.ts'), 'hook', 'session-start', '--socket', socket], {
       cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1' },
     })
     replay.child.stdin!.end(JSON.stringify(hookResult.input))

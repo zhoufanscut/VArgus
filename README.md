@@ -41,6 +41,32 @@ on Linux or macOS, or `.\bin\vargus.cmd --help` in PowerShell, to check that che
 commands. For example, [v0.6.0](https://github.com/zhoufanscut/VArgus/blob/v0.6.0/README.md)
 uses `vargus omo install` and `vargus omo remove`.
 
+### Shared configuration
+
+To customize VArgus for the hosts using this checkout, copy
+[`vargus.sample.jsonc`](vargus.sample.jsonc) to `vargus.jsonc` beside this README.
+From the checkout root, run `cp vargus.sample.jsonc vargus.jsonc` or, in
+PowerShell, `Copy-Item vargus.sample.jsonc vargus.jsonc`. Git ignores your copy.
+
+The example explains each option and lists the available themes. Uncomment the
+settings you want and change their values. The file accepts ordinary JSON plus
+`//` and `/* … */` comments. VArgus starts with its built-in defaults and reads
+the file from its own checkout, wherever you start the host.
+
+- **Claude Code** shows shared values in the VArgus section of `/config`.
+  Changing a picker option saves it to the shared file, creating the file on
+  the first change in a clone. After editing the file by hand, run
+  `/reload-plugins` or open a new session. [Claude guide](docs/setup-claude.md#configure)
+- **Codex** reads the file on activation and on `!vargus reload`. An explicit
+  `--config FILE` or `--theme NAME` overrides the corresponding shared values.
+  [Codex guide](docs/setup-codex.md#configure)
+- **OmO Native** reads it when the extension loads. Run `/reload` after an edit.
+  An install-time `--config FILE` overrides shared values, and
+  `/vargus config` overrides them for that session. [OmO guide](docs/setup-omo.md#configure)
+- **Antigravity CLI** reads it on the next status-line refresh. Flags on the
+  status-line command override the corresponding shared values.
+  [Antigravity guide](docs/setup-antigravity.md#configure)
+
 ### Put vargus on PATH
 
 The host installers and the Codex and Antigravity CLI commands share a single
@@ -81,6 +107,7 @@ After removing the host integration, check these paths separately.
    [Claude directory marketplace](docs/setup-claude.md#or-from-a-clone-updated-with-git-pull).
    After removing the remaining integrations that reference that checkout and
    reloading or closing their sessions as directed, you can delete the checkout.
+   Copy `vargus.jsonc` elsewhere first if you want to keep your settings.
 
 ## What it shows
 

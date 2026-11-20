@@ -37,7 +37,10 @@ not an earlier custom footer.
 
 ## Configure
 
-Create the options file before running the installer, or reuse the one you pass
+The extension reads `vargus.jsonc` from the VArgus checkout each time it
+loads. Run `/reload` after editing it. [Shared configuration](../README.md#shared-configuration)
+
+For a separate JSON or JSONC file, create it before running the installer, or reuse the one you pass
 to Codex or Antigravity CLI. For example, save this JSON as `~/.config/vargus.json`.
 See the [shared option keys](../src/options.ts).
 
@@ -73,8 +76,8 @@ reinstall without `--config` in the same directory.
 ```
 
 VArgus saves your on/off choice and `/vargus config` overrides with the current
-session. Saved options take precedence over file values, and the file takes
-precedence over built-in defaults. Sessions configured with an older VArgus may
+session. Saved options take precedence over the install-time file, then the
+checkout file, then built-in defaults. Sessions configured with an older VArgus may
 have saved a full set of options. An explicit `off` survives reload and resume.
 New sessions default on.
 

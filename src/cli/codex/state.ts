@@ -4,14 +4,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Target } from '../../outputs/tmux/target.ts'
 import type { FooterSelection } from '../../hosts/codex/footer.ts'
+import type { SavedOptions } from '../../hosts/codex/options.ts'
 
 export type Running = { pid: number; thread: string; transcript?: string; target: Target; token: string; version?: number;
   mode?: 'on' | 'restore'; selected?: string; pending?: number; error?: string;
   paused?: { thread: string; label: string };
-  reload?: { version: 1; home: string; options: Record<string, unknown> } }
+  reload?: { version: 1; home: string } & SavedOptions }
 export type FooterBackup = { thread: string; target: Target; selection: FooterSelection }
-export type Spec = { target: Target; thread: string; transcript: string; home: string;
-  options: Record<string, unknown>; token: string; mode: 'on' | 'restore' }
+export type Spec = SavedOptions & { target: Target; thread: string; transcript: string; home: string;
+  token: string; mode: 'on' | 'restore' }
 export const workerVersion = 7
 export const controlRoot = () => join(tmpdir(), `vargus-control-${process.getuid?.() ?? 'user'}`)
 export const running = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }

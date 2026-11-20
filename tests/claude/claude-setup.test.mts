@@ -20,7 +20,7 @@ fs.appendFileSync(process.env.CLAUDE_CALLS, JSON.stringify(args) + '\\n')
 const file = path.join(process.env.CLAUDE_CONFIG_DIR, 'settings.json')
 const settings = JSON.parse(fs.readFileSync(file))
 if (args[1] === 'marketplace') {
-  console.log(JSON.stringify(Object.keys(settings.extraKnownMarketplaces ?? {}).map(name => ({ name }))))
+  console.log(JSON.stringify(Object.entries(settings.extraKnownMarketplaces ?? {}).map(([name, market]) => ({ name, ...market.source }))))
 } else {
   require('node:assert/strict').equal(process.env.NPM_CONFIG_OMIT, 'dev')
   if (settings.model === 'fail-install') {
@@ -114,4 +114,29 @@ test('Claude installer protects a custom reader and skips configuration if plugi
   await assert.rejects(f.install(), /Claude refused the plugin/)
   assert.equal(await readFile(f.settings, 'utf8'), before)
   assert.match(await readFile(f.calls, 'utf8'), /"install","vargus"/)
+})
+
+test('the installed reader follows the session marker when shared and native blankStopped disagree', { skip: process.platform === 'win32' }, async t => {
+  const f = await fixture(t)
+  const root = join(f.config, 'other checkout')
+  await mkdir(root)
+  await writeFile(f.settings, JSON.stringify({
+    statusLine: { type: 'command', command: 'cat "$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null' },
+    extraKnownMarketplaces: { vargus: { source: { source: 'directory', path: root } } },
+    enabledPlugins: { [id]: true },
+    pluginConfigs: { [id]: { options: { blankStopped: false } } },
+  }))
+  await writeFile(join(root, 'vargus.jsonc'), '// shared reader setting\n{"blankStopped":true}')
+  await f.install()
+  const line = join(f.config, 'plugins/data/vargus-vargus/S1/line')
+  await mkdir(dirname(line), { recursive: true })
+  await writeFile(line, 'idle row')
+  const stale = new Date(Date.now() - 180000)
+  await utimes(line, stale, stale)
+  const { command } = (await f.load()).statusLine
+  const read = () => exec('sh', ['-c', command], { env: { PATH: process.env.PATH, CLAUDE_CODE_SESSION_ID: 'S1' } })
+  await writeFile(line + '.blank', '')
+  assert.equal((await read()).stdout, 'idle row')
+  await writeFile(line + '.blank', '1')
+  await assert.rejects(read(), { code: 1 })
 })

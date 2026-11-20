@@ -104,21 +104,14 @@ the path appears as `\\$` in JSON. Leave `$CLAUDE_CODE_SESSION_ID` and `$f` as w
 ```json
 "statusLine": {
   "type": "command",
-  "command": "cat \"$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line\" 2>/dev/null",
+  "command": "f=\"$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line\"; { [ ! -s \"$f.blank\" ] || [ -n \"$(find \"$f\" -mmin -2 2>/dev/null)\" ]; } && cat \"$f\" 2>/dev/null",
   "refreshInterval": 1
 }
 ```
 
-Use this entry when **Blank a stopped line** is enabled. The option is stored in
-`pluginConfigs["vargus@vargus"].options.blankStopped` in the user settings.
-
-```json
-"statusLine": {
-  "type": "command",
-  "command": "f=\"$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line\"; [ -n \"$(find \"$f\" -mmin -2 2>/dev/null)\" ] && cat \"$f\"",
-  "refreshInterval": 1
-}
-```
+The mod writes the effective **Blank a stopped line** setting beside the line for
+that session. It reads `blankStopped` from the shared file or Claude’s plugin
+settings and respects managed settings. The reader uses that value immediately.
 
 Run `/reload-plugins` or start a new session. If you moved from a user-wide install to a
 project-only install, remove any leftover VArgus `statusLine` from your user settings or restore
@@ -140,8 +133,23 @@ If the row stays empty, check the effective reader and plugin in that session.
 
 ## Configure
 
-Find VArgus options under the plugin in `/config`. The
-[shared option keys](../src/options.ts) list their defaults.
+Open the VArgus options in `/config`. With a shared checkout, a change here
+updates that key in the checkout's `vargus.jsonc`, creating the file on the
+first change. The other hosts using this checkout pick it up on their next
+load or refresh. You can also edit the file by hand and run `/reload-plugins`
+or open a new session. [Shared configuration](../README.md#shared-configuration)
+
+Opening `/config` copies shared choices into the native picker. When a key is
+removed from the file, the row and picker use the previous native value again.
+Claude saves that value when the picker restores it, even if it originally came from a default.
+Removing the VArgus marketplace and its plugin data clears those saved fallbacks.
+If another plugin adjusts a shared choice as Claude imports it, Claude’s picker
+and status line use the accepted value until the shared choice changes.
+The checkout file keeps the value you selected for the other hosts.
+A change you make in the picker becomes the new native choice as well as the
+shared value. Unspecified keys keep Claude's plugin settings and manifest defaults.
+Managed settings keep their locked values. A downloaded marketplace install
+without a shared checkout or options file uses Claude's own plugin settings.
 
 Rate-limit API reads stop when `rateLimits` is off. Git/svn polling stops when
 `repo`, `branch` and `status` are all off.
@@ -153,13 +161,10 @@ reported. Other models' weekly limits use the same threshold when enabled.
 
 - **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only the usage
   colours carry hue). All but `daylight` assume a dark terminal.
-- **Blank a stopped line** (off by default): if the plugin stops mid-session (its module fails
-  to load at `/reload-plugins`; turning it off is expected to do the same, not tested), the row
-  goes blank within about two minutes instead of showing frozen numbers. After turning it on or
-  off in `/config`, rerun `vargus install claude` for a user-scope install or use the matching
-  entry in [Set up the status line](#set-up-the-status-line). The plugin rewrites the line every
-  30 s while it is on. If that reader stays configured after you turn the option off, the row
-  goes blank whenever the line has not changed for two minutes.
+- **Blank a stopped line** (off by default) makes the mod refresh an unchanged
+  line every 30 seconds. With the option enabled, the reader hides a line older
+  than about two minutes. If you installed a reader from an earlier version,
+  run `vargus install claude` once or update the manual reader above.
 - **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.
   Other programs Claude Code starts see it too.
 

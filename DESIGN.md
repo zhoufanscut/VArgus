@@ -86,6 +86,50 @@ detached-HEAD and stopped-line options default off. Codex resolves its
 count and installed startup hooks default on. Explicit activation or hook
 installation enables its tmux integration.
 
+The recommended install runs from one checkout. Its optional
+[`vargus.jsonc`](README.md#shared-configuration) supplies shared values, with
+only the keys present overriding built-in defaults. The Node reader resolves
+the path from its own module. Looking in the session's working directory
+would select a different file when the user changes projects. Explicit option
+files use the same comment-aware parser. Flags keep their argument order, and
+OmO's saved session overrides remain the top layer for that session.
+
+The Claude Code 2.1.323 `PluginOptions` declaration describes registration
+values as “defaults filled in.” Its `config.set` declaration says
+“`next(e)` resolves to `{ value }` once written.” In the 2.1.323 TUI,
+overriding `config.list` changed the API result while the native panel still
+displayed the saved choice. The built-in `config` and `reload-plugins`
+commands both raised `command.run` in a throwaway plugin. VArgus synchronizes
+unlocked file choices through `$.config.set` before opening the native panel.
+It records prior native choices by checkout and key in `picker-backups.json`
+in Claude's VArgus plugin data directory. Updates compare the original bytes
+before publishing so sessions editing different keys preserve each other's choices.
+The shell writer preserves literal backslashes in POSIX paths and converts
+Windows drive separators for Git Bash. A Linux profile named `profile\west`
+kept its backup and restored the previous theme after the shared key was removed.
+Removing that key restores the fallback. A deliberate picker edit replaces
+the fallback. The renderer reads the file at startup and on the reload command,
+including when Claude keeps the loaded module. A picker edit stages a change beside
+the destination, passes the event to Claude, and publishes the accepted value
+after checking the original bytes. It changes one top-level value and preserves
+unrelated settings and comments. A file edit from another session between
+staging and publication requires a fresh read and merge. The native settings
+supply the fallback for omitted keys. [Claude mod reference](https://code.claude.com/docs/en/plugins/mods/reference)
+
+In a 2.1.323 throwaway directory plugin the native save reloaded the mod while
+the setting hook was still running. The pending key in `$.state` lets the new
+copy use Claude's accepted value during that handoff. Saving a value already
+stored in Claude can also change the shared file without reloading the mod.
+The running copy then updates its renderer and affected collectors directly.
+
+Removing the VArgus marketplace in Claude Code 2.1.323 erased the plugin
+data directory and native options while a `$.store` entry survived. With the
+backup in the data directory, reinstalling the same checkout without the shared
+file left the default Graphite theme in the picker. In a live two-plugin check,
+a second plugin rewrote a shared Ember request to Daylight. The picker and row
+used Daylight through a reload. VArgus remembers a rewrite with the shared value
+that requested it and retires that association when the file value changes.
+
 The displayed context percentage is rounded. Colour changes at 70% and 85%,
 with `COMPRESS?` from 80% through 84% and `CRITICAL` from 85%. WSL uses text
 call-count marks. Hosts choose the context supplied to the renderer, including
@@ -156,6 +200,9 @@ bound TUI exits.
 `reload` validates and replays the root transcript before replacing the worker.
 A recovery record retains the root, options and mode. Flags override retained
 options in command order, and the original footer backups remain separate.
+Workers also record which option keys were explicit. Reload rereads the
+checkout defaults for the remaining keys. Older snapshots retain their
+effective values because they contain no record of which keys were explicit.
 An interrupted manual `off` still suppresses reactivation. A worker without
 reload metadata needs an `off` and `on` with the original options.
 
@@ -458,8 +505,12 @@ share the file and can overwrite or remove each other's row.
 
 The normal reader prints the per-session file with `cat`. The
 `CLAUDE_CODE_SESSION_ID` supplied to the reader matches the writer's ID in
-the Claude Code 2.1.300 probe. `blankStopped` pairs a 30-second writer
-heartbeat with an mtime check in the reader. Select both together. The
+the Claude Code 2.1.300 probe. The writer records its effective `blankStopped`
+in the session's `line.blank` when the session or setting changes. A nonempty
+marker pairs a 30-second heartbeat with the reader's mtime check. An empty
+marker keeps an unchanged row visible even when a checkout and managed setting
+disagree. For a session from an older writer with no marker, the installer
+retains the age-check behavior selected by the user's native setting. The
 [setup guide](docs/setup-claude.md#set-up-the-status-line) owns the commands.
 [Reader tests](tests/claude/reader.test.sh) cover a present, missing and stale
 file and an empty session ID.
@@ -517,6 +568,22 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   validation exit 1 for those warnings.
 
 ### Live evidence and limits
+
+On Linux on 2026-11-20, a checkout installed with `vargus install claude`
+ran in Claude Code 2.1.323 with a saved native `model: true` and a shared
+`model: false`. Both the Claude line and the Antigravity status-line command
+omitted the model initially, showed it after `/config vargus.model=true`,
+and omitted it after `/config vargus.model=false`. The probe used the native
+Claude TUI and supplied Antigravity's stdin payload. The checkout-file case
+in the Linux Codex standalone suite used the stock TUI, removed a shared
+`codexSkillCounts: false` setting, and observed the built-in value on reload.
+The native Claude panel and open-session reload were also exercised with
+conflicting native and checkout values, including a case in which Claude
+reported a successful plugin reload while keeping the current module.
+The OmO Native 5.1.61 TUI with Senpi 2026.11.3-3 and the older
+Senpi 2026.10.25-2 TUI loaded checkout settings, applied an OmO session
+override, and reread a hand edit on `/reload`. The older loader supplied
+`import.meta.url` and failed checkout path resolution using `import.meta.dirname`.
 
 | Surface | Recorded evidence | Coverage boundary |
 |---|---|---|

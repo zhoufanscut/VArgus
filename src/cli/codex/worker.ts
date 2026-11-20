@@ -40,7 +40,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const stop = () => { stopping = true }
   process.on('SIGTERM', stop); process.on('SIGHUP', stop)
   const state = async (): Promise<Running> => ({ pid: process.pid, thread, transcript: spec.transcript, target, token: spec.token, version: workerVersion,
-    reload: { version: 1, home: spec.home, options },
+    reload: { version: 1, home: spec.home, options, overrideKeys: spec.overrideKeys },
     mode, selected, paused, pending: (await backups(target)).length, error })
   const step = async () => {
     if (Date.now() >= refreshAt) {
