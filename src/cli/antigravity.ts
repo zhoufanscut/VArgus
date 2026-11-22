@@ -3,6 +3,7 @@ import { staleLine } from '../render/freshness.ts'
 import { cachePath, defaultCacheDir, readCache, writeCache } from '../hosts/antigravity/cache.ts'
 import { collectAntigravityPayload, type AntigravityPayload } from '../hosts/antigravity/collect.ts'
 import { antigravityDisplay } from '../hosts/antigravity/display.ts'
+import { updateAntigravityRate } from '../hosts/antigravity/rate.ts'
 import { readTranscriptState, resolveTranscriptPath } from '../hosts/antigravity/transcript.ts'
 import { readCachedGit } from '../hosts/antigravity/vcs.ts'
 import { resolveLabels } from '../i18n/index.ts'
@@ -21,6 +22,7 @@ export type StatuslineRuntime = {
   noColor?: boolean
   cacheDir?: string
   now?: number
+  observedAt?: number
   fallbackCwd?: string
 }
 
@@ -91,6 +93,16 @@ async function collectLine(payload: AntigravityPayload, runtime: StatuslineRunti
       })
       if (options.session) values.session.startedAt = transcript.startedAt
       if (options.tokens || options.callCounts) values.session.counts = transcript.counts
+      if (options.tokens && transcript.firstLineHash) {
+        values.session.tokensPerSecond = await updateAntigravityRate(
+          transcriptPath,
+          transcript,
+          payload,
+          cacheDir,
+          now,
+          runtime.observedAt ?? now,
+        )
+      }
       mutatingToolsSeen = transcript.mutatingToolsSeen
     }
   }
@@ -146,7 +158,9 @@ export async function statusline(args: string[]): Promise<number> {
   }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return 0
 
-  const line = await renderAntigravityStatusLine(payload, { givenOptions: given })
+  const now = Date.now()
+  const observedAt = now - Math.round(process.uptime() * 1000)
+  const line = await renderAntigravityStatusLine(payload, { givenOptions: given, now, observedAt })
   if (line) process.stdout.write(`${line}\n`)
   return 0
 }

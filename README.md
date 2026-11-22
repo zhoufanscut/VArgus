@@ -123,7 +123,7 @@ Illustrative output from Claude Code.
 | `opus:high` / `carbon:high` / `sol:xhigh` | the model and effort level |
 | `5h:` `7d:` `1m:` | rate-limit windows with used percent and time until reset. `1m` is Kimi Code's membership monthly total. |
 | `ctx:` | how full the context window is |
-| `token:` | uncached input plus output tokens in the scope described by the host guide. Parentheses append the latest prompt's cache-hit share (up to one decimal place; only fully cached input shows `100%`) and, where the host exposes streaming decode timing, the latest eligible response's output speed (`t/s`, timed from first streamed output token to last over at least 0.5 s). Either value is omitted when unavailable. |
+| `token:` | uncached input plus output tokens in the scope described by the host guide. Parentheses append the latest prompt's cache-hit share (up to one decimal place; only fully cached input shows `100%`) and the latest eligible response's output speed (`t/s`, timed from first streamed output token to last over at least 0.5 s). Either value is omitted when unavailable. |
 | `session:` | age of the session or active conversation |
 | `🔧` `🤖` `⚡` | tool, agent and skill counts described in the host guides |
 | `repo:` `branch:` | Git repository and branch. On a detached HEAD, the label shows the checkout ref or short commit ID. During a rebase it shows the branch being rebased when available. Claude Code also supports SVN. |

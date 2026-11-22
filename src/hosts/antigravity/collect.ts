@@ -36,6 +36,7 @@ export type AntigravityPayload = {
   session_id?: string
   conversation_id?: string
   transcript_path?: string
+  agent_state?: string
   model?: AntigravityModel | string
   workspace?: {
     current_dir?: string

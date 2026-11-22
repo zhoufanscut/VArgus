@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { open, readFile, stat } from 'node:fs/promises'
 import { dirname, join, posix, resolve, sep, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,9 +14,15 @@ const MUTATING_TOOLS = new Set(['run_command', 'write_file', 'edit_file', 'multi
 const BUILTIN_OR_GLOBAL_SKILL = /\/\.gemini\/(?:antigravity(?:-cli)?\/builtin|config)(?:\/plugins\/[^/]+)?\/skills\/[^/]+\/SKILL\.md$/
 const WORKSPACE_DOT_SKILL = /\/(?:\.agents?|_agents?)(?:\/plugins\/[^/]+)?\/skills\/[^/]+\/SKILL\.md$/
 
+export type LastPlannerStep = {
+  stepCount: number
+  outputTokens: number
+}
+
 type TranscriptCache = {
-  version: 2
+  version: 3
   path: string
+  epoch: string
   size: number
   firstLineHash: string
   tailHash: string
@@ -25,12 +31,31 @@ type TranscriptCache = {
   seenSkillsInTurn: string[]
   mutatingToolsSeen: number
   counts: Counts
+  stepCount: number
+  plannerStepsSeen: number
+  compactionsSeen: number
+  pendingTools: number
+  awaitingModel: boolean
+  lastPlanner?: LastPlannerStep
+  firstToolAfterPlannerCreatedAt?: number
+  unboundedTrailingStep: boolean
 }
 
 export type TranscriptState = {
   startedAt: number | undefined
   counts: Counts
   mutatingToolsSeen: number
+  epoch: string
+  firstLineHash: string
+  committedBytes: number
+  mtimeMs: number
+  stepCount: number
+  plannerStepsSeen: number
+  compactionsSeen: number
+  awaitingModel: boolean
+  lastPlanner?: LastPlannerStep
+  firstToolAfterPlannerCreatedAt?: number
+  unboundedTrailingStep: boolean
 }
 
 export type TranscriptLookupOptions = {
@@ -290,27 +315,37 @@ type TranscriptStep = {
 }
 
 function applyStep(
-  step: TranscriptStep,
+  rawStep: unknown,
   state: {
     startedAt: number | undefined
     turnIndex: number
     seenSkills: Set<string>
     mutatingToolsSeen: number
     counts: Counts
+    stepCount: number
+    plannerStepsSeen: number
+    compactionsSeen: number
+    pendingTools: number
+    awaitingModel: boolean
+    lastPlanner: LastPlannerStep | undefined
+    firstToolAfterPlannerCreatedAt: number | undefined
+    unboundedTrailingStep: boolean
   },
   context: TranscriptReadContext,
   customSkillRoots: readonly string[],
 ): void {
+  if (!rawStep || typeof rawStep !== 'object' || Array.isArray(rawStep)) return
+  const step = rawStep as TranscriptStep
+  state.stepCount += 1
+  let createdMs: number | undefined
   if (typeof step.created_at === 'string') {
-    const createdMs = Date.parse(step.created_at)
-    if (!Number.isNaN(createdMs) && (state.startedAt === undefined || createdMs < state.startedAt)) {
-      state.startedAt = createdMs
+    const parsed = Date.parse(step.created_at)
+    if (!Number.isNaN(parsed)) {
+      createdMs = parsed
+      if (state.startedAt === undefined || parsed < state.startedAt) {
+        state.startedAt = parsed
+      }
     }
-  }
-
-  if (step.type === 'USER_INPUT') {
-    state.turnIndex += 1
-    state.seenSkills.clear()
   }
 
   // Uncached input + output tokens across model steps (`PLANNER_RESPONSE` and
@@ -321,33 +356,68 @@ function applyStep(
     state.counts.tokens += inputTokens + outputTokens
   }
 
-  if (!Array.isArray(step.tool_calls)) return
-  for (const call of step.tool_calls) {
-    if (!call || typeof call !== 'object') continue
-    const name = typeof call.name === 'string' ? call.name : ''
-    if (!name) continue
-    state.counts.tools += 1
-    if (MUTATING_TOOLS.has(name)) state.mutatingToolsSeen += 1
+  let validToolCalls = 0
+  if (Array.isArray(step.tool_calls)) {
+    for (const call of step.tool_calls) {
+      if (!call || typeof call !== 'object') continue
+      const name = typeof call.name === 'string' ? call.name.trim() : ''
+      if (!name) continue
+      validToolCalls += 1
+      state.counts.tools += 1
+      if (MUTATING_TOOLS.has(name)) state.mutatingToolsSeen += 1
 
-    const args = call.args && typeof call.args === 'object' ? call.args : undefined
-    if (name === 'invoke_subagent') {
-      state.counts.agents += 1
-    } else if (name === 'swarm' && unwrapArg(args?.action) === 'add') {
-      const tasks = unwrapArg(args?.tasks)
-      const copies = unwrapArg(args?.n)
-      if (Array.isArray(tasks) && tasks.length > 0) state.counts.agents += tasks.length
-      else if (typeof copies === 'number' && Number.isFinite(copies) && copies > 1) state.counts.agents += Math.floor(copies)
-      else state.counts.agents += 1
-    } else if (name === 'read_file') {
-      const rawPath = unwrapArg(args?.Path)
-      if (typeof rawPath === 'string' && rawPath.trim()) {
-        const resolved = resolveUserPath(rawPath.trim(), context.cwd, context.home)
-        if (resolved && isSkillPath(resolved, customSkillRoots, context.appDataDir) && !state.seenSkills.has(resolved)) {
-          state.seenSkills.add(resolved)
-          state.counts.skills += 1
+      const args = call.args && typeof call.args === 'object' ? call.args : undefined
+      if (name === 'invoke_subagent') {
+        state.counts.agents += 1
+      } else if (name === 'swarm' && unwrapArg(args?.action) === 'add') {
+        const tasks = unwrapArg(args?.tasks)
+        const copies = unwrapArg(args?.n)
+        if (Array.isArray(tasks) && tasks.length > 0) state.counts.agents += tasks.length
+        else if (typeof copies === 'number' && Number.isFinite(copies) && copies > 1) state.counts.agents += Math.floor(copies)
+        else state.counts.agents += 1
+      } else if (name === 'read_file') {
+        const rawPath = unwrapArg(args?.Path)
+        if (typeof rawPath === 'string' && rawPath.trim()) {
+          const resolved = resolveUserPath(rawPath.trim(), context.cwd, context.home)
+          if (resolved && isSkillPath(resolved, customSkillRoots, context.appDataDir) && !state.seenSkills.has(resolved)) {
+            state.seenSkills.add(resolved)
+            state.counts.skills += 1
+          }
         }
       }
     }
+  }
+
+  if (step.type === 'USER_INPUT') {
+    state.turnIndex += 1
+    state.seenSkills.clear()
+    state.pendingTools = 0
+    state.awaitingModel = true
+    state.firstToolAfterPlannerCreatedAt = undefined
+    if (state.lastPlanner) state.unboundedTrailingStep = true
+  } else if (step.type === 'PLANNER_RESPONSE') {
+    state.plannerStepsSeen += 1
+    state.lastPlanner = { stepCount: state.stepCount, outputTokens }
+    state.pendingTools = validToolCalls
+    state.awaitingModel = false
+    state.firstToolAfterPlannerCreatedAt = undefined
+    state.unboundedTrailingStep = false
+  } else if (step.type === 'CHECKPOINT') {
+    state.compactionsSeen += 1
+    state.pendingTools = 0
+    state.awaitingModel = true
+    state.firstToolAfterPlannerCreatedAt = undefined
+    if (state.lastPlanner) state.unboundedTrailingStep = true
+  } else if (step.type === 'SYSTEM_MESSAGE') {
+    if (state.pendingTools === 0) state.awaitingModel = true
+    if (state.lastPlanner) state.unboundedTrailingStep = true
+  } else if (typeof step.type === 'string' && step.type !== '' && state.pendingTools > 0) {
+    if (createdMs === undefined) state.unboundedTrailingStep = true
+    else if (state.firstToolAfterPlannerCreatedAt === undefined) state.firstToolAfterPlannerCreatedAt = createdMs
+    state.pendingTools -= 1
+    if (state.pendingTools === 0) state.awaitingModel = true
+  } else if (state.lastPlanner) {
+    state.unboundedTrailingStep = true
   }
 }
 
@@ -367,7 +437,20 @@ export async function readTranscriptState(
   cacheDir: string,
   context: TranscriptReadContext = {},
 ): Promise<TranscriptState> {
-  const empty = (): TranscriptState => ({ startedAt: undefined, counts: initialCounts(), mutatingToolsSeen: 0 })
+  const empty = (): TranscriptState => ({
+    startedAt: undefined,
+    counts: initialCounts(),
+    mutatingToolsSeen: 0,
+    epoch: '',
+    firstLineHash: '',
+    committedBytes: 0,
+    mtimeMs: 0,
+    stepCount: 0,
+    plannerStepsSeen: 0,
+    compactionsSeen: 0,
+    awaitingModel: false,
+    unboundedTrailingStep: false,
+  })
   let handle
   try {
     handle = await open(transcriptPath, 'r')
@@ -394,11 +477,19 @@ export async function readTranscriptState(
     const cached = await readCache<TranscriptCache>(file)
     let canResume = Boolean(
       cached
-      && cached.version === 2
+      && cached.version === 3
       && cached.path === transcriptPath
+      && typeof cached.epoch === 'string'
+      && cached.epoch !== ''
       && cached.firstLineHash === firstLineHash
       && cached.size >= 0
-      && cached.size <= info.size,
+      && cached.size <= info.size
+      && typeof cached.stepCount === 'number'
+      && typeof cached.plannerStepsSeen === 'number'
+      && typeof cached.compactionsSeen === 'number'
+      && typeof cached.pendingTools === 'number'
+      && typeof cached.awaitingModel === 'boolean'
+      && typeof cached.unboundedTrailingStep === 'boolean',
     )
     if (canResume && cached && cached.size > 0) {
       const actualTail = await hashWindowAt(handle, cached.size)
@@ -410,9 +501,21 @@ export async function readTranscriptState(
         startedAt: cached.startedAt,
         counts: initialCounts(cached.counts),
         mutatingToolsSeen: cached.mutatingToolsSeen,
+        epoch: cached.epoch,
+        firstLineHash,
+        committedBytes: cached.size,
+        mtimeMs: info.mtimeMs,
+        stepCount: cached.stepCount,
+        plannerStepsSeen: cached.plannerStepsSeen,
+        compactionsSeen: cached.compactionsSeen,
+        awaitingModel: cached.awaitingModel,
+        lastPlanner: cached.lastPlanner,
+        firstToolAfterPlannerCreatedAt: cached.firstToolAfterPlannerCreatedAt,
+        unboundedTrailingStep: cached.unboundedTrailingStep,
       }
     }
 
+    const epoch = canResume && cached ? cached.epoch : randomBytes(8).toString('hex')
     const customSkillRoots = await collectDeclaredSkillRoots(context)
     const state = {
       startedAt: canResume && cached ? cached.startedAt : undefined,
@@ -420,6 +523,14 @@ export async function readTranscriptState(
       seenSkills: new Set<string>(canResume && cached ? cached.seenSkillsInTurn : []),
       mutatingToolsSeen: canResume && cached ? cached.mutatingToolsSeen : 0,
       counts: initialCounts(canResume ? cached?.counts : undefined),
+      stepCount: canResume && cached ? cached.stepCount : 0,
+      plannerStepsSeen: canResume && cached ? cached.plannerStepsSeen : 0,
+      compactionsSeen: canResume && cached ? cached.compactionsSeen : 0,
+      pendingTools: canResume && cached ? cached.pendingTools : 0,
+      awaitingModel: canResume && cached ? cached.awaitingModel : false,
+      lastPlanner: canResume && cached ? cached.lastPlanner : undefined,
+      firstToolAfterPlannerCreatedAt: canResume && cached ? cached.firstToolAfterPlannerCreatedAt : undefined,
+      unboundedTrailingStep: canResume && cached ? cached.unboundedTrailingStep : false,
     }
 
     let readOffset = canResume && cached ? cached.size : 0
@@ -446,7 +557,7 @@ export async function readTranscriptState(
         const text = lineBytes.toString('utf8').trim()
         if (!text) continue
         try {
-          applyStep(JSON.parse(text) as TranscriptStep, state, context, customSkillRoots)
+          applyStep(JSON.parse(text), state, context, customSkillRoots)
         } catch {
           // skip malformed line
         }
@@ -456,8 +567,9 @@ export async function readTranscriptState(
 
     const tailHash = await hashWindowAt(handle, committedOffset)
     const updated: TranscriptCache = {
-      version: 2,
+      version: 3,
       path: transcriptPath,
+      epoch,
       size: committedOffset,
       firstLineHash,
       tailHash,
@@ -466,6 +578,14 @@ export async function readTranscriptState(
       seenSkillsInTurn: [...state.seenSkills],
       mutatingToolsSeen: state.mutatingToolsSeen,
       counts: state.counts,
+      stepCount: state.stepCount,
+      plannerStepsSeen: state.plannerStepsSeen,
+      compactionsSeen: state.compactionsSeen,
+      pendingTools: state.pendingTools,
+      awaitingModel: state.awaitingModel,
+      lastPlanner: state.lastPlanner,
+      firstToolAfterPlannerCreatedAt: state.firstToolAfterPlannerCreatedAt,
+      unboundedTrailingStep: state.unboundedTrailingStep,
     }
     await writeCache(cacheDir, file, updated).catch(() => {})
 
@@ -473,6 +593,17 @@ export async function readTranscriptState(
       startedAt: state.startedAt,
       counts: state.counts,
       mutatingToolsSeen: state.mutatingToolsSeen,
+      epoch,
+      firstLineHash,
+      committedBytes: committedOffset,
+      mtimeMs: info.mtimeMs,
+      stepCount: state.stepCount,
+      plannerStepsSeen: state.plannerStepsSeen,
+      compactionsSeen: state.compactionsSeen,
+      awaitingModel: state.awaitingModel,
+      lastPlanner: state.lastPlanner,
+      firstToolAfterPlannerCreatedAt: state.firstToolAfterPlannerCreatedAt,
+      unboundedTrailingStep: state.unboundedTrailingStep,
     }
   } finally {
     await handle.close().catch(() => {})

@@ -10,9 +10,16 @@ import { renderAntigravityStatusLine } from '../../src/cli/antigravity.ts'
 import { collectAntigravityPayload, type AntigravityPayload } from '../../src/hosts/antigravity/collect.ts'
 import { cachePath } from '../../src/hosts/antigravity/cache.ts'
 import {
+  advanceAntigravityRate,
+  baseModelKey,
+  payloadFingerprint,
+  updateAntigravityRate,
+} from '../../src/hosts/antigravity/rate.ts'
+import {
   readTranscriptState,
   resolveContainedTranscriptCandidate,
   resolveTranscriptPath,
+  type TranscriptState,
 } from '../../src/hosts/antigravity/transcript.ts'
 import { POLL_MS, readCachedGit } from '../../src/hosts/antigravity/vcs.ts'
 import { en } from '../../src/i18n/en.ts'
@@ -632,6 +639,715 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
     const badFlag = await runStatusline(['--bogus', '1'], '{}')
     assert.equal(badFlag.code, 1)
     assert.match(badFlag.stderr, /Unknown VArgus option: --bogus/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Antigravity payloadFingerprint ignores quota reset_in_seconds countdowns and baseModelKey strips only effort', () => {
+  const base: AntigravityPayload = {
+    agent_state: 'working',
+    model: { id: 'Gemini 4 Neon (Medium)', display_name: 'Gemini 4 Neon (Medium)', effort: 'medium' },
+    quota: {
+      'gemini-5h': { remaining_fraction: 0.78, reset_time: '2026-11-22T05:19:09Z', reset_in_seconds: 7378 },
+      'gemini-weekly': { remaining_fraction: 0.94, reset_time: '2026-11-29T00:19:09Z', reset_in_seconds: 594178 },
+    },
+    terminal_width: 120,
+  }
+  const ticked: AntigravityPayload = {
+    ...base,
+    quota: {
+      'gemini-5h': { remaining_fraction: 0.78, reset_time: '2026-11-22T05:19:09Z', reset_in_seconds: 7370 },
+      'gemini-weekly': { remaining_fraction: 0.94, reset_time: '2026-11-29T00:19:09Z', reset_in_seconds: 594170 },
+    },
+  }
+  assert.equal(payloadFingerprint(base), payloadFingerprint(ticked))
+
+  const quotaMoved: AntigravityPayload = {
+    ...base,
+    quota: {
+      ...base.quota,
+      'gemini-5h': { remaining_fraction: 0.77, reset_time: '2026-11-22T05:19:09Z', reset_in_seconds: 7370 },
+    },
+  }
+  assert.notEqual(payloadFingerprint(base), payloadFingerprint(quotaMoved))
+  assert.notEqual(payloadFingerprint(base), payloadFingerprint({ ...base, terminal_width: 140 }))
+
+  assert.equal(baseModelKey({ id: 'Gemini 4 Neon (Medium)', display_name: 'Gemini 4 Neon (Medium)' }), 'gemini-4-neon')
+  assert.equal(baseModelKey({ id: 'gemini-4-neon-xhigh', display_name: 'Gemini 4 Neon (XHigh)' }), 'gemini-4-neon')
+  assert.equal(baseModelKey('gemini-4-neon-low'), 'gemini-4-neon')
+  assert.equal(baseModelKey({ display_name: 'Claude Opus 5.5 (High)' }), 'claude-opus-5-5')
+  assert.equal(baseModelKey('claude-opus-5-5-high'), 'claude-opus-5-5')
+  assert.equal(baseModelKey('qwen-vl-max'), 'qwen-vl-max')
+  assert.equal(baseModelKey('alibaba/qwen-3-max'), 'alibaba/qwen-3-max')
+  assert.equal(baseModelKey({ display_name: 'Orchestrator (Carbon)' }), 'orchestrator-(carbon)')
+  assert.notEqual(baseModelKey({ display_name: 'Orchestrator (Carbon)' }), baseModelKey({ display_name: 'Orchestrator (Argon)' }))
+  assert.equal(baseModelKey(undefined), undefined)
+})
+
+test('Antigravity stream-start heuristic matches probed multi-step and slow-tool decode rates and preserves bursts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vargus-agy-rate-'))
+  try {
+    const cacheDir = join(root, 'cache')
+    const home = join(root, 'home')
+    const workspace = join(home, 'proj', 'demo')
+    await mkdir(workspace, { recursive: true })
+    const id = '984a33cd-3fb1-43f8-9ae5-40a3727efdcd'
+    const transcript = join(home, '.gemini', 'antigravity-cli', 'brain', id, '.system_generated', 'logs', 'transcript.jsonl')
+    await mkdir(join(transcript, '..'), { recursive: true })
+
+    const baseTime = Date.parse('2026-11-22T03:17:40.000Z')
+    const setTranscript = async (lines: Record<string, unknown>[], mtimeMs: number) => {
+      await writeFile(transcript, lines.map(l => JSON.stringify(l)).join('\n') + '\n')
+      const at = new Date(mtimeMs)
+      await utimes(transcript, at, at)
+    }
+    const makePayload = (overrides: Partial<AntigravityPayload> & { resetIn?: number } = {}): AntigravityPayload => {
+      const { resetIn = 7300, ...rest } = overrides
+      return {
+        cwd: workspace,
+        session_id: id,
+        conversation_id: id,
+        transcript_path: transcript,
+        agent_state: 'working',
+        model: { id: 'Gemini 4 Neon (Medium)', display_name: 'Gemini 4 Neon (Medium)', effort: 'medium' },
+        workspace: { current_dir: workspace, project_dir: workspace },
+        context_window: {
+          total_input_tokens: 21637,
+          total_output_tokens: 0,
+          context_window_size: 1048576,
+          used_percentage: 2,
+          current_usage: null,
+        },
+        quota: {
+          'gemini-5h': { remaining_fraction: 0.78, reset_time: '2026-11-22T05:19:09Z', reset_in_seconds: resetIn },
+        },
+        terminal_width: 200,
+        ...rest,
+      }
+    }
+    const runtimeFor = (now: number, extra: Record<string, unknown> = {}) => ({
+      home,
+      noColor: true,
+      cacheDir,
+      now,
+      givenOptions: { repo: false, branch: false, status: false, session: false, callCounts: false, rateLimits: false, ...extra },
+    })
+
+    // Probe 1 replay: Step 1 (fast read_file burst, 0 mid-step stream ticks) -> Step 2 (1917 tok over 15.56s -> 123t/s) -> Step 3 ("pong" 15ms burst preserves 123t/s).
+    const step0 = { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-22T03:17:43Z' }
+    await setTranscript([step0], baseTime + 3569)
+    await renderAntigravityStatusLine(makePayload({ resetIn: 7378 }), runtimeFor(baseTime + 3809))
+
+    // Startup quota refresh during pre-TTFT updates lastTransitionAt without latching.
+    await renderAntigravityStatusLine(makePayload({
+      quota: { 'gemini-5h': { remaining_fraction: 0.77, reset_time: '2026-11-22T05:19:09Z', reset_in_seconds: 7377 } },
+    }), runtimeFor(baseTime + 4411))
+
+    // Step 1 (read_file) completes in one chunk alongside GENERIC tool output: no rate yet.
+    const step1 = {
+      step_index: 1,
+      type: 'PLANNER_RESPONSE',
+      created_at: '2026-11-22T03:17:43Z',
+      model: 'gemini-4-neon-medium',
+      input_tokens: 15468,
+      cache_read_tokens: 0,
+      output_tokens: 116,
+      tool_calls: [{ name: 'read_file', args: { Path: '"probe.txt"' } }],
+    }
+    const step2 = { step_index: 2, type: 'GENERIC', created_at: '2026-11-22T03:17:49Z' }
+    await setTranscript([step0, step1, step2], baseTime + 9365)
+    const afterStep1 = await renderAntigravityStatusLine(makePayload({ resetIn: 7372 }), runtimeFor(baseTime + 9380))
+    assert.match(afterStep1, /token:15\.6k$/)
+    assert.doesNotMatch(afterStep1, /t\/s/)
+
+    // Context window updates 300ms later (fpChanged=true), then one trailing 300ms no-op tick (dt=301ms <= 450ms -> skipped).
+    const cwAfterStep1 = {
+      total_input_tokens: 21637,
+      total_output_tokens: 116,
+      context_window_size: 1048576,
+      used_percentage: 2,
+      current_usage: { input_tokens: 15468, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 116 },
+    }
+    await renderAntigravityStatusLine(makePayload({ context_window: cwAfterStep1, resetIn: 7372 }), runtimeFor(baseTime + 9677))
+    await renderAntigravityStatusLine(makePayload({ context_window: cwAfterStep1, resetIn: 7371 }), runtimeFor(baseTime + 9978))
+
+    // First SSE chunk arrives after 4.38s pre-TTFT silence -> latches streamStartMs at baseTime + 14356.
+    await renderAntigravityStatusLine(makePayload({ context_window: cwAfterStep1, resetIn: 7367 }), runtimeFor(baseTime + 14356))
+    // Mid-stream terminal resize does not reset an already-latched streamStartMs.
+    await renderAntigravityStatusLine(makePayload({ context_window: cwAfterStep1, resetIn: 7360, terminal_width: 180 }), runtimeFor(baseTime + 21000))
+
+    // Step 2 completes at mtimeMs = baseTime + 29913 (15,557 ms decode, 1917 tokens -> 123t/s).
+    const step3 = {
+      step_index: 3,
+      type: 'PLANNER_RESPONSE',
+      created_at: '2026-11-22T03:17:49Z',
+      model: 'gemini-4-neon-medium',
+      input_tokens: 2281,
+      cache_read_tokens: 13411,
+      output_tokens: 1917,
+    }
+    await setTranscript([step0, step1, step2, step3], baseTime + 29913)
+    const cwAfterStep2 = {
+      total_input_tokens: 21811,
+      total_output_tokens: 2033,
+      context_window_size: 1048576,
+      used_percentage: 2,
+      current_usage: { input_tokens: 2281, cache_read_input_tokens: 13411, cache_creation_input_tokens: 0, output_tokens: 1917 },
+    }
+    const afterStep2 = await renderAntigravityStatusLine(
+      makePayload({ agent_state: 'idle', context_window: cwAfterStep2, resetIn: 7351 }),
+      runtimeFor(baseTime + 30012),
+    )
+    assert.match(afterStep2, /token:19\.8k\(85\.5%, 123t\/s\)$/)
+
+    // Step 3 ("pong"): 8.63s pre-TTFT silence, first chunk at +39986, flush at +40001 (15ms < 500ms -> preserves 123t/s).
+    const step4 = { step_index: 4, type: 'USER_INPUT', created_at: '2026-11-22T03:18:11Z' }
+    await setTranscript([step0, step1, step2, step3, step4], baseTime + 31209)
+    await renderAntigravityStatusLine(
+      makePayload({ agent_state: 'working', context_window: cwAfterStep2, resetIn: 7350 }),
+      runtimeFor(baseTime + 31355),
+    )
+    await renderAntigravityStatusLine(
+      makePayload({ agent_state: 'working', context_window: cwAfterStep2, resetIn: 7341 }),
+      runtimeFor(baseTime + 39986),
+    )
+    const step5 = {
+      step_index: 5,
+      type: 'PLANNER_RESPONSE',
+      created_at: '2026-11-22T03:18:11Z',
+      model: 'gemini-4-neon-medium',
+      input_tokens: 4045,
+      cache_read_tokens: 13643,
+      output_tokens: 13,
+    }
+    await setTranscript([step0, step1, step2, step3, step4, step5], baseTime + 40001)
+    const cwAfterStep3 = {
+      total_input_tokens: 23789,
+      total_output_tokens: 2046,
+      context_window_size: 1048576,
+      used_percentage: 2,
+      current_usage: { input_tokens: 4045, cache_read_input_tokens: 13643, cache_creation_input_tokens: 0, output_tokens: 13 },
+    }
+    const afterBurst = await renderAntigravityStatusLine(
+      makePayload({ agent_state: 'idle', context_window: cwAfterStep3, resetIn: 7341 }),
+      runtimeFor(baseTime + 40286),
+    )
+    assert.match(afterBurst, /token:23\.8k\(77\.1%, 123t\/s\)$/)
+
+    // Slow tool in flight (pendingTools > 0): no-op ticks during tool execution must NOT latch streamStartMs.
+    const step6 = { step_index: 6, type: 'USER_INPUT', created_at: '2026-11-22T03:18:20Z' }
+    const step7 = {
+      step_index: 7,
+      type: 'PLANNER_RESPONSE',
+      created_at: '2026-11-22T03:18:20Z',
+      input_tokens: 1000,
+      output_tokens: 142,
+      tool_calls: [{ name: 'run_command', args: { CommandLine: '"sleep 3"' } }],
+    }
+    await setTranscript([step0, step1, step2, step3, step4, step5, step6, step7], baseTime + 47268)
+    await renderAntigravityStatusLine(
+      makePayload({ agent_state: 'working', context_window: cwAfterStep3, resetIn: 7334 }),
+      runtimeFor(baseTime + 47293),
+    )
+    // Tool safety monitor & command ticks while tool is still running: ignored because awaitingModel === false.
+    await renderAntigravityStatusLine(
+      makePayload({ agent_state: 'working', context_window: cwAfterStep3, resetIn: 7332 }),
+      runtimeFor(baseTime + 49126),
+    )
+    const step8 = { step_index: 8, type: 'GENERIC', created_at: '2026-11-22T03:18:27Z' }
+    await setTranscript([step0, step1, step2, step3, step4, step5, step6, step7, step8], baseTime + 52420)
+    await renderAntigravityStatusLine(
+      makePayload({ agent_state: 'working', context_window: cwAfterStep3, resetIn: 7329 }),
+      runtimeFor(baseTime + 52443),
+    )
+    // Trailing 297ms flush after GENERIC skipped; first SSE chunk at +56229 latches; flush at +59700 -> 407 tok / 3.471s -> 117t/s.
+    await renderAntigravityStatusLine(
+      makePayload({ agent_state: 'working', context_window: cwAfterStep3, resetIn: 7328 }),
+      runtimeFor(baseTime + 52740),
+    )
+    await renderAntigravityStatusLine(
+      makePayload({ agent_state: 'working', context_window: cwAfterStep3, resetIn: 7325 }),
+      runtimeFor(baseTime + 56229),
+    )
+    const step9 = {
+      step_index: 9,
+      type: 'PLANNER_RESPONSE',
+      created_at: '2026-11-22T03:18:32Z',
+      input_tokens: 1200,
+      output_tokens: 407,
+    }
+    await setTranscript([step0, step1, step2, step3, step4, step5, step6, step7, step8, step9], baseTime + 59700)
+    const afterSlowTool = await renderAntigravityStatusLine(
+      makePayload({ agent_state: 'idle', context_window: cwAfterStep3, resetIn: 7321 }),
+      runtimeFor(baseTime + 59835),
+    )
+    assert.match(afterSlowTool, /\(77\.1%, 117t\/s\)$/)
+
+    // Effort change on the same model keeps the rate; model switch clears it.
+    const sameModelEffort = await renderAntigravityStatusLine(
+      makePayload({
+        agent_state: 'idle',
+        model: { id: 'Gemini 4 Neon (XHigh)', display_name: 'Gemini 4 Neon (XHigh)', effort: 'xhigh' },
+        context_window: cwAfterStep3,
+      }),
+      runtimeFor(baseTime + 61000),
+    )
+    assert.match(sameModelEffort, /117t\/s\)$/)
+
+    const switchedModel = await renderAntigravityStatusLine(
+      makePayload({
+        agent_state: 'idle',
+        model: { id: 'Claude Opus 5.5 (High)', display_name: 'Claude Opus 5.5 (High)', effort: 'high' },
+        context_window: cwAfterStep3,
+      }),
+      runtimeFor(baseTime + 62000),
+    )
+    assert.doesNotMatch(switchedModel, /t\/s/)
+    assert.match(switchedModel, /\(77\.1%\)$/)
+
+    // Cold-start / resumed conversation (separate cacheDir) omits t/s until a live reply streams.
+    const coldCacheDir = join(root, 'cold-cache')
+    const resumed = await renderAntigravityStatusLine(
+      makePayload({ agent_state: 'idle', context_window: cwAfterStep3 }),
+      { ...runtimeFor(baseTime + 63000), cacheDir: coldCacheDir },
+    )
+    assert.doesNotMatch(resumed, /t\/s/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Antigravity rate clears on compaction, rewind and zero output, fails closed on intervening/trailing steps, and recovers from clock/cache faults', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vargus-agy-rate-edge-'))
+  try {
+    const cacheDir = join(root, 'cache')
+    const trPath = join(root, 'transcript.jsonl')
+    const payload: AntigravityPayload = {
+      agent_state: 'working',
+      model: { id: 'Gemini 4 Neon (High)', display_name: 'Gemini 4 Neon (High)', effort: 'high' },
+    }
+    const baseState = (overrides: Partial<TranscriptState> = {}): TranscriptState => ({
+      startedAt: 1000,
+      counts: { tokens: 1000, tools: 0, agents: 0, skills: 0 },
+      mutatingToolsSeen: 0,
+      epoch: 'epoch-1',
+      firstLineHash: 'hash-1',
+      committedBytes: 100,
+      mtimeMs: 1000,
+      stepCount: 1,
+      plannerStepsSeen: 0,
+      compactionsSeen: 0,
+      awaitingModel: true,
+      unboundedTrailingStep: false,
+      ...overrides,
+    })
+
+    // Fast-TTFT back-to-back 300ms ticks: first (+300ms) skipped without moving lastTransitionAt; second (+600ms) latches.
+    let fastTtft = advanceAntigravityRate(undefined, { transcriptPath: trPath, transcript: baseState(), payload, now: 1000 })
+    fastTtft = advanceAntigravityRate(fastTtft, { transcriptPath: trPath, transcript: baseState(), payload, now: 1300 })
+    assert.equal(fastTtft.streamStartMs, undefined)
+    assert.equal(fastTtft.lastTransitionAt, 1000)
+    fastTtft = advanceAntigravityRate(fastTtft, { transcriptPath: trPath, transcript: baseState(), payload, now: 1600 })
+    assert.equal(fastTtft.streamStartMs, 1600)
+
+    // Seed a measured 100 t/s reading (500 tokens / 5000 ms).
+    let state = advanceAntigravityRate(undefined, { transcriptPath: trPath, transcript: baseState(), payload, now: 1000 })
+    state = advanceAntigravityRate(state, { transcriptPath: trPath, transcript: baseState(), payload, now: 2000 })
+    assert.equal(state.streamStartMs, 2000)
+    state = advanceAntigravityRate(state, {
+      transcriptPath: trPath,
+      transcript: baseState({
+        committedBytes: 300,
+        mtimeMs: 7000,
+        stepCount: 2,
+        plannerStepsSeen: 1,
+        awaitingModel: false,
+        lastPlanner: { stepCount: 2, outputTokens: 500 },
+      }),
+      payload: { ...payload, agent_state: 'idle' },
+      now: 7100,
+    })
+    assert.equal(state.tokensPerSecond, 100)
+
+    // Aborted turn (working -> idle or working -> error with no PLANNER_RESPONSE) discards streamStartMs and keeps 100 t/s.
+    for (const endState of ['idle', 'error'] as const) {
+      let aborted = advanceAntigravityRate(state, {
+        transcriptPath: trPath,
+        transcript: baseState({ committedBytes: 400, stepCount: 3, plannerStepsSeen: 1, awaitingModel: true }),
+        payload,
+        now: 8000,
+      })
+      aborted = advanceAntigravityRate(aborted, {
+        transcriptPath: trPath,
+        transcript: baseState({ committedBytes: 400, stepCount: 3, plannerStepsSeen: 1, awaitingModel: true }),
+        payload,
+        now: 9000,
+      })
+      assert.equal(aborted.streamStartMs, 9000)
+      aborted = advanceAntigravityRate(aborted, {
+        transcriptPath: trPath,
+        transcript: baseState({ committedBytes: 400, stepCount: 3, plannerStepsSeen: 1, awaitingModel: true }),
+        payload: { ...payload, agent_state: endState },
+        now: 10000,
+      })
+      assert.equal(aborted.streamStartMs, undefined)
+      assert.equal(aborted.tokensPerSecond, 100)
+    }
+
+    // A new transcript step arriving while awaitingModel clears any latched streamStartMs.
+    let trReset = advanceAntigravityRate(state, {
+      transcriptPath: trPath,
+      transcript: baseState({ committedBytes: 400, stepCount: 3, plannerStepsSeen: 1, awaitingModel: true }),
+      payload,
+      now: 8000,
+    })
+    trReset = advanceAntigravityRate(trReset, {
+      transcriptPath: trPath,
+      transcript: baseState({ committedBytes: 400, stepCount: 3, plannerStepsSeen: 1, awaitingModel: true }),
+      payload,
+      now: 9000,
+    })
+    assert.equal(trReset.streamStartMs, 9000)
+    trReset = advanceAntigravityRate(trReset, {
+      transcriptPath: trPath,
+      transcript: baseState({ committedBytes: 480, stepCount: 4, plannerStepsSeen: 1, awaitingModel: true }),
+      payload,
+      now: 9500,
+    })
+    assert.equal(trReset.streamStartMs, undefined)
+
+    // Missed intermediate refresh + slow tool in same read (mtimeMs - created_at > 2000 ms) preserves prior rate.
+    let slowCombined = advanceAntigravityRate(state, {
+      transcriptPath: trPath,
+      transcript: baseState({ committedBytes: 400, stepCount: 3, plannerStepsSeen: 1, awaitingModel: true }),
+      payload,
+      now: 8000,
+    })
+    slowCombined = advanceAntigravityRate(slowCombined, {
+      transcriptPath: trPath,
+      transcript: baseState({ committedBytes: 400, stepCount: 3, plannerStepsSeen: 1, awaitingModel: true }),
+      payload,
+      now: 9000,
+    })
+    slowCombined = advanceAntigravityRate(slowCombined, {
+      transcriptPath: trPath,
+      transcript: baseState({
+        committedBytes: 700,
+        mtimeMs: 16000,
+        stepCount: 5,
+        plannerStepsSeen: 2,
+        awaitingModel: true,
+        lastPlanner: { stepCount: 4, outputTokens: 200 },
+        firstToolAfterPlannerCreatedAt: 11000,
+      }),
+      payload,
+      now: 16050,
+    })
+    assert.equal(slowCombined.tokensPerSecond, 100)
+
+    // Compaction clears the rate.
+    const compacted = advanceAntigravityRate(state, {
+      transcriptPath: trPath,
+      transcript: baseState({ committedBytes: 400, stepCount: 3, plannerStepsSeen: 1, compactionsSeen: 1, awaitingModel: true }),
+      payload,
+      now: 8000,
+    })
+    assert.equal(compacted.tokensPerSecond, undefined)
+
+    // Mid-transcript `/rewind` (epoch rotation even with larger bytes) clears the rate.
+    const rewound = advanceAntigravityRate(state, {
+      transcriptPath: trPath,
+      transcript: baseState({ epoch: 'epoch-2', committedBytes: 900, stepCount: 5, plannerStepsSeen: 2, awaitingModel: false }),
+      payload: { ...payload, agent_state: 'idle' },
+      now: 8000,
+    })
+    assert.equal(rewound.tokensPerSecond, undefined)
+
+    // Usage-less / zero-output completed step (single and multi-step jump) clears the rate.
+    const zeroOut = advanceAntigravityRate(state, {
+      transcriptPath: trPath,
+      transcript: baseState({
+        committedBytes: 400,
+        mtimeMs: 9000,
+        stepCount: 3,
+        plannerStepsSeen: 2,
+        awaitingModel: false,
+        lastPlanner: { stepCount: 3, outputTokens: 0 },
+      }),
+      payload: { ...payload, agent_state: 'idle' },
+      now: 9050,
+    })
+    assert.equal(zeroOut.tokensPerSecond, undefined)
+
+    const multiZeroOut = advanceAntigravityRate(state, {
+      transcriptPath: trPath,
+      transcript: baseState({
+        committedBytes: 600,
+        mtimeMs: 9500,
+        stepCount: 5,
+        plannerStepsSeen: 3,
+        awaitingModel: false,
+        lastPlanner: { stepCount: 5, outputTokens: 0 },
+      }),
+      payload: { ...payload, agent_state: 'idle' },
+      now: 9600,
+    })
+    assert.equal(multiZeroOut.tokensPerSecond, undefined)
+
+    // Far-future mtimeMs (> now + 1000) falls back to observedAt instead of trusting skewed filesystem time.
+    let futureMtime = advanceAntigravityRate(undefined, { transcriptPath: trPath, transcript: baseState(), payload, now: 1000 })
+    futureMtime = advanceAntigravityRate(futureMtime, { transcriptPath: trPath, transcript: baseState(), payload, now: 2000 })
+    futureMtime = advanceAntigravityRate(futureMtime, {
+      transcriptPath: trPath,
+      transcript: baseState({
+        committedBytes: 300,
+        mtimeMs: 99_999_999,
+        stepCount: 2,
+        plannerStepsSeen: 1,
+        awaitingModel: false,
+        lastPlanner: { stepCount: 2, outputTokens: 200 },
+      }),
+      payload: { ...payload, agent_state: 'idle' },
+      now: 4200,
+      observedAt: 4000,
+    })
+    assert.equal(futureMtime.tokensPerSecond, 100)
+
+    // Backward wall-clock jump does not freeze stream-start latching.
+    let jumped = advanceAntigravityRate(state, {
+      transcriptPath: trPath,
+      transcript: baseState({ committedBytes: 400, stepCount: 3, plannerStepsSeen: 1, awaitingModel: true }),
+      payload,
+      now: 10000,
+    })
+    jumped = advanceAntigravityRate(jumped, {
+      transcriptPath: trPath,
+      transcript: baseState({ committedBytes: 400, stepCount: 3, plannerStepsSeen: 1, awaitingModel: true }),
+      payload,
+      now: 5000,
+    })
+    assert.equal(jumped.lastTransitionAt, 5000)
+    assert.equal(jumped.streamStartMs, undefined)
+    jumped = advanceAntigravityRate(jumped, {
+      transcriptPath: trPath,
+      transcript: baseState({ committedBytes: 400, stepCount: 3, plannerStepsSeen: 1, awaitingModel: true }),
+      payload,
+      now: 6000,
+    })
+    assert.equal(jumped.streamStartMs, 6000)
+
+    // observedAt compensates for Node startup latency when measuring against transcript mtimeMs.
+    let compensated = advanceAntigravityRate(undefined, {
+      transcriptPath: trPath,
+      transcript: baseState(),
+      payload,
+      now: 1170,
+      observedAt: 1000,
+    })
+    compensated = advanceAntigravityRate(compensated, {
+      transcriptPath: trPath,
+      transcript: baseState(),
+      payload,
+      now: 2170,
+      observedAt: 2000,
+    })
+    assert.equal(compensated.streamStartMs, 2000)
+    compensated = advanceAntigravityRate(compensated, {
+      transcriptPath: trPath,
+      transcript: baseState({
+        committedBytes: 300,
+        mtimeMs: 3000,
+        stepCount: 2,
+        plannerStepsSeen: 1,
+        awaitingModel: false,
+        lastPlanner: { stepCount: 2, outputTokens: 100 },
+      }),
+      payload: { ...payload, agent_state: 'idle' },
+      now: 3170,
+      observedAt: 3000,
+    })
+    assert.equal(compensated.tokensPerSecond, 100)
+
+    // Corrupted rate cache files (bad types or negative/non-positive counters/rates) recover cleanly without throwing.
+    const rateFile = cachePath(cacheDir, 'rate', trPath)
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(rateFile, JSON.stringify({ version: 1, lastTransitionAt: 'corrupt' }))
+    assert.equal(await updateAntigravityRate(trPath, baseState(), payload, cacheDir, 1000), undefined)
+    const matchingState = baseState({
+      committedBytes: 300,
+      mtimeMs: 7000,
+      stepCount: 2,
+      plannerStepsSeen: 1,
+      awaitingModel: false,
+      lastPlanner: { stepCount: 2, outputTokens: 500 },
+    })
+    await writeFile(rateFile, JSON.stringify({ ...state, tokensPerSecond: -50 }))
+    assert.equal(await updateAntigravityRate(trPath, matchingState, { ...payload, agent_state: 'idle' }, cacheDir, 7200), undefined)
+    await writeFile(rateFile, JSON.stringify({ ...state, streamStartMs: 0 }))
+    assert.equal(await updateAntigravityRate(trPath, matchingState, { ...payload, agent_state: 'idle' }, cacheDir, 7200), undefined)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Antigravity end-to-end transcript wiring fails closed on intervening/trailing steps, survives tokens toggle across rewind, and handles compaction, SYSTEM_MESSAGE and observedAt', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vargus-agy-rate-e2e-'))
+  try {
+    const home = join(root, 'home')
+    const workspace = join(home, 'proj', 'demo')
+    await mkdir(workspace, { recursive: true })
+    const baseTime = Date.parse('2026-11-22T04:00:00.000Z')
+
+    const makeHarness = async (id: string) => {
+      const cacheDir = join(root, `cache-${id}`)
+      const tr = join(home, '.gemini', 'antigravity-cli', 'brain', id, '.system_generated', 'logs', 'transcript.jsonl')
+      await mkdir(join(tr, '..'), { recursive: true })
+      const writeLines = async (lines: unknown[], mtimeMs: number) => {
+        await writeFile(tr, lines.map(l => JSON.stringify(l)).join('\n') + '\n')
+        const at = new Date(mtimeMs)
+        await utimes(tr, at, at)
+      }
+      const payload = (state = 'working'): AntigravityPayload => ({
+        cwd: workspace,
+        session_id: id,
+        conversation_id: id,
+        transcript_path: tr,
+        agent_state: state,
+        model: { id: 'Gemini 4 Neon (High)', display_name: 'Gemini 4 Neon (High)', effort: 'high' },
+        workspace: { current_dir: workspace, project_dir: workspace },
+        context_window: { total_input_tokens: 1000, total_output_tokens: 100, context_window_size: 1048576, used_percentage: 1 },
+        terminal_width: 200,
+      })
+      const run = (now: number, opts: Record<string, unknown> = {}, state = 'working', observedAt?: number) =>
+        renderAntigravityStatusLine(payload(state), {
+          home,
+          noColor: true,
+          cacheDir,
+          now,
+          observedAt,
+          givenOptions: { repo: false, branch: false, status: false, callCounts: false, rateLimits: false, ...opts },
+        })
+      return { tr, cacheDir, writeLines, run }
+    }
+
+    // 1. Real observedAt forwarding, mid-append non-object JSONL guard, SYSTEM_MESSAGE wakeup, CHECKPOINT compaction, and durable /rewind across tokens:false toggle.
+    const h1 = await makeHarness('conv-e2e-1')
+    const u0 = { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-22T04:00:00Z' }
+    await h1.writeLines([u0], baseTime + 100)
+    await h1.run(baseTime + 270, {}, 'working', baseTime + 100)
+    await h1.run(baseTime + 1170, {}, 'working', baseTime + 1000)
+    const p1 = { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-22T04:00:00Z', input_tokens: 500, output_tokens: 100 }
+    // Appending non-object JSONL lines right before p1 must not shift stepCount or break contiguity.
+    await h1.writeLines([u0, null, 42, p1], baseTime + 2000)
+    // observedAt=1000 to mtimeMs=2000 -> 1000ms -> 100t/s (without observedAt forwarding it would be 100/830ms = 120t/s).
+    const r1 = await h1.run(baseTime + 2170, {}, 'idle', baseTime + 2000)
+    assert.match(r1, /token:600\(100t\/s\)/)
+
+    // SYSTEM_MESSAGE waking an idle conversation sets awaitingModel so the next streamed reply is timed.
+    const sysMsg = { step_index: 2, type: 'SYSTEM_MESSAGE', created_at: '2026-11-22T04:00:05Z' }
+    await h1.writeLines([u0, null, 42, p1, sysMsg], baseTime + 5000)
+    await h1.run(baseTime + 5050, {}, 'working')
+    await h1.run(baseTime + 6000, {}, 'working')
+    const p2 = { step_index: 3, type: 'PLANNER_RESPONSE', created_at: '2026-11-22T04:00:05Z', input_tokens: 500, output_tokens: 400 }
+    await h1.writeLines([u0, null, 42, p1, sysMsg, p2], baseTime + 8000)
+    const rSys = await h1.run(baseTime + 8050, {}, 'idle')
+    assert.match(rSys, /\(200t\/s\)/)
+
+    // Durable `/rewind` across an intervening `tokens: false` refresh (same line 1, larger bytes, higher counts).
+    const rewoundLine = {
+      step_index: 1,
+      type: 'PLANNER_RESPONSE',
+      created_at: '2026-11-22T04:00:09Z',
+      input_tokens: 600,
+      output_tokens: 100,
+      padding: 'x'.repeat(512),
+    }
+    await h1.writeLines([u0, rewoundLine, sysMsg, p2], baseTime + 9000)
+    const hiddenTokens = await h1.run(baseTime + 9050, { tokens: false, session: true }, 'idle')
+    assert.doesNotMatch(hiddenTokens, /token:/)
+    const afterRewind = await h1.run(baseTime + 9500, { tokens: true, session: true }, 'idle')
+    assert.doesNotMatch(afterRewind, /t\/s/)
+
+    // Re-seed a rate, then verify real CHECKPOINT in transcript.jsonl clears it.
+    const u2 = { step_index: 4, type: 'USER_INPUT', created_at: '2026-11-22T04:00:10Z' }
+    await h1.writeLines([u0, rewoundLine, sysMsg, p2, u2], baseTime + 10000)
+    await h1.run(baseTime + 10050, {}, 'working')
+    await h1.run(baseTime + 11000, {}, 'working')
+    const p3 = { step_index: 5, type: 'PLANNER_RESPONSE', created_at: '2026-11-22T04:00:10Z', input_tokens: 300, output_tokens: 300 }
+    await h1.writeLines([u0, rewoundLine, sysMsg, p2, u2, p3], baseTime + 13000)
+    assert.match(await h1.run(baseTime + 13050, {}, 'idle'), /\(150t\/s\)/)
+    const cp = { step_index: 6, type: 'CHECKPOINT', created_at: '2026-11-22T04:00:14Z', input_tokens: 200, output_tokens: 100 }
+    await h1.writeLines([u0, rewoundLine, sysMsg, p2, u2, p3, cp], baseTime + 14000)
+    assert.doesNotMatch(await h1.run(baseTime + 14050, {}, 'idle'), /t\/s/)
+
+    // 2a. Positive witness: PLANNER_RESPONSE + fast dated GENERIC in one read (<= 2s) computes rate, and whitespace tool names are ignored.
+    const hFastTool = await makeHarness('conv-fast-tool')
+    await hFastTool.writeLines([u0], baseTime + 100)
+    await hFastTool.run(baseTime + 150, {}, 'working')
+    await hFastTool.run(baseTime + 1000, {}, 'working')
+    await hFastTool.writeLines([
+      u0,
+      { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-22T04:00:00Z', input_tokens: 200, output_tokens: 400, tool_calls: [{ name: 'read_file' }, { name: '   ' }] },
+      { step_index: 2, type: 'GENERIC', created_at: '2026-11-22T04:00:03Z' },
+    ], baseTime + 3050)
+    const fastToolOut = await hFastTool.run(baseTime + 3100, {}, 'working')
+    assert.match(fastToolOut, /\(195t\/s\)/)
+    const fastToolState = await readTranscriptState(hFastTool.tr, hFastTool.cacheDir)
+    assert.equal(fastToolState.counts.tools, 1)
+    assert.equal(fastToolState.awaitingModel, true)
+
+    // 2b. Trailing-step fail-closed checks: slow GENERIC, slow GENERIC + USER_INPUT, 0-tool PLANNER + USER_INPUT,
+    // dateless GENERIC, fast GENERIC + SYSTEM_MESSAGE, and 2-tool batch where the second GENERIC omits created_at.
+    for (const [name, trailing, mtimeDelta] of [
+      ['slow-generic', [
+        { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-22T04:00:00Z', input_tokens: 200, output_tokens: 200, tool_calls: [{ name: 'run_command' }] },
+        { step_index: 2, type: 'GENERIC', created_at: '2026-11-22T04:00:02Z' },
+      ], 7000],
+      ['slow-generic-plus-user', [
+        { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-22T04:00:00Z', input_tokens: 200, output_tokens: 200, tool_calls: [{ name: 'run_command' }] },
+        { step_index: 2, type: 'GENERIC', created_at: '2026-11-22T04:00:02Z' },
+        { step_index: 3, type: 'USER_INPUT', created_at: '2026-11-22T04:00:07Z' },
+      ], 7000],
+      ['zero-tool-plus-user', [
+        { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-22T04:00:00Z', input_tokens: 200, output_tokens: 500 },
+        { step_index: 2, type: 'USER_INPUT', created_at: '2026-11-22T04:00:20Z' },
+      ], 20000],
+      ['dateless-generic', [
+        { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-22T04:00:00Z', input_tokens: 200, output_tokens: 200, tool_calls: [{ name: 'run_command' }] },
+        { step_index: 2, type: 'GENERIC' },
+      ], 8000],
+      ['fast-generic-plus-system', [
+        { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-22T04:00:00Z', input_tokens: 200, output_tokens: 400, tool_calls: [{ name: 'read_file' }] },
+        { step_index: 2, type: 'GENERIC', created_at: '2026-11-22T04:00:02Z' },
+        { step_index: 3, type: 'SYSTEM_MESSAGE', created_at: '2026-11-22T04:00:03Z' },
+      ], 3050],
+      ['two-tools-second-dateless', [
+        { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-22T04:00:00Z', input_tokens: 200, output_tokens: 400, tool_calls: [{ name: 'read_file' }, { name: 'run_command' }] },
+        { step_index: 2, type: 'GENERIC', created_at: '2026-11-22T04:00:02Z' },
+        { step_index: 3, type: 'GENERIC' },
+      ], 3050],
+    ] as const) {
+      const h = await makeHarness(`conv-trail-${name}`)
+      await h.writeLines([u0], baseTime + 100)
+      await h.run(baseTime + 150, {}, 'working')
+      await h.run(baseTime + 1000, {}, 'working')
+      await h.writeLines([u0, ...trailing], baseTime + mtimeDelta)
+      const out = await h.run(baseTime + mtimeDelta + 50, {}, 'working')
+      assert.doesNotMatch(out, /t\/s/, `${name} must not emit a corrupted rate`)
+    }
+
+    // 3. Intervening USER_INPUT after an aborted turn must NOT pair Turn 1's latched streamStartMs with Turn 2's PLANNER_RESPONSE.
+    const hAbort = await makeHarness('conv-abort-gap')
+    await hAbort.writeLines([u0], baseTime + 100)
+    await hAbort.run(baseTime + 150, {}, 'working')
+    await hAbort.run(baseTime + 1000, {}, 'working') // Turn 1 streamStartMs latches at +1000
+    // Turn 1 aborted without idle tick; Turn 2 USER_INPUT + 100ms burst PLANNER_RESPONSE land together at +5000.
+    const uTurn2 = { step_index: 1, type: 'USER_INPUT', created_at: '2026-11-22T04:00:04Z' }
+    const pTurn2 = { step_index: 2, type: 'PLANNER_RESPONSE', created_at: '2026-11-22T04:00:04Z', input_tokens: 200, output_tokens: 25 }
+    await hAbort.writeLines([u0, uTurn2, pTurn2], baseTime + 5000)
+    const afterMissedAbort = await hAbort.run(baseTime + 5050, {}, 'idle')
+    assert.doesNotMatch(afterMissedAbort, /t\/s/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

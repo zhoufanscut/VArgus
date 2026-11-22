@@ -1,8 +1,8 @@
 import type { SessionValues } from '../../core/session.ts'
 import { displaySession, shortModelName } from '../../render/session.ts'
 
-const EFFORT_TAIL = /\s*\((?:low|medium|high|xhigh|max)\)\s*$/i
-const KNOWN_EFFORT_SLUG = /^(?:gemini|claude|gpt-oss)-[a-z0-9.-]+-(low|medium|high|xhigh|max)$/i
+export const EFFORT_TAIL = /\s*\((?:low|medium|high|xhigh|max)\)\s*$/i
+export const KNOWN_EFFORT_SLUG = /^(?:gemini|claude|gpt-oss)-[a-z0-9.-]+-(low|medium|high|xhigh|max)$/i
 const GEMINI_FAMILY = /^gemini[\s-]+(?:\d+(?:\.\d+)*[\s-]+)?([a-z][a-z0-9]*(?:[\s-][a-z0-9]+)*)$/
 
 // Antigravity sends display labels (`Gemini 4 Carbon (High)`, `Orchestrator (Carbon)`,

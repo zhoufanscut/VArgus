@@ -183,11 +183,20 @@ for session age, uncached input plus output tokens, and tool, subagent (`invoke_
 `swarm` `add`) and skill (`SKILL.md` reads) counts. Subagent
 conversations have separate transcripts and are not summed into the parent's `token:`.
 The cache-hit percentage in parentheses comes from the active conversation’s latest request in
-the status-line payload’s `context_window.current_usage`. Output speed (`t/s`)
-is omitted on Antigravity CLI because neither `statusLine` stdin nor
-`transcript.jsonl` exposes response durations or incremental streaming output
-token counts.
+the status-line payload’s `context_window.current_usage`. Output decode speed (`t/s`)
+is timed live from the first mid-stream `statusLine` refresh (while a model call is
+in flight and no payload field changed other than quota reset countdowns) to the
+`transcript.jsonl` completion flush when at least 0.5 s elapsed; shorter bursts
+and aborted/errored turns preserve the previous rate, while model switches,
+compaction, `/rewind` and zero-output replies clear it. Because `transcript.jsonl`
+records no response durations, `t/s` starts hidden on a freshly resumed
+conversation until the next streamed reply; on a new conversation's first turn
+the background title request can trigger an early refresh, and typing in the
+composer while waiting for the first token can pull that step's reading toward
+end-to-end speed.
 
-Live rendering checks used `agy` 1.5.8 on Linux on 2026-11-14. The macOS `agy` 1.5.9
-checks on 2026-11-16 covered setup access. See [DESIGN.md](../DESIGN.md#antigravity-cli-native-statusline)
-for platform and verification details.
+Live rendering checks used `agy` 1.5.8 on Linux on 2026-11-14 and `agy` 1.5.14 on
+Linux on 2026-11-22 (for live `t/s` rendering and burst preservation). The macOS
+`agy` 1.5.9 checks on 2026-11-16 covered setup access. See
+[DESIGN.md](../DESIGN.md#antigravity-cli-native-statusline) for platform and
+verification details.

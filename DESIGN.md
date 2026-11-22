@@ -73,8 +73,8 @@ can fit the result further, as OmO does at grapheme boundaries.
 
 The [token fragment](src/render/fragments/tokens.ts) keeps the session's token
 total and appends a faint parenthesized suffix with the latest request's
-cache-read share of prompt input and, where the host exposes streaming decode
-timing, its output speed (`t/s`), separated by `, ` when both are present.
+cache-read share of prompt input and its output speed (`t/s`), separated by `, `
+when both are present.
 Cache-hit share rounds to one decimal place with trailing zeros omitted, and a
 partial hit displays at most `99.9%` so `100%` means every input token was
 cached. Zero cache reads in the host's usage show `(0%)` (or `(0%, 48t/s)`).
@@ -475,14 +475,43 @@ The status-line payload supplies the cache reading in `context_window.current_us
 A saved Linux 1.5.8 payload reported 2,669 uncached input tokens, 8,113 cache
 reads and zero cache writes for the request. Its enclosing `total_input_tokens`
 was 15,295, so that field would give a different denominator. Output decode
-speed (`t/s`) is intentionally omitted on Antigravity CLI: a 2026-11-22 live
-Linux `agy` 1.5.14 probe logged 47 `statusLine` refreshes across a full reply
-and observed zero timing/duration keys (`cost` was `null`), `total_output_tokens`
-and `current_usage.output_tokens` remaining `0`/`null` through all 300 ms
-streaming refreshes before jumping atomically to `10,300` at step completion,
-and `transcript.jsonl` flushing atomically with only 1-second `created_at` and
-no `completed_at` or `duration_ms`. That rules out an accurate decode `t/s`
-reading without mixing in TTFT and 300 ms–1 s quantization error.
+speed (`t/s`) is inferred live in [rate.ts](src/hosts/antigravity/rate.ts) from
+`statusLine` refresh timing and `transcript.jsonl`: two 2026-11-22 live Linux
+`agy` 1.5.14 PTY probes (with `--settings` and `--log-file`) confirmed zero
+timing/duration keys in the payload (`cost` was `null`), `agent_state` staying
+`"working"` through both fast and 5 s tool runs, `transcript.jsonl` flushing
+`PLANNER_RESPONSE` immediately on model completion before tools execute (with
+only 1-second `created_at` and no duration field), and `statusLine` staying
+silent through 3.5–8.6 s of pre-TTFT wait before firing 23–24 ms after the first
+`streamGenerateContent` SSE chunk. While `agent_state` is `"working"` and
+transcript step counts show a model call in flight (not pending tool results),
+[rate.ts](src/hosts/antigravity/rate.ts) hashes payload fields excluding
+`quota.*.reset_in_seconds` countdowns, skips state/transcript transitions and
+any trailing 300 ms throttle refresh within 450 ms, latches the first remaining
+no-op refresh as stream start using the estimated invocation time
+(`Date.now() - Math.round(process.uptime() * 1000)` to remove ~160 ms of Node
+startup latency), and pairs `PLANNER_RESPONSE.output_tokens` with
+`transcript.jsonl`'s `mtimeMs` (requiring `lastPlanner.stepCount === prev.stepCount + 1`
+so an intervening prompt or aborted turn cannot reuse an earlier stream start,
+and failing closed on trailing steps unless every trailing step is a tool result
+with a valid `created_at` within 2 s of `mtimeMs`). A durable transcript replay
+`epoch` in the transcript cache invalidates the rate cache across mid-transcript
+`/rewind` rewrites even when `tokens` is temporarily disabled. Across the five probed
+steps this matched `--log-file` ground truth within 24 ms (`123t/s` vs `123t/s`,
+`117t/s` vs `116t/s`) and filtered three single-chunk bursts (`0`–`39 ms`) under
+the 500 ms floor; a live two-turn check running `./bin/vargus statusline` inside
+`agy` 1.5.14 rendered `token:17.7k(0%, 106t/s)` on a 2,244-token first-turn
+reply (where the new conversation's one-time background title request triggered
+an earlier no-op refresh ~4 s before the main stream's `132t/s` decode) and
+preserved `106t/s` across a 22-token follow-up burst (`token:20.1k(87%, 106t/s)`).
+Typing in the composer during pre-TTFT wait also triggers a no-op refresh (~25 ms
+later), pulling that step toward end-to-end speed; very fast TTFT (<450 ms) after
+a transition can skip one ~300 ms tick; and a future `agy` build that adds a
+periodic pre-TTFT status timer would degrade toward end-to-end speed. Like OmO
+Native, `t/s` is live-only (omitted on a cold-start resume until the next
+streamed reply); bursts and aborted/errored turns preserve the previous rate,
+while model switches (ignoring effort changes), compaction (`CHECKPOINT`),
+`/rewind` and zero-output steps clear it.
 [Google status-line payload](https://antigravity.google/docs/cli/statusline)
 
 [Git cache](src/hosts/antigravity/vcs.ts) is scoped to the working directory.
@@ -720,7 +749,7 @@ override, and reread a hand edit on `/reload`. The older loader supplied
 | Codex on tmux | Linux 0.167.0 engine and TUI probes with a localhost mock covered hook trust, footer restore and recorded usage. Linux 0.169.1 with tmux 3.5a covered side chats, aligned footer labels and abandoned row recovery on 2026-11-18. | Host layout and transcript formats are version-sensitive. No billed turns or macOS TUI checks in these probes. |
 | Codex on psmux | Native Windows Codex 0.167.0 with psmux 3.4.0 and Node 24.21.0 checked row and footer lifecycle with `--no-daemon` on 2026-11-10. Follow-up attached-client checks exercised window switching and a new window on 2026-11-13. | Shared-daemon mode and native draft and sibling navigation need their own live evidence. |
 | OmO | OmO 5.1.61 on Linux on 2026-11-14 covered widget lifecycle, model and quota selection, and assistant-edit accounting. A localhost provider supplied usage for the counting probe. | File-option reload was checked with the Senpi 2026.10.25-2 TUI. Live history compaction and account failover remain fixture or source-level coverage. |
-| Antigravity | Linux `agy` 1.5.8 on 2026-11-14 checked native rendering and transcript and quota readings. macOS `agy` 1.5.9 on 2026-11-16 checked the sandbox's setup and launcher access. | Live macOS rendering and Windows TUI rendering need their own checks. |
+| Antigravity | Linux `agy` 1.5.8 on 2026-11-14 checked native rendering and transcript and quota readings. macOS `agy` 1.5.9 on 2026-11-16 checked the sandbox's setup and launcher access. Linux `agy` 1.5.14 on 2026-11-22 probed `statusLine` refresh cadence and ran `./bin/vargus statusline` live for two turns to verify `t/s` rendering and burst preservation. | Live macOS rendering and Windows TUI rendering need their own checks. |
 
 Keep evidence with its host build, platform and scope when revising these
 contracts.
