@@ -6,11 +6,69 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-22
+
+### Added
+
+- Shared checkout configuration through an optional, gitignored `vargus.jsonc`
+  in the checkout root, with a commented `vargus.sample.jsonc` template.
+  All four hosts read checkout defaults while preserving explicit CLI flags,
+  `--config` files and OmO session overrides. Claude Code syncs shared values
+  into `/config`, saves picker edits back to `vargus.jsonc` while preserving
+  comments and concurrent edits, and keeps previous native fallbacks in its
+  plugin data directory. Codex rereads checkout defaults on `!vargus reload`
+  for options not set explicitly.
+- Latest prompt-cache hit rate appended in parentheses to `token:` across all
+  four hosts under the existing `tokens` setting, e.g. `token:69.5k(99.4%)`.
+  Shows up to one decimal place (omitting trailing `.0`), caps partial hits at
+  `99.9%` so `100%` means a fully cached prompt, shows `(0%)` for reported
+  zeros, and omits the rate when unavailable. Claude subagent replies and
+  observed OmO edit copies keep the previous rate; Codex clears the rate on
+  usage-less replies even when it repeats the prior usage snapshot.
+- Output decode speed (`t/s`) appended to the `token:` suffix on Claude Code,
+  Codex CLI and OmO Native under the existing `tokens` setting, e.g.
+  `token:69.5k(99.4%, 48t/s)` or `token:69.5k(48t/s)`. Divides output tokens
+  (including thinking/reasoning tokens) by the streamed output span from first
+  output token to last, excluding time-to-first-token and tool execution, over
+  at least 500 ms (and multiple chunks/events on Claude and OmO). Shows up to
+  one decimal place below `9.95` (`4.3t/s`), whole integers from `9.95` up
+  (`48t/s`), and omits values rounding to `0`. Omitted on Antigravity CLI,
+  where neither `statusLine` stdin nor `transcript.jsonl` exposes response
+  timing or incremental streaming output counts.
+- Default whole-row stale warning (`| ⚠ stale`) after a missed or failed
+  refresh (5 s grace period on live-checking hosts), keeping the last available
+  readings, dropping trailing fragments to fit narrow rows and clearing on
+  recovery. Claude's reader compares a companion `line.live` deadline
+  (`vargus install claude` upgrades older plain and age-check VArgus readers),
+  Codex publishes a pane-local deadline evaluated by tmux/psmux on redraw, OmO
+  checks last successful collection age on draw, and Antigravity can reuse a
+  same-conversation cached row after a collection failure on a later invocation.
+
+### Changed
+
+- `branch` now shows both attached and detached Git checkouts across hosts,
+  including detached tags/refs, short commit IDs and in-progress operations
+  such as rebase. Claude's SVN branch label omits the `@revision` suffix
+  (for example `branch:trunk`).
+- Codex uses the shared `callCounts` setting to control tool, agent and skill
+  counts together, and keeps displayed call counts frozen with the confirmed
+  row while a draft is held.
+- Shared defaults, `vargus.sample.jsonc` and Claude's `/config` picker use a
+  consistent option order with session display before rate limits and `theme`
+  last.
+- Documented why Codex `/btw` side chats can display Codex's own native footer
+  alongside the VArgus tmux row on Codex 0.170.0.
+
 ### Removed
 
 - The workflow run counter and its `workflowRuns` setting.
-- The `otherModelWeekly` setting, Claude’s per-model weekly readings (including
-  Sonnet and Opus), and Antigravity’s inactive-group weekly reading.
+- The `otherModelWeekly` setting, Claude's per-model weekly readings (including
+  Sonnet and Opus), and Antigravity's inactive-group weekly reading.
+- The `detachedHead` setting (detached Git labels are now governed by `branch`;
+  older `detachedHead` entries are ignored).
+- The Codex-only `codexAgentCounts` and `codexSkillCounts` settings (replaced
+  by `callCounts`).
+- Claude's `blankStopped` setting (replaced by the default `| ⚠ stale` warning).
 
 ## [0.7.0] - 2026-11-19
 
@@ -381,7 +439,8 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
-[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/zhoufanscut/VArgus/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/zhoufanscut/VArgus/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/zhoufanscut/VArgus/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zhoufanscut/VArgus/compare/v0.4.4...v0.5.0
