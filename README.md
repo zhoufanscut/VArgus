@@ -36,10 +36,6 @@ git clone https://github.com/zhoufanscut/VArgus "$HOME/.local/share/VArgus"
 ```
 
 On Windows, clone to a location such as `%USERPROFILE%\.local\share\VArgus`.
-Read the guide from the checkout or release tag you will run. Use `./bin/vargus --help`
-on Linux or macOS, or `.\bin\vargus.cmd --help` in PowerShell, to check that checkout's
-commands. For example, [v0.6.0](https://github.com/zhoufanscut/VArgus/blob/v0.6.0/README.md)
-uses `vargus omo install` and `vargus omo remove`.
 
 ### Shared configuration
 
@@ -52,12 +48,6 @@ The example explains each option and lists the available themes. Uncomment the
 settings you want and change their values. The file accepts ordinary JSON plus
 `//` and `/* … */` comments. VArgus starts with its built-in defaults and reads
 the file from its own checkout, wherever you start the host.
-
-`folderFoldThreshold` sets when to fold the working path (default 24 terminal
-columns). Set it to `16` to fold sooner. Longer paths show `.../` and the
-last two folder names in full, even if the result exceeds the threshold.
-For example, `~/work/company/services/payments/api` becomes `.../payments/api`.
-Use a positive whole number.
 
 - **Claude Code** shows shared values in the VArgus section of `/config`.
   Changing a picker option saves it to the shared file, creating the file on
@@ -91,10 +81,10 @@ forwarding file named `vargus.cmd` in a user PATH directory such as
 
 ```bat
 @echo off
-"H:\VArgus\bin\vargus.cmd" %*
+"%USERPROFILE%\.local\share\VArgus\bin\vargus.cmd" %*
 ```
 
-Replace the example path with your checkout's absolute path.
+Use your checkout's absolute path if it differs.
 Add the directory to your user PATH if needed, reopen your terminal, and check
 `vargus --help`. Use `vargus install --help` or `vargus remove --help` to see the
 supported hosts and options.
@@ -117,8 +107,6 @@ After removing the host integration, check these paths separately.
 
 ## What it shows
 
-Illustrative output from Claude Code.
-
 ```
 ~/proj/VArgus | opus:high | 5h:4%(4h37m) 7d:39%(5d6h) | ctx:20% | token:69.5k(99.4%, 48t/s) | session:24m | 🔧73 🤖2 ⚡1 | repo:VArgus | branch:main | ?4
 ```
@@ -129,24 +117,12 @@ Illustrative output from Claude Code.
 | `opus:high` / `carbon:high` / `sol:xhigh` | the model and effort level |
 | `5h:` `7d:` `1m:` | rate-limit windows with used percent and time until reset. `1m` is Kimi Code's membership monthly total. |
 | `ctx:` | how full the context window is |
-| `token:` | uncached input plus output tokens in the scope described by the host guide. Parentheses append the latest prompt's cache-hit share (up to one decimal place; only fully cached input shows `100%`) and the latest eligible response's output speed (`t/s`, timed from first streamed output token to last over at least 0.5 s). Either value is omitted when unavailable. |
+| `token:` | uncached input plus output tokens (scope varies by host), with the latest prompt's cache-hit share and output speed (`t/s`) in parentheses when available |
 | `session:` | age of the session or active conversation |
 | `🔧` `🤖` `⚡` | tool, agent and skill counts described in the host guides |
 | `repo:` `branch:` | Git repository and branch. On a detached HEAD, the label shows the checkout ref or short commit ID. During a rebase it shows the branch being rebased when available. Claude Code also supports SVN. |
 | `?4` | Working-tree marks include staged `+`, modified `!`, untracked `?`, conflicts `✗`, ahead `⇡`, and behind `⇣`. |
-
-Effort uses the selected theme's Calm colour at or above the model's default
-and Alert below it. When the default is unavailable, `high` is the cutoff.
-Effort values that cannot be compared use Alert. Codex reads the configured
-model catalog or its local cache, OmO uses the active model's metadata, and
-Claude Code and Antigravity use published defaults for recognised models.
-
-A row ending in `| ⌛stale` (`| !:stale` on WSL) shows the last readings VArgus
-could refresh. The marker clears on recovery. Each host’s guide explains when
-its display can detect a missed or failed update.
-
-Open the guide for your host to configure the line
-and see how that host counts tokens, tools, agents and skills.
+| `⌛stale` / `!:stale` | shown at the end of the row on a missed or failed refresh (WSL uses `!:stale`); keeps the last refreshed readings and clears on recovery |
 
 ## Development
 

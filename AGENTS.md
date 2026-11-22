@@ -10,8 +10,12 @@ Keep the gitignored `PLAN.md` local.
 - Support feature and design choices with a measurement or a quoted source.
   Say which alternatives the evidence rules out.
 - Enable new features and behavior by default across hosts. Make them opt-in
-  only when the user explicitly asks. Document host usage in its setup guide and
-  shared usage in README.md.
+  only when the user explicitly asks.
+- Keep docs in their lane: `README.md` stays a brief current overview (setup
+  entry points and the fragment table — no old-release examples, per-option
+  writeups, or thresholds/edge cases). Put shared option notes in
+  `vargus.sample.jsonc`, host details in `docs/setup-*.md`, contracts and edge
+  cases in `DESIGN.md`, and version/migration history in `CHANGELOG.md`.
 - Follow the [code boundaries](DESIGN.md#hosts-and-outputs). Keep shared code free of
   host and output imports. Host collectors stay independent of each other and of
   outputs. Wire hosts to outputs in the CLI or OmO registration. Keep Node code out
