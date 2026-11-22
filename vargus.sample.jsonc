@@ -4,6 +4,7 @@
 
   // Session display
   // "folder": true,         // Show the working folder.
+  // "folderFoldThreshold": 24,  // Fold longer paths to .../parent/folder (terminal columns).
   // "model": true,          // Show the model name.
   // "effort": true,         // Include reasoning effort beside the model.
   // "context": true,        // Show the percentage of the context window used.

@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { CodexCollector } from '../../src/hosts/codex/collect.ts'
 import { codexLine } from '../../src/cli/codex/line.ts'
@@ -41,7 +41,7 @@ test('cwd changes clear the previous Git readings before rendering or pausing', 
     assert.match(await line(500), /repo:first.*branch:first.*\?1/)
     collector.snapshot()!.core.cwd = second
     const changed = await line(500)
-    assert.ok(changed.includes(second))
+    assert.equal(changed.split(' | ')[0], '.../' + basename(dir) + '/second')
     assert.doesNotMatch(changed, /repo:|branch:|\?1/)
     assert.equal(line.paused(500), changed)
     await ready(collector, 'second')

@@ -1,6 +1,16 @@
 import type { Fragment } from '../../core/types.ts'
 import { cleanText, shortenHome } from '../text.ts'
+import { stringWidth } from '../width.ts'
 
-// 1. folder: the working folder, `~` for home (VantageHUD's pathLabel).
-export const folder: Fragment = ({ v, t }) =>
-  v.core.cwd ? t.bold(t.paint('text', cleanText(shortenHome(v.core.cwd, v.core.home)))) : null
+function folderLabel(cwd: string, home: string | undefined, threshold: number): string {
+  const label = cleanText(shortenHome(cwd, home))
+  if (stringWidth(label) <= threshold) return label
+
+  const windows = /^(?:[A-Za-z]:[\\/]|\\\\)/.test(cwd)
+  const path = windows ? cwd.replace(/^[A-Za-z]:/, '') : cwd
+  const parts = path.split(windows ? /[\\/]+/ : /\/+/).filter(Boolean)
+  return parts.length ? '.../' + cleanText(parts.slice(-2).join('/')) : label
+}
+
+export const folder: Fragment = ({ v, t, o }) =>
+  v.core.cwd ? t.bold(t.paint('text', folderLabel(v.core.cwd, v.core.home, o.folderFoldThreshold))) : null

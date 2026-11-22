@@ -132,6 +132,7 @@ An explicit JSON or JSONC file uses the [shared defaults](../src/options.ts) and
 ```json
 {
   "theme": "ember",
+  "folderFoldThreshold": 16,
   "session": false
 }
 ```

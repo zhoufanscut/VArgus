@@ -16,6 +16,13 @@
       "description": "Show the working folder (~/proj/x)",
       "default": true
     },
+    "folderFoldThreshold": {
+      "type": "number",
+      "title": "Folder fold threshold",
+      "description": "Fold longer working paths to .../parent/folder, keeping both names in full",
+      "min": 1,
+      "default": 24
+    },
     "model": {
       "type": "boolean",
       "title": "Model",

@@ -12,11 +12,11 @@ const manifest = JSON.parse(readFileSync(root + "/.claude-plugin/plugin.json", "
 const src = readFileSync(root + "/src/options.ts", "utf8")
 const open = "export const DEFAULTS = {\n"
 const block = src.slice(src.indexOf(open) + open.length, src.indexOf("}", src.indexOf(open)))
-const line = /^\s+(\w+): (true|false|\x27[^\x27]*\x27),$/
+const line = /^\s+(\w+): (true|false|\d+|\x27[^\x27]*\x27),$/
 const unread = block.split("\n").filter(l => l.trim() !== "" && !line.test(l))
 if (unread.length) fail("options.ts DEFAULTS lines this test cannot read: " + JSON.stringify(unread))
 const defaults = Object.fromEntries([...block.matchAll(new RegExp(line.source, "gm"))]
-  .map(([, k, v]) => [k, v === "true" ? true : v === "false" ? false : v.slice(1, -1)]))
+  .map(([, k, v]) => [k, v === "true" ? true : v === "false" ? false : /^\d+$/.test(v) ? Number(v) : v.slice(1, -1)]))
 const config = Object.fromEntries(Object.entries(manifest.userConfig).map(([k, f]) => [k, f.default]))
 const a = JSON.stringify(defaults), b = JSON.stringify(config)
 if (Object.keys(defaults).length < 10 || a !== b) fail("options.ts " + a + "\n      plugin.json " + b)

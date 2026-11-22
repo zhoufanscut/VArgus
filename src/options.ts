@@ -2,6 +2,7 @@
 // `userConfig` in plugin.json.
 export const DEFAULTS = {
   folder: true,
+  folderFoldThreshold: 24,
   model: true,
   effort: true,
   context: true,
@@ -74,13 +75,18 @@ export function editOption(text: string, key: keyof Options, value: Options[keyo
   return text.slice(0, afterOpen) + eol + line + (/^[ \t]*[\r\n]/.test(rest) ? '' : eol) + rest
 }
 
+export function validOption(key: keyof Options, value: unknown): value is Options[keyof Options] {
+  if (key === 'folderFoldThreshold') return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+  return typeof value === typeof DEFAULTS[key]
+}
+
 // The engine fills in defaults and drops values outside a picker's options;
 // this keeps the code's defaults for anything missing or of the wrong type.
 export function resolveOptions(given: Record<string, unknown>): Options {
   const out: Record<string, unknown> = { ...DEFAULTS }
   for (const key of Object.keys(DEFAULTS) as (keyof Options)[]) {
     const value = given[key]
-    if (typeof value === typeof DEFAULTS[key]) out[key] = value
+    if (validOption(key, value)) out[key] = value
   }
   return out as Options
 }

@@ -1,6 +1,6 @@
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
 import { resolvePalette } from '../../theme'
-import { DEFAULTS, editOption, parseOptions, resolveOptions, type Options } from '../../options'
+import { DEFAULTS, editOption, parseOptions, resolveOptions, validOption, type Options } from '../../options'
 import { DRIVE_PATH, shellPath } from './paths'
 import { pluginDataDir } from './write'
 
@@ -16,21 +16,20 @@ function optionKey($: EngineInterface, row: { key: string }): keyof Options | un
   if (Object.hasOwn(DEFAULTS, key)) return key as keyof Options
 }
 
-async function sharedValues($: EngineInterface): Promise<Record<string, boolean | string>> {
+async function sharedValues($: EngineInterface): Promise<Record<string, PickerValue>> {
   const path = filePath($)
   if (!await $.fs.exists(path)) return {}
   const file = parseOptions(await $.fs.read(path))
-  const values: Record<string, boolean | string> = {}
+  const values: Record<string, PickerValue> = {}
   for (const [key, value] of Object.entries(file)) {
     if (!Object.hasOwn(DEFAULTS, key)) continue
-    if (typeof value !== 'boolean' && typeof value !== 'string') continue
-    if (typeof value !== typeof DEFAULTS[key as keyof Options]) continue
+    if (!validOption(key as keyof Options, value)) continue
     values[key] = key === 'theme' ? resolvePalette(String(value)).name : value
   }
   return values
 }
 
-type PickerValue = boolean | string
+type PickerValue = Options[keyof Options]
 type MirroredChoice = { original: PickerValue; applied: PickerValue; rewrittenFrom?: PickerValue }
 type Mirrors = Record<string, MirroredChoice>
 
@@ -76,7 +75,7 @@ export async function claudeOptions($: EngineInterface, given: PluginOptions, sy
 
   for (const row of await $.config.list()) {
     const key = optionKey($, row)
-    if (!key || key === pending || (typeof row.value !== 'string' && typeof row.value !== 'boolean')) continue
+    if (!key || key === pending || !validOption(key, row.value)) continue
     if (row.isLocked) { effective[key] = row.value; continue }
     const id = prefix + key
     const mirror = mirrors[id]
@@ -97,7 +96,7 @@ export async function claudeOptions($: EngineInterface, given: PluginOptions, sy
       const guard = await $.state.set(saving, key)
       try {
         const result = await $.config.set({ key: row.key, value: wanted })
-        if ('deny' in result || (typeof result.value !== 'string' && typeof result.value !== 'boolean')) {
+        if ('deny' in result || !validOption(key, result.value)) {
           effective[key] = row.value
           continue
         }
@@ -138,7 +137,7 @@ async function runEdit($: EngineInterface, edit: StagedEdit, operation: 'prepare
   return true
 }
 
-async function prepareEdit($: EngineInterface, key: keyof Options, value: boolean | string): Promise<StagedEdit | undefined> {
+async function prepareEdit($: EngineInterface, key: keyof Options, value: PickerValue): Promise<StagedEdit | undefined> {
   const file = filePath($)
   const exists = await $.fs.exists(file)
   const path = exists ? (await $.fs.stat(file, { resolve: true })).realPath : file
@@ -168,7 +167,10 @@ export function registerConfig(on: On, given: PluginOptions, apply: (changes: Pa
   on('config.set', async ($, e, next) => {
     const key = optionKey($, e)
     if (!key || e.origin.kind === 'plugin' && e.origin.name === $.plugin.name) return next(e)
-    if (typeof e.value !== 'string' && typeof e.value !== 'boolean') return next(e)
+    if (!validOption(key, e.value)) {
+      if (key === 'folderFoldThreshold') return { deny: 'Folder fold threshold must be a positive whole number.' }
+      return next(e)
+    }
     const path = filePath($)
     // A downloaded marketplace cache is private to Claude. A checkout, or an
     // existing file deliberately placed beside the plugin, has a shared config.
@@ -182,7 +184,7 @@ export function registerConfig(on: On, given: PluginOptions, apply: (changes: Pa
     try {
       savingVersion = (await $.state.set(saving, key)).version
       const accepted = await next(e)
-      if ('deny' in accepted || (typeof accepted.value !== 'boolean' && typeof accepted.value !== 'string')) return accepted
+      if ('deny' in accepted || !validOption(key, accepted.value)) return accepted
       try {
         if (accepted.value !== e.value) {
           if (staged) await runEdit($, staged, 'cancel')

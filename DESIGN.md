@@ -71,6 +71,12 @@ The renderer drops whole trailing fragments to fit the terminal, keeping the
 first if it is the only one left. Width counts terminal columns. A host output
 can fit the result further, as OmO does at grapheme boundaries.
 
+The [folder fragment](src/render/fragments/folder.ts) measures the sanitized,
+home-shortened path before styling. Above `folderFoldThreshold` it shows `.../`
+and the last two components in full. The folded label can exceed the threshold.
+At 16 columns `~/projects/payments/api` folds. The 24-column default keeps
+that 23-column path intact.
+
 The [token fragment](src/render/fragments/tokens.ts) keeps the session's token
 total and appends a faint parenthesized suffix with the latest request's
 cache-read share of prompt input and its output speed (`t/s`), separated by `, `
@@ -115,7 +121,8 @@ files use the same comment-aware parser. Flags keep their argument order, and
 OmO's saved session overrides remain the top layer for that session.
 
 The Claude Code 2.1.323 `PluginOptions` declaration describes registration
-values as “defaults filled in.” Its `config.set` declaration says
+values as “defaults filled in.” Its `ConfigKind` includes `'number'` for
+settings such as the folder fold threshold. Its `config.set` declaration says
 “`next(e)` resolves to `{ value }` once written.” In the 2.1.323 TUI,
 overriding `config.list` changed the API result while the native panel still
 displayed the saved choice. The built-in `config` and `reload-plugins`
@@ -690,7 +697,8 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
 - `npm run test:local` type-checks the Node graph and exercises shared rendering,
   import boundaries, installers and local fixtures. The Codex replay fixtures
   check which counters belong to each thread. Display fixtures cover legacy
-  counter settings, the shared `callCounts` switch and counts held while typing.
+  counter settings, the shared `callCounts` switch, folded paths on a working
+  directory change and counts held while typing.
   The collector fixture distinguishes per-request cache reads from cumulative
   usage, an explicit miss and a context-only estimate.
   A separate Codex row test checks

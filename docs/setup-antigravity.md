@@ -121,7 +121,7 @@ the marker. If agy stops invoking the status command, the row cannot update.
 ## Configure
 
 Antigravity reads the checkout's `vargus.jsonc` on every status-line invocation.
-An edit takes effect on the next refresh. [Shared configuration](../README.md#shared-configuration)
+Set `"folderFoldThreshold": 16` to fold paths over 16 columns. An edit takes effect on the next refresh. [Shared configuration](../README.md#shared-configuration)
 
 To override shared options with `--config FILE` or `--theme NAME`,
 append the flags to your existing `statusLine.command`. With `vargus` on PATH,

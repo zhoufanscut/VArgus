@@ -53,6 +53,12 @@ settings you want and change their values. The file accepts ordinary JSON plus
 `//` and `/* … */` comments. VArgus starts with its built-in defaults and reads
 the file from its own checkout, wherever you start the host.
 
+`folderFoldThreshold` sets when to fold the working path (default 24 terminal
+columns). Set it to `16` to fold sooner. Longer paths show `.../` and the
+last two folder names in full, even if the result exceeds the threshold.
+For example, `~/work/company/services/payments/api` becomes `.../payments/api`.
+Use a positive whole number.
+
 - **Claude Code** shows shared values in the VArgus section of `/config`.
   Changing a picker option saves it to the shared file, creating the file on
   the first change in a clone. After editing the file by hand, run

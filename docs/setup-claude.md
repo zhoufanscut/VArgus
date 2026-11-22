@@ -147,6 +147,8 @@ shared value. Unspecified keys keep Claude's plugin settings and manifest defaul
 Managed settings keep their locked values. A downloaded marketplace install
 without a shared checkout or options file uses Claude's own plugin settings.
 
+Set **Folder fold threshold** to `16` in the VArgus options to fold paths over 16 columns.
+
 Rate-limit API reads stop when `rateLimits` is off. Git/svn polling stops when
 `repo`, `branch` and `status` are all off.
 

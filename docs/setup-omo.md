@@ -77,7 +77,7 @@ reinstall without `--config` in the same directory.
 /vargus off
 /vargus on
 /vargus status
-/vargus config {"theme":"graphite","folder":true,"rateLimits":true}
+/vargus config {"theme":"graphite","folder":true,"folderFoldThreshold":16,"rateLimits":true}
 ```
 
 VArgus saves your on/off choice and `/vargus config` overrides with the current

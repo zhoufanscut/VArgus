@@ -54,6 +54,32 @@ describe('render', () => {
   test('the stub-free fragments run: folder', () => {
     assert.equal(render(input(), [['folder', ORDER[0]![1]]]), '~/proj/x')
   })
+
+  test('folder folds after home shortening and preserves the last two names in full', () => {
+    function label(cwd: string, width = 24, home = '/home/u') {
+      const f = input(undefined, { folderFoldThreshold: width })
+      Object.assign(f.v.core, { cwd, home })
+      return render(f, [ORDER[0]!])
+    }
+    assert.equal(label('/home/u/abcdefghijklmnopqrst/x'), '~/abcdefghijklmnopqrst/x')
+    assert.equal(label('/home/u/work/company/platform/services/payments/api/'), '.../payments/api')
+    assert.equal(label('/home/u/projects/payments/api'), '~/projects/payments/api')
+    assert.equal(label('/home/u/projects/payments/api', 16), '.../payments/api')
+    assert.equal(label('/work/company/enterprise-payments/api-server'), '.../enterprise-payments/api-server')
+    assert.equal(label('/abcdefghijklmnop', 8), '.../abcdefghijklmnop')
+    assert.equal(label('C:\\', 1), 'C:\\')
+    assert.equal(label('/var/work/company/platform/services/billing/api'), '.../billing/api')
+    assert.equal(label('/work/company/services/payments/api-server'), '.../payments/api-server')
+    assert.equal(label('C:\\Users\\u\\company\\platform\\payments\\api', 16, 'C:\\Users\\u'), '.../payments/api')
+    assert.equal(label('\\\\server\\shared\\platform\\payments\\api', 16), '.../payments/api')
+    assert.equal(label('/a/long/directory/a\\b/api', 16), '.../a\\b/api')
+    assert.equal(label('/work/company/abcdefghijklmnop/api', 16), '.../abcdefghijklmnop/api')
+    assert.equal(label('/work/company/p/abcdefghijklmnop', 16), '.../p/abcdefghijklmnop')
+    assert.equal(label('/home/u/abcdefghijklmnop', 16), '.../u/abcdefghijklmnop')
+    assert.equal(label('/company/projects/界界界界界/api', 16), '.../界界界界界/api')
+    assert.equal(label('/home/u/界界界界界/api', 11), '.../界界界界界/api')
+    assert.equal(label('/company/projects/p/' + 'e\u0301'.repeat(20), 8), '.../p/' + 'e\u0301'.repeat(20))
+  })
 })
 
 describe('options and labels', () => {
@@ -63,6 +89,10 @@ describe('options and labels', () => {
       ...DEFAULTS, spendLimit: true, theme: 'ember',
     })
     assert.equal(DEFAULTS.spendLimit, false)
+    assert.equal(resolveOptions({ folderFoldThreshold: 16 }).folderFoldThreshold, 16)
+    for (const width of [0, -1, 16.5, Infinity, '16']) {
+      assert.equal(resolveOptions({ folderFoldThreshold: width }).folderFoldThreshold, 24)
+    }
     assert.equal(Object.hasOwn(resolveOptions({ workflowRuns: true }), 'workflowRuns'), false)
   })
 
