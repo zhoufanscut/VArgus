@@ -2,7 +2,7 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import type { FragmentInput, Values } from '../../src/core/types.ts'
-import { initialSession } from '../../src/core/session.ts'
+import { initialSession, outputTokensPerSecond } from '../../src/core/session.ts'
 import { displaySession, shortModelName } from '../../src/render/session.ts'
 import { initialVcs } from '../../src/core/vcs.ts'
 import { en } from '../../src/i18n/en.ts'
@@ -13,7 +13,7 @@ import { folder } from '../../src/render/fragments/folder.ts'
 import { effortColor, model } from '../../src/render/fragments/model.ts'
 import { session } from '../../src/render/fragments/session.ts'
 import { formatDuration } from '../../src/render/format.ts'
-import { formatTokenCount, tokens } from '../../src/render/fragments/tokens.ts'
+import { formatTokenCount, formatTokenRate, tokens } from '../../src/render/fragments/tokens.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 
 // The session area's fragments (DESIGN, "Fragments"), each rule as VantageHUD
@@ -134,6 +134,27 @@ describe('tokens', () => {
       assert.equal(tokens(input({ counts: total, cacheHitPercent: percent })), `token:103.2k(${shown}%)`)
     }
     assert.equal(tokens(input({ counts: total })), 'token:103.2k')
+  })
+
+  test('decode rate enforces a 500ms floor, formats decimals under 10 and joins with cache hit', () => {
+    assert.equal(outputTokensPerSecond(100, 499), undefined)
+    assert.equal(outputTokensPerSecond(0, 1000), undefined)
+    assert.equal(outputTokensPerSecond(Number.MAX_VALUE, 500), undefined)
+    assert.equal(outputTokensPerSecond(100, 500), 200)
+    for (const [rate, shown] of [
+      [NaN, null], [-1, null], [0, null], [0.04, null], [0.05, '0.1'],
+      [4, '4'], [4.25, '4.3'], [9.94, '9.9'], [9.95, '10'], [48.4, '48'], [124.6, '125'],
+    ] as const) {
+      assert.equal(formatTokenRate(rate), shown)
+    }
+    const total = counts({ tokens: 69_500 })
+    assert.equal(tokens(input({ counts: total, tokensPerSecond: 48.4 })), 'token:69.5k(48t/s)')
+    assert.equal(tokens(input({ counts: total, cacheHitPercent: 99.4, tokensPerSecond: 48.4 })), 'token:69.5k(99.4%, 48t/s)')
+    assert.equal(
+      tokens(input({ counts: total, cacheHitPercent: 99.4, tokensPerSecond: 48.4 }, {}, { color: true })),
+      t.paint('label', 'token:') + t.paint(gradLow, '69.5k') + t.paint('faint', '(99.4%, 48t/s)'),
+    )
+    assert.equal(tokens(input({ counts: total, cacheHitPercent: 99.4, tokensPerSecond: 0.04 })), 'token:69.5k(99.4%)')
   })
 })
 

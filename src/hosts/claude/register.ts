@@ -1,9 +1,9 @@
-import type { EngineInterface, Register, SessionStartInput, Timer } from 'claude-code'
+import type { EngineInterface, Register, SessionStartInput, Timer, TurnStepChunk, TurnStepResult } from 'claude-code'
 
 import { initialClaudeLimits, claudeQuotaReadings } from './quota'
 import { measuredLimits, startLimits, stopLimits } from './collect/limits'
 import {
-  compacted, initialSession, measured, sessionEnding, startSession, stepDone, stepStarting, toolCalled,
+  compacted, initialSession, measured, sessionEnding, setModel, startSession, stepDone, stepStarting, toolCalled,
 } from './collect/session'
 import { initialVcs, startVcs, stopVcs, toolCalledVcs } from './collect/vcs'
 import type { Theme, Values } from '../../core/types'
@@ -37,7 +37,7 @@ async function refresh($: EngineInterface): Promise<void> {
   // re-read each tick: a /model switch raises no event but the classic
   // PostModelSwitch, which doesn't run under a managed install (a failed read
   // keeps the last model, never costs the line)
-  values.session.model = await $.session.model().catch(() => values.session.model)
+  setModel($, values.session, await $.session.model().catch(() => values.session.model))
   const now = await $.clock.now()
   values.limits = options.rateLimits ? claudeQuotaReadings(quota, options, labels, now) : []
   const text = render({ v: values, display: claudeDisplay(values.session), o: options, l: labels, t: theme, now })
@@ -119,9 +119,52 @@ export const register: Register = (on, given) => {
   })
 
   on('turn.step', async function* ($, e, next) {
-    stepStarting(e, values.session)
-    const r = yield* next(e)
-    await stepDone($, e, r, values.session)
+    stepStarting($, e, values.session)
+    if (e.agentId !== undefined) {
+      const r = yield* next(e)
+      await stepDone($, e, r, values.session)
+      return r
+    }
+    const readClock = () => $.clock.now().catch(() => undefined)
+    const stream = next(e)
+    let firstClockChecked = false
+    let endClockChecked = false
+    let firstTokenAt: number | undefined
+    let endedAt: number | undefined
+    let outputChunks = 0
+    let finished = false
+    let r: TurnStepResult
+    try {
+      for (;;) {
+        const nextChunk = await stream.next()
+        if (nextChunk.done) {
+          finished = true
+          r = nextChunk.value
+          break
+        }
+        const chunk: TurnStepChunk = nextChunk.value
+        if (chunk.kind === 'thinking' || chunk.kind === 'text' || chunk.kind === 'tool' || chunk.kind === 'input') {
+          if (!firstClockChecked) {
+            firstClockChecked = true
+            firstTokenAt = await readClock()
+          }
+          outputChunks += 1
+        } else if (chunk.kind === 'stop' && firstTokenAt !== undefined && !endClockChecked) {
+          endClockChecked = true
+          endedAt = await readClock()
+        }
+        yield chunk
+      }
+    } finally {
+      if (!finished) await stream.return?.(undefined as never).catch(() => {})
+    }
+    if (firstTokenAt !== undefined && !endClockChecked) {
+      endClockChecked = true
+      endedAt = await readClock()
+    }
+    const timing = firstTokenAt !== undefined && endedAt !== undefined
+      ? { firstTokenAt, endedAt, outputChunks } : undefined
+    await stepDone($, e, r, values.session, timing)
     return r
   })
 

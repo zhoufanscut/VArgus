@@ -183,7 +183,10 @@ for session age, uncached input plus output tokens, and tool, subagent (`invoke_
 `swarm` `add`) and skill (`SKILL.md` reads) counts. Subagent
 conversations have separate transcripts and are not summed into the parent's `token:`.
 The cache-hit percentage in parentheses comes from the active conversation’s latest request in
-the status-line payload’s `context_window.current_usage`.
+the status-line payload’s `context_window.current_usage`. Output speed (`t/s`)
+is omitted on Antigravity CLI because neither `statusLine` stdin nor
+`transcript.jsonl` exposes response durations or incremental streaming output
+token counts.
 
 Live rendering checks used `agy` 1.5.8 on Linux on 2026-11-14. The macOS `agy` 1.5.9
 checks on 2026-11-16 covered setup access. See [DESIGN.md](../DESIGN.md#antigravity-cli-native-statusline)

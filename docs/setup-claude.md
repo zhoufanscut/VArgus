@@ -221,8 +221,13 @@ is experimental, so its response shape may change.
 
 Claude's token total includes the main conversation and subagents since the mod
 first loaded, or since the last `/clear` or in-session resume. Cache reads and
-writes are excluded. The cache-hit percentage in parentheses follows the latest main-conversation
-request. Claude Code counts missing provider cache counters as zero.
+writes are excluded. The cache-hit percentage and output decode speed (`t/s`)
+in parentheses follow the latest main-conversation request. Claude Code counts
+missing provider cache counters as zero. Output speed divides `output_tokens`
+by the streamed generation span (first thinking, text or tool chunk to stop,
+excluding server-side tool execution spans) when at least 0.5 s elapsed across
+multiple chunks; shorter steps keep the previous rate, and model switches,
+compaction, `/clear`, resume and usage-less responses clear it.
 Subagent replies contribute only to the token total. Tool, agent and
 skill counts come from main-loop tool starts. Separate teammates in their own
 panes are outside that collector.

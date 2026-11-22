@@ -4,6 +4,7 @@ import { omoDisplay } from './display.ts'
 import type { AccountLimits, NativeContext, SessionEntry } from './contracts.ts'
 import { OmoVcs } from './vcs.ts'
 import { OmoKimi, type ProviderAuth } from './kimi.ts'
+import { outputTokensPerSecond } from '../../core/session.ts'
 import { readCheckoutOptions, readOptionsFile } from '../../node/options.ts'
 import { mountOmo, type OmoUi } from '../../outputs/omo.ts'
 import { parseOptions, resolveOptions } from '../../options.ts'
@@ -11,6 +12,18 @@ import { resolveLabels } from '../../i18n/index.ts'
 import { makeTheme } from '../../theme/index.ts'
 import { REFRESH_GRACE_MS, staleLine } from '../../render/freshness.ts'
 import { render } from '../../render/index.ts'
+
+const STREAM_START_EVENTS = new Set([
+  'thinking_start', 'thinking_delta', 'text_start', 'text_delta', 'toolcall_start', 'toolcall_delta',
+])
+const STREAM_END_EVENTS = new Set([
+  'thinking_delta', 'thinking_end', 'text_delta', 'text_end', 'toolcall_delta', 'toolcall_end',
+])
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined
+}
 
 type Context = NativeContext & {
   readonly modelRegistry: { getProviderAuth(provider: string): Promise<ProviderAuth | undefined> }
@@ -27,6 +40,8 @@ export type OmoApi = {
   on(event: 'session_tree', handler: Handler): () => void
   on(event: 'session_before_tree', handler: Handler): () => void
   on(event: 'session_compact', handler: Handler): () => void
+  on(event: 'message_start', handler: Handler): () => void
+  on(event: 'message_update', handler: Handler): () => void
   on(event: 'message_end', handler: Handler): () => void
   on(event: 'tool_execution_end', handler: Handler): () => void
   on(event: 'model_select', handler: Handler): () => void
@@ -44,8 +59,22 @@ export function configuredVargus(file: string): (pi: OmoApi) => void {
   return pi => vargus(pi, { ...readCheckoutOptions(), ...readOptionsFile(file) })
 }
 
+function modelKey(model: Record<string, unknown> | undefined): string | undefined {
+  if (!model || typeof model.id !== 'string') return undefined
+  return `${typeof model.provider === 'string' ? model.provider : ''}\0${model.id}`
+}
+
 export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> = readCheckoutOptions()): void {
-  let active: { ctx: Context; stop(): void; update(forceGit?: boolean): void } | undefined
+  let active: {
+    ctx: Context
+    stop(): void
+    update(forceGit?: boolean): void
+    messageStart(event: unknown): void
+    messageUpdate(event: unknown): void
+    messageEnd(event: unknown): void
+    modelSelected(event: unknown, nextCtx: Context): void
+    clearRate(): void
+  } | undefined
   let treeTarget: string | undefined
 
   function stop(): void {
@@ -65,15 +94,69 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     const labels = resolveLabels('en')
     const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
     let disposed = false
+    let stream: { firstAt?: number; lastAt?: number; events: number } | undefined
+    let tokensPerSecond: number | undefined
+    let lastModelKey = modelKey(ctx.model)
     let values = collectOmo(ctx, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now(), options.spendLimit, labels)
     let checkedAt = Date.now()
     const instance = {
       ctx,
+      messageStart(event: unknown) {
+        if (disposed) return
+        const msg = asRecord(asRecord(event)?.message)
+        if (msg?.role === 'assistant') stream = { events: 0 }
+      },
+      messageUpdate(event: unknown) {
+        if (disposed || !stream) return
+        const body = asRecord(event)
+        const msg = asRecord(body?.message)
+        if (msg && msg.role !== 'assistant') return
+        const kind = asRecord(body?.assistantMessageEvent)?.type
+        if (typeof kind !== 'string') return
+        const isStart = STREAM_START_EVENTS.has(kind)
+        const isEnd = STREAM_END_EVENTS.has(kind)
+        if (!isStart && !isEnd) return
+        const at = performance.now()
+        if (isStart && stream.firstAt === undefined) stream.firstAt = at
+        if (isEnd) stream.lastAt = at
+        stream.events += 1
+      },
+      messageEnd(event: unknown) {
+        if (disposed) return
+        const msg = asRecord(asRecord(event)?.message)
+        if (msg?.role !== 'assistant') return
+        const finished = stream
+        stream = undefined
+        if (msg.stopReason === 'error' || msg.stopReason === 'aborted' || msg.stopReason === 'deferred') return
+        const out = asRecord(msg.usage)?.output
+        if (typeof out !== 'number' || !Number.isFinite(out) || out <= 0) {
+          tokensPerSecond = undefined
+          return
+        }
+        if (finished && finished.events >= 2 && finished.firstAt !== undefined && finished.lastAt !== undefined) {
+          const rate = outputTokensPerSecond(out, finished.lastAt - finished.firstAt)
+          if (rate !== undefined) tokensPerSecond = rate
+        }
+      },
+      modelSelected(event: unknown, nextCtx: Context) {
+        const data = asRecord(event)
+        const prev = asRecord(data?.previousModel)
+        const next = asRecord(data?.model)
+        const prevKey = modelKey(prev) ?? lastModelKey
+        const nextKey = modelKey(next) ?? modelKey(nextCtx.model)
+        if (prevKey !== undefined && nextKey !== prevKey) this.clearRate()
+        lastModelKey = nextKey
+      },
+      clearRate() {
+        stream = undefined
+        tokensPerSecond = undefined
+      },
       update(forceGit = false) {
         if (disposed) return
         const current = instance.ctx
         try {
           values = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now(), options.spendLimit, labels)
+          values.session.tokensPerSecond = tokensPerSecond
           checkedAt = Date.now()
         } catch {
           output.refresh()
@@ -140,6 +223,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
   pi.on('session_tree', (event, ctx) => {
     const target = treeTarget === undefined ? undefined : ctx.sessionManager.getEntry(treeTarget)
     treeTarget = undefined
+    let isAssistantEdit = false
     if (target && event !== null && typeof event === 'object'
       && 'newLeafId' in event && typeof event.newLeafId === 'string' && event.newLeafId !== target.id) {
       const edited = ctx.sessionManager.getEntry(event.newLeafId)
@@ -153,14 +237,37 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         && 'role' in originalMessage && originalMessage.role === 'assistant'
         && editedMessage !== null && typeof editedMessage === 'object'
         && 'role' in editedMessage && editedMessage.role === 'assistant') {
+        isAssistantEdit = true
         pi.appendEntry(OMO_EDIT_ENTRY, { entryId: edited.id })
       }
     }
+    if (!isAssistantEdit) active?.clearRate()
     update(event, ctx)
   })
-  pi.on('session_compact', update)
-  pi.on('message_end', update)
-  pi.on('model_select', update)
+  pi.on('session_compact', (event, ctx) => {
+    active?.clearRate()
+    update(event, ctx)
+  })
+  pi.on('message_start', (event, ctx) => {
+    if (!active) return
+    active.ctx = ctx
+    active.messageStart(event)
+  })
+  pi.on('message_update', (event, ctx) => {
+    if (!active) return
+    active.ctx = ctx
+    active.messageUpdate(event)
+  })
+  pi.on('message_end', (event, ctx) => {
+    if (!active) return
+    active.ctx = ctx
+    active.messageEnd(event)
+    active.update()
+  })
+  pi.on('model_select', (event, ctx) => {
+    active?.modelSelected(event, ctx)
+    update(event, ctx)
+  })
   pi.on('thinking_level_select', update)
   pi.on('tool_execution_end', (_event, ctx) => {
     if (!active) return

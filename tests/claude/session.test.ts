@@ -1,5 +1,5 @@
 import { describe, expect, mock, test, type Engine, type MockClock } from 'claude-code/testing'
-import type { On, TurnStepInput } from 'claude-code'
+import type { On, TurnStepChunk, TurnStepInput, TurnStepServerToolUse } from 'claude-code'
 
 // The session collector (src/hosts/claude/collect/session.ts), driven through the mod's own
 // hooks; what it collected is read off the line it writes.
@@ -23,6 +23,10 @@ type World = {
   // the usage each turn.step's response reports
   usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number } | null
   stopReason: 'end_turn' | null
+  // optional scripted chunks + clock advances for streaming t/s tests
+  streamChunks: readonly { delayMs?: number; chunk: TurnStepChunk }[]
+  streamClosed: number
+  serverToolUses?: readonly TurnStepServerToolUse[]
   // what the mod last saved to $.state, and what a state read answers
   saved: unknown
   restore: unknown
@@ -38,6 +42,8 @@ function world(on: On, clock: MockClock): World {
     lines: [], model: 'claude-opus-5-5[1m]', startedAt: 0, percent: 20, usageRefused: false, usageCalls: 0, usageHeld: false, releaseUsage: undefined, saved: undefined, restore: undefined, compactSkipped: false, id: 'S1',
     usage: { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 90000, cache_creation_input_tokens: 7000 },
     stopReason: 'end_turn',
+    streamChunks: [],
+    streamClosed: 0,
   }
   mock.env(on, { HOME: '/home/u', NO_COLOR: '1' })
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
@@ -59,7 +65,19 @@ function world(on: On, clock: MockClock): World {
     value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
   }))
   on('turn.step', async function* ($, e) {
-    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: w.stopReason, usage: w.usage && { ...w.usage, model: e.model } }
+    try {
+      for (const item of w.streamChunks) {
+        if (item.delayMs) await clock.advance(item.delayMs)
+        yield item.chunk
+      }
+    } finally {
+      w.streamClosed += 1
+    }
+    return {
+      turnId: e.turnId, index: e.index, answer: '', toolUses: [],
+      ...(w.serverToolUses ? { serverToolUses: w.serverToolUses } : {}),
+      stopReason: w.stopReason, usage: w.usage && { ...w.usage, model: e.model },
+    }
   })
   on('tool.call', async () => ({ result: 'ok' }) as never)
   on('session.measure', async ($, e) => ({ changed: e.changed }))
@@ -336,5 +354,169 @@ describe('session collector', () => {
     await step($)
     await clock.settle()
     expect(w.saved).toEqual({ tokens: 71500, tools: 9, agents: 2, skills: 1, cacheHitPercent: 9000 / 98 })
+  })
+
+  test('decode t/s excludes TTFT and server tools, ignores bursts/subagents, survives reload and clears on switch/compact', MINE, async ($, on) => {
+    const clock = mock.clock(on, { now: 1000 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    // 2000ms TTFT before thinking starts, then 2500ms thinking+text with 500ms server tool => 2000ms decode for 500 tokens => 250t/s
+    w.streamChunks = [
+      { delayMs: 2000, chunk: { kind: 'thinking', index: 0, text: 'plan' } },
+      { delayMs: 1000, chunk: { kind: 'text', index: 1, text: 'hello' } },
+      { delayMs: 1500, chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage!, model: 'claude-opus-5-5' } } },
+    ]
+    w.serverToolUses = [
+      { id: 'st1', name: 'advisor', input: {}, startedAt: 3200, endedAt: 3600 },
+      { id: 'st2', name: 'advisor', input: {}, startedAt: 3400, endedAt: 3700 },
+    ]
+    const seen: TurnStepChunk[] = []
+    const gen = $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })
+    for (;;) {
+      const next = await gen.next()
+      if (next.done) break
+      seen.push(next.value)
+    }
+    expect(seen.map(c => c.kind)).toEqual(['thinking', 'text', 'stop'])
+    expect(await line(clock, w)).toContain('token:1.5k(91.8%, 250t/s)')
+
+    // A short burst (< 500ms) or single chunk preserves the last valid rate.
+    w.serverToolUses = undefined
+    w.streamChunks = [
+      { chunk: { kind: 'text', index: 0, text: 'quick' } },
+      { delayMs: 200, chunk: { kind: 'text', index: 0, text: '!' } },
+      { chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage!, model: 'claude-opus-5-5' } } },
+    ]
+    await step($)
+    expect(await line(clock, w)).toContain('token:3.0k(91.8%, 250t/s)')
+
+    // A single-chunk non-streamed burst (even with a late stop) preserves the last valid rate.
+    w.streamChunks = [
+      { chunk: { kind: 'text', index: 0, text: 'whole' } },
+      { delayMs: 1000, chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage!, model: 'claude-opus-5-5' } } },
+    ]
+    await step($)
+    expect(await line(clock, w)).toContain('token:4.5k(91.8%, 250t/s)')
+
+    // A subagent's slower stream does not replace the main loop's rate.
+    w.streamChunks = [
+      { chunk: { kind: 'text', index: 0, text: 'sub' } },
+      { delayMs: 5000, chunk: { kind: 'text', index: 0, text: 'agent' } },
+      { chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage!, model: 'claude-opus-5-5' } } },
+    ]
+    await step($, { agentId: 'a1' })
+    expect(await line(clock, w)).toContain('token:6.0k(91.8%, 250t/s)')
+
+    // Hot reload restores the rate from $.state.
+    await clock.settle()
+    w.restore = w.saved
+    await $.session.start(start)
+    expect(await line(clock, w)).toContain('token:6.0k(91.8%, 250t/s)')
+
+    // A model switch clears the stale rate.
+    w.model = 'claude-sonnet-5'
+    expect(await line(clock, w)).toContain('token:6.0k(91.8%) |')
+
+    // Record another rate, then verify unfinished server tools, interrupted steps,
+    // missing usage, compaction, /clear, and stepStarting model switches.
+    w.streamChunks = [
+      { chunk: { kind: 'text', index: 0, text: 'a' } },
+      { delayMs: 1500, chunk: { kind: 'text', index: 0, text: 'b' } },
+      { chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage!, model: 'claude-sonnet-5' } } },
+    ]
+    // Unfinished server tool (endedAt absent) started 500ms before stop => 1000ms decode => 500t/s
+    w.serverToolUses = [{ id: 'st-open', name: 'advisor', input: {}, startedAt: clock.now() + 1000 }]
+    await step($, { model: 'claude-sonnet-5' })
+    w.serverToolUses = undefined
+    expect(await line(clock, w)).toContain('token:7.5k(91.8%, 500t/s)')
+
+    // Interrupted step (usage null, stopReason null) preserves the rate.
+    w.streamChunks = []
+    w.usage = null
+    w.stopReason = null
+    await step($, { model: 'claude-sonnet-5' })
+    expect(await line(clock, w)).toContain('token:7.5k(91.8%, 500t/s)')
+
+    // Completed step without usage clears both cache hit and t/s.
+    w.stopReason = 'end_turn'
+    await step($, { model: 'claude-sonnet-5' })
+    expect(await line(clock, w)).toContain('token:7.5k |')
+
+    // Compaction clears t/s.
+    w.usage = { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 90000, cache_creation_input_tokens: 7000 }
+    w.streamChunks = [
+      { chunk: { kind: 'text', index: 0, text: 'a' } },
+      { delayMs: 1000, chunk: { kind: 'text', index: 0, text: 'b' } },
+      { chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage, model: 'claude-sonnet-5' } } },
+    ]
+    await step($, { model: 'claude-sonnet-5' })
+    expect(await line(clock, w)).toContain('token:9.0k(91.8%, 500t/s)')
+    await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
+    expect(await line(clock, w)).toContain('token:9.0k |')
+
+    // stepStarting with a new model persists the clear to $.state even if the step is interrupted before refresh.
+    await step($, { model: 'claude-sonnet-5' })
+    expect(await line(clock, w)).toContain('token:10.5k(91.8%, 500t/s)')
+    w.streamChunks = []
+    w.usage = null
+    w.stopReason = null
+    await step($, { model: 'claude-haiku-5-5' })
+    await clock.settle()
+    expect((w.saved as { tokensPerSecond?: number }).tokensPerSecond).toBeUndefined()
+
+    // /clear also clears tokensPerSecond in $.state.
+    w.usage = { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 90000, cache_creation_input_tokens: 7000 }
+    w.stopReason = 'end_turn'
+    w.streamChunks = [
+      { chunk: { kind: 'text', index: 0, text: 'a' } },
+      { delayMs: 1000, chunk: { kind: 'text', index: 0, text: 'b' } },
+      { chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage, model: 'claude-haiku-5-5' } } },
+    ]
+    await step($, { model: 'claude-haiku-5-5' })
+    await clock.settle()
+    expect((w.saved as { tokensPerSecond?: number }).tokensPerSecond).toBe(500)
+    await $.session.end({ reason: 'clear', sessionId: 'S1', resume: { id: 'S1' } })
+    w.id = 'S2'
+    await clock.settle()
+    expect((w.saved as { tokensPerSecond?: number }).tokensPerSecond).toBeUndefined()
+  })
+
+  test('refused clock.now does not break turn.step and latches once per step', MINE, async ($, on) => {
+    let clockCalls = 0
+    on('clock.now', async () => {
+      clockCalls += 1
+      throw new Error('clock refused')
+    })
+    on('clock.after', async () => ({ value: undefined }) as never)
+    on('clock.every', async () => ({ value: undefined }) as never)
+    const w = world(on, undefined as unknown as MockClock)
+    await $.session.start({ cwd: '/home/u/x', surface: 'terminal', isInteractive: false })
+    w.streamChunks = [
+      { chunk: { kind: 'text', index: 0, text: 'a' } },
+      { chunk: { kind: 'text', index: 0, text: 'b' } },
+      { chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage!, model: 'claude-opus-5-5' } } },
+    ]
+    clockCalls = 0
+    const res = await step($)
+    expect(res.stopReason).toBe('end_turn')
+    expect(res.usage?.output_tokens).toBe(500)
+    // First-chunk clock check latched once; never re-queried on subsequent chunks.
+    expect(clockCalls).toBe(1)
+  })
+
+  test('early stream abort closes the inner turn.step generator cleanly', MINE, async ($, on) => {
+    const clock = mock.clock(on, { now: 1000 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    const closedBefore = w.streamClosed
+    w.streamChunks = [
+      { chunk: { kind: 'text', index: 0, text: 'first' } },
+      { chunk: { kind: 'text', index: 0, text: 'second' } },
+    ]
+    const gen = $.turn.step({ turnId: 't2', index: 0, model: 'claude-opus-5-5', messageCount: 1 })
+    const first = await gen.next()
+    expect(first.done).toBe(false)
+    await gen.return(undefined as never)
+    expect(w.streamClosed).toBe(closedBefore + 1)
   })
 })

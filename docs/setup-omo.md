@@ -128,8 +128,16 @@ while this extension is loaded are recorded as non-billable copies, so editing a
 response does not increase its token total. OmO does not persist edit provenance
 itself: copies made before installation or through another client without VArgus
 cannot be distinguished reliably and remain in the recorded total.
-The cache-hit percentage in parentheses uses the latest recorded main-session assistant request.
-An edit identified by VArgus preserves the preceding request's percentage.
+The cache-hit percentage and output decode speed (`t/s`) in parentheses follow the
+latest main-session assistant request. Output speed times live streamed assistant
+deltas from the first thinking, text or tool-call stream event to the last (so
+TTFT is excluded) when at least 0.5 s elapsed; shorter bursts and aborted,
+errored or deferred replies preserve the previous rate, while completed replies
+without output usage, model switches, compaction or branch navigation clear it.
+Because persisted OmO sessions do not record stream-start
+times for text or tool blocks, `t/s` starts hidden after `/reload` or `/resume`
+until the next streamed reply. An edit identified by VArgus preserves the
+preceding request's cache hit and speed.
 Tools count persisted outer
 assistant tool calls; calls hidden inside `eval` are not added. Agents count distinct
 task IDs from accepted spawn results. Skill counts are omitted because a `SKILL.md`

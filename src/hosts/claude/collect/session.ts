@@ -20,13 +20,19 @@
 // from it; the tool names are the 2.1.300 tool table's (VantageHUD also
 // counted `Task`, `proxy_Task`, `proxy_Skill`, which that table lacks).
 
-import { cacheHitFromSplitInput, initialCounts, type SessionValues } from '../../../core/session'
+import { cacheHitFromSplitInput, initialCounts, outputTokensPerSecond, type SessionValues } from '../../../core/session'
 export { initialSession, type SessionValues } from '../../../core/session'
 import type {
   EngineInterface, SessionCompactInput, SessionCompactResult, SessionContextUsage, SessionEndInput,
-  SessionMeasureInput, ToolCallInput, TurnStepInput, TurnStepResult,
+  SessionMeasureInput, ToolCallInput, TurnStepInput, TurnStepResult, TurnStepServerToolUse,
 } from 'claude-code'
 import type { VargusCounts } from '../state'
+
+export type StepTiming = {
+  firstTokenAt: number
+  endedAt: number
+  outputChunks: number
+}
 
 const COUNTS = { plugin: 'vargus', key: 'counts' } as const
 
@@ -50,13 +56,59 @@ const DEFAULT_EFFORTS = new Map([
 // runs, so the last save holds the latest counts whatever order calls came in.
 let saving: Promise<unknown> = Promise.resolve()
 let sessionGeneration = 0
+let lastStepModel: string | undefined
+
+function serverToolDurationMs(
+  uses: readonly TurnStepServerToolUse[] | undefined,
+  start: number,
+  end: number,
+): number {
+  if (!uses?.length) return 0
+  const spans: [number, number][] = []
+  for (const tool of uses) {
+    const toolEnd = tool.endedAt ?? end
+    if (!Number.isFinite(tool.startedAt) || !Number.isFinite(toolEnd)) continue
+    const s = Math.max(start, tool.startedAt)
+    const f = Math.min(end, toolEnd)
+    if (f > s) spans.push([s, f])
+  }
+  if (!spans.length) return 0
+  spans.sort((a, b) => a[0] - b[0])
+  let total = 0
+  let [curStart, curEnd] = spans[0]!
+  for (let i = 1; i < spans.length; i++) {
+    const [s, f] = spans[i]!
+    if (s <= curEnd) curEnd = Math.max(curEnd, f)
+    else {
+      total += curEnd - curStart
+      curStart = s
+      curEnd = f
+    }
+  }
+  return total + (curEnd - curStart)
+}
 
 function save($: EngineInterface, values: SessionValues): void {
   saving = saving.then(() => {
     const saved: VargusCounts = { ...values.counts }
     if (values.cacheHitPercent !== undefined) saved.cacheHitPercent = values.cacheHitPercent
+    if (values.tokensPerSecond !== undefined) saved.tokensPerSecond = values.tokensPerSecond
     return $.state.set(COUNTS, saved)
   }).catch(() => {})
+}
+
+function modelChanged($: EngineInterface, values: SessionValues): void {
+  if (values.tokensPerSecond === undefined) return
+  values.tokensPerSecond = undefined
+  save($, values)
+}
+
+export function setModel($: EngineInterface, values: SessionValues, model: string | undefined): void {
+  const previous = values.model
+  values.model = model
+  if (previous !== undefined && model !== undefined && model !== previous) {
+    modelChanged($, values)
+  }
 }
 
 // Model and session start, and the context when no event pushed it. Called
@@ -64,7 +116,7 @@ function save($: EngineInterface, values: SessionValues): void {
 // keeps the others.
 async function readSession($: EngineInterface, values: SessionValues, withContext: boolean): Promise<void> {
   try {
-    values.model = await $.session.model()
+    setModel($, values, await $.session.model())
   } catch {
     // keep the last
   }
@@ -92,6 +144,7 @@ export async function startSession($: EngineInterface, values: SessionValues): P
     if (saved) {
       values.counts = initialCounts(saved)
       values.cacheHitPercent = saved.cacheHitPercent
+      values.tokensPerSecond = saved.tokensPerSecond
     }
   } catch {
     // nothing saved
@@ -116,8 +169,12 @@ export function measured($: EngineInterface, e: SessionMeasureInput, values: Ses
   readSession($, values, false).catch(() => {})
 }
 
-export function stepStarting(e: TurnStepInput, values: SessionValues): void {
+export function stepStarting($: EngineInterface, e: TurnStepInput, values: SessionValues): void {
   if (e.agentId !== undefined) return
+  if (lastStepModel !== undefined && e.model !== lastStepModel) {
+    modelChanged($, values)
+  }
+  lastStepModel = e.model
   values.effort = e.effort
   const model = e.model.toLowerCase().replace(/\[1m\]$/, '').replace(/-\d{8}$/, '')
   values.defaultEffort = DEFAULT_EFFORTS.get(model)
@@ -126,7 +183,13 @@ export function stepStarting(e: TurnStepInput, values: SessionValues): void {
 // A main-loop response is already in usage() when its step resolves; a
 // subagent's response is not the main conversation's window. Read after every
 // main step, even one without usage: a failed response then keeps the last fill.
-export async function stepDone($: EngineInterface, e: TurnStepInput, r: TurnStepResult, values: SessionValues): Promise<void> {
+export async function stepDone(
+  $: EngineInterface,
+  e: TurnStepInput,
+  r: TurnStepResult,
+  values: SessionValues,
+  timing?: StepTiming,
+): Promise<void> {
   const usage = r.usage
   if (usage) values.counts.tokens += usage.input_tokens + usage.output_tokens
   const mainResponse = e.agentId === undefined && (usage !== null || r.stopReason !== null)
@@ -134,6 +197,14 @@ export async function stepDone($: EngineInterface, e: TurnStepInput, r: TurnStep
     values.cacheHitPercent = cacheHitFromSplitInput(
       usage?.cache_read_input_tokens, usage?.input_tokens, usage?.cache_creation_input_tokens,
     )
+    if (usage === null) {
+      values.tokensPerSecond = undefined
+    } else if (timing && timing.outputChunks >= 2) {
+      const genMs = timing.endedAt - timing.firstTokenAt
+        - serverToolDurationMs(r.serverToolUses, timing.firstTokenAt, timing.endedAt)
+      const rate = outputTokensPerSecond(usage.output_tokens, genMs)
+      if (rate !== undefined) values.tokensPerSecond = rate
+    }
   }
   if (usage || mainResponse) save($, values)
   if (e.agentId !== undefined) return
@@ -162,8 +233,10 @@ export function toolCalled($: EngineInterface, e: ToolCallInput, values: Session
 export function sessionEnding($: EngineInterface, e: SessionEndInput, values: SessionValues): void {
   if (e.reason !== 'clear' && e.reason !== 'resume') return
   sessionGeneration += 1
+  lastStepModel = undefined
   values.counts = initialCounts()
   values.cacheHitPercent = undefined
+  values.tokensPerSecond = undefined
   values.contextPercent = undefined
   values.startedAt = undefined
   values.compactPending = false
@@ -181,5 +254,6 @@ export function compacted($: EngineInterface, e: SessionCompactInput, r: Session
   values.contextPercent = undefined
   values.compactPending = true
   values.cacheHitPercent = undefined
+  values.tokensPerSecond = undefined
   save($, values)
 }

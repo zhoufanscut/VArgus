@@ -8,6 +8,7 @@ export type VargusCounts = {
   agents: number
   skills: number
   cacheHitPercent?: number
+  tokensPerSecond?: number
 }
 
 declare module 'claude-code' {

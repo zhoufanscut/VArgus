@@ -224,9 +224,14 @@ returning brings VArgus back. On Linux/macOS, another pane using VArgus keeps th
 extra row in its window; windows without VArgus keep the original height. `status` reports the current view or pause.
 Without the optional startup hook, after `/new` or `/resume` run `!vargus on` again (with pane selection if needed)
 to bind the new conversation. Its token total covers recorded uncached input and output.
-The cache-hit percentage in parentheses uses the latest request's cached and total input tokens in the displayed thread.
-Codex can record zero when the provider omits cache details. If a new response
-finishes without fresh input usage, the suffix disappears.
+The cache-hit percentage and output decode speed (`t/s`) in parentheses use the
+latest request in the displayed thread: cached over total input tokens for cache
+hit, and recorded `output_tokens` over the model's streamed item span
+(`Reasoning`, `AgentMessage`, `Plan`, plus any trailing client tool call) when
+at least 0.5 s elapsed. Codex can record zero when the provider omits cache
+details. Pure tool-call-only steps without a recorded stream-start timestamp and
+sub-0.5 s bursts preserve the previous speed. Compaction, a response without
+fresh usage, or changing the model or Fast tier clears the affected suffix.
 Tool counts replay completed visible items and exclude `!` controls. `🤖2` counts
 recorded subagent starts in the displayed conversation; `⚡3` counts observed skill
 loads, once per skill path per user turn. Missing readings stay hidden.

@@ -1,7 +1,8 @@
 import type { Fragment } from '../../core/types.ts'
 
-// Session token total with the latest request's cache-hit percentage when known.
-// Hidden while nothing is counted (DESIGN, "Fragments").
+// Session token total with the latest request's cache-hit percentage and
+// output decode speed when known. Hidden while nothing is counted
+// (DESIGN, "Fragments").
 
 // Raw under 1k, one decimal of k under 1M, two decimals of M beyond. The k/M
 // switch is at 999,950, where one decimal of k would round to `1000.0k`
@@ -17,10 +18,21 @@ function formatCachePercent(percent: number): number {
   return Math.min(99.9, Math.round(percent * 10) / 10)
 }
 
+// One decimal under 10 (omitting trailing `.0`), whole integer from 10 up.
+// Values that round to 0 are omitted so positive output never displays `0t/s`.
+export function formatTokenRate(rate: number): string | null {
+  if (!Number.isFinite(rate) || rate <= 0) return null
+  const value = rate >= 9.95 ? Math.round(rate) : Math.round(rate * 10) / 10
+  return value > 0 ? `${value}` : null
+}
+
 export const tokens: Fragment = ({ v, l, t }) => {
   const total = v.session.counts.tokens
   if (!(total > 0)) return null
-  const percent = v.session.cacheHitPercent
-  const suffix = percent === undefined ? '' : t.paint('faint', `(${formatCachePercent(percent)}%)`)
+  const details: string[] = []
+  if (v.session.cacheHitPercent !== undefined) details.push(`${formatCachePercent(v.session.cacheHitPercent)}%`)
+  const rate = v.session.tokensPerSecond === undefined ? null : formatTokenRate(v.session.tokensPerSecond)
+  if (rate !== null) details.push(`${rate}${l.tokensPerSecond}`)
+  const suffix = details.length ? t.paint('faint', `(${details.join(', ')})`) : ''
   return t.paint('label', `${l.tokens}:`) + t.paint('gradLow', formatTokenCount(total)) + suffix
 }

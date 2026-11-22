@@ -371,3 +371,124 @@ test('saved model-specific quota metadata selects the named bucket before the ge
   r.observe({ ...settings, payload: { ...settings.payload, thread_settings: { ...settings.payload.thread_settings, model: 'gpt-6-luna' } } })
   assert.partialDeepStrictEqual(r.collector.snapshot()!.limits[0], { percent: 27.5 })
 })
+
+test('Codex rollout computes decode t/s from model item spans and token_usage_record', () => {
+  const r = new RolloutReader('/unused', 'thread-a', '/repo', '/home/user')
+  r.observe(meta)
+  r.observe(settings)
+  // Reasoning (400ms) + mid-step quota-only token_count (info: null) + AgentMessage (600ms) => 1000ms for 150 tokens => 150t/s
+  r.observe({ type: 'event_msg', payload: { type: 'item_completed', thread_id: 'thread-a',
+    item: { type: 'Reasoning', id: 'rs1' }, started_at_ms: 1000, completed_at_ms: 1400 } })
+  r.observe({ type: 'response_item', payload: { type: 'reasoning', id: 'rs1' } })
+  r.observe({ type: 'event_msg', payload: { type: 'token_count', info: null, rate_limits: { limit_id: 'codex' } } })
+  r.observe({ type: 'event_msg', payload: { type: 'item_completed', thread_id: 'thread-a',
+    item: { type: 'AgentMessage', id: 'm1' }, started_at_ms: 1400, completed_at_ms: 2000 } })
+  r.observe({ type: 'response_item', payload: { type: 'message', role: 'assistant', id: 'm1' } })
+  r.observe({ type: 'token_usage_record', payload: { thread_id: 'thread-a', usage: { output_tokens: 150 } } })
+  r.observe(count)
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, 150)
+
+  // Incoming inter-agent mailbox message (response_item type:"agent_message") before task_complete
+  // is input, not model output, and must keep both cache hit and t/s intact.
+  r.observe({ type: 'response_item', payload: { type: 'agent_message', author: '/root/child', recipient: '/root',
+    content: [{ type: 'input_text', text: 'FINAL_ANSWER' }] } })
+  r.observe({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1' } })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, 150)
+  assert.notEqual(r.collector.snapshot()!.session.cacheHitPercent, undefined)
+
+  // Reasoning (400ms) + trailing client function_call (+300ms) => 700ms for 140 tokens => 200t/s
+  r.observe({ type: 'event_msg', payload: { type: 'item_completed', thread_id: 'thread-a',
+    item: { type: 'Reasoning', id: 'rs2' }, started_at_ms: 5000, completed_at_ms: 5400 } })
+  r.observe({ type: 'response_item', payload: { type: 'reasoning', id: 'rs2' } })
+  r.observe({ type: 'response_item', timestamp: new Date(5700).toISOString(),
+    payload: { type: 'function_call', name: 'exec_command', call_id: 'c1' } })
+  r.observe({ type: 'token_usage_record', payload: { thread_id: 'thread-a', usage: { output_tokens: 140 } } })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, 200)
+  r.observe({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'c1' } })
+
+  // Pure function_call-only step (no started_at_ms) and 0ms burst preserve prior rate.
+  r.observe({ type: 'response_item', timestamp: new Date(7000).toISOString(),
+    payload: { type: 'function_call', name: 'exec_command', call_id: 'c2' } })
+  r.observe({ type: 'token_usage_record', payload: { thread_id: 'thread-a', usage: { output_tokens: 30 } } })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, 200)
+  r.observe({ type: 'event_msg', payload: { type: 'item_completed', thread_id: 'thread-a',
+    item: { type: 'AgentMessage', id: 'burst' }, started_at_ms: 8000, completed_at_ms: 8000 } })
+  r.observe({ type: 'response_item', payload: { type: 'message', role: 'assistant', id: 'burst' } })
+  r.observe({ type: 'token_usage_record', payload: { thread_id: 'thread-a', usage: { output_tokens: 80 } } })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, 200)
+  r.observe(count)
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, 200)
+
+  // Missing usage (new model output followed by stale repeated token_count) clears rate.
+  r.observe({ type: 'event_msg', payload: { type: 'item_completed', thread_id: 'thread-a',
+    item: { type: 'AgentMessage', id: 'nousage' }, started_at_ms: 9000, completed_at_ms: 9600 } })
+  r.observe({ type: 'response_item', payload: { type: 'message', role: 'assistant', id: 'nousage' } })
+  r.observe(count)
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, undefined)
+
+  // Fallback without token_usage_record across function_call_output -> token_count.
+  r.observe({ type: 'event_msg', payload: { type: 'item_completed', thread_id: 'thread-a',
+    item: { type: 'Reasoning', id: 'rs3' }, started_at_ms: 10_000, completed_at_ms: 10_600 } })
+  r.observe({ type: 'response_item', payload: { type: 'reasoning', id: 'rs3' } })
+  r.observe({ type: 'response_item', timestamp: new Date(11_000).toISOString(),
+    payload: { type: 'function_call', name: 'exec_command', call_id: 'c3' } })
+  r.observe({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'c3' } })
+  const nextTotal = { input_tokens: 50000, cached_input_tokens: 45000, output_tokens: 877, total_tokens: 50877 }
+  const nextLast = { input_tokens: 7576, cached_input_tokens: 5000, output_tokens: 100, total_tokens: 7676 }
+  r.observe({ type: 'event_msg', payload: { type: 'token_count', info: {
+    total_token_usage: nextTotal, last_token_usage: nextLast, model_context_window: 190000,
+  } } })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, 100)
+
+  // Abandoned fallback duration from a step missing both token_usage_record and token_count
+  // must not leak into a subsequent pure function_call step's token_count.
+  r.observe({ type: 'event_msg', payload: { type: 'item_completed', thread_id: 'thread-a',
+    item: { type: 'Reasoning', id: 'rs-abandoned' }, started_at_ms: 11_100, completed_at_ms: 11_700 } })
+  r.observe({ type: 'response_item', payload: { type: 'reasoning', id: 'rs-abandoned' } })
+  r.observe({ type: 'response_item', timestamp: new Date(11_900).toISOString(),
+    payload: { type: 'function_call', name: 'exec_command', call_id: 'c-abandoned' } })
+  r.observe({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'c-abandoned' } })
+  r.observe({ type: 'response_item', timestamp: new Date(12_000).toISOString(),
+    payload: { type: 'function_call', name: 'exec_command', call_id: 'c-next' } })
+  r.observe({ type: 'event_msg', payload: { type: 'token_count', info: {
+    total_token_usage: { ...nextTotal, output_tokens: 977, total_tokens: 50977 },
+    last_token_usage: { ...nextLast, output_tokens: 100 },
+    model_context_window: 190000,
+  } } })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, 100)
+
+  // Quota-only update keeps the rate; task_complete after usage-less output clears it.
+  r.observe({ type: 'event_msg', payload: { type: 'token_count', rate_limits: { limit_id: 'codex' } } })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, 100)
+  r.observe({ type: 'response_item', payload: { type: 'message', role: 'assistant', id: 'no-tc' } })
+  r.observe({ type: 'token_usage_record', payload: { thread_id: 'thread-a', usage: { output_tokens: 0 } } })
+  r.observe({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 't2' } })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, undefined)
+
+  // Compaction, model switch, and Fast toggle (including undefined -> priority) each clear rate.
+  const recordRate = (id: string, startMs: number) => {
+    r.observe({ type: 'event_msg', payload: { type: 'item_completed', thread_id: 'thread-a',
+      item: { type: 'Plan', id }, started_at_ms: startMs, completed_at_ms: startMs + 1000 } })
+    r.observe({ type: 'response_item', payload: { type: 'message', role: 'assistant', id } })
+    r.observe({ type: 'token_usage_record', payload: { thread_id: 'thread-a', usage: { output_tokens: 100 } } })
+    assert.equal(r.collector.snapshot()!.session.tokensPerSecond, 100)
+  }
+  recordRate('p1', 12_000)
+  r.observe({ type: 'compacted', payload: {} })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, undefined)
+
+  recordRate('p2', 14_000)
+  r.observe({ type: 'turn_context', payload: { model: 'gpt-6-luna', cwd: '/repo', effort: 'high' } })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, undefined)
+  assert.equal(r.collector.snapshot()!.session.fast, undefined)
+
+  recordRate('p3', 16_000)
+  r.observe({ type: 'event_msg', payload: { type: 'thread_settings_applied', thread_id: 'thread-a',
+    thread_settings: { model: 'gpt-6-luna', cwd: '/repo', service_tier: 'priority' } } })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, undefined)
+
+  recordRate('p4', 18_000)
+  r.observe({ type: 'event_msg', payload: { type: 'thread_settings_applied', thread_id: 'thread-a',
+    thread_settings: { model: 'gpt-6-luna', cwd: '/repo', service_tier: 'default' } } })
+  assert.equal(r.collector.snapshot()!.session.tokensPerSecond, undefined)
+})

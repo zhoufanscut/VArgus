@@ -72,12 +72,20 @@ first if it is the only one left. Width counts terminal columns. A host output
 can fit the result further, as OmO does at grapheme boundaries.
 
 The [token fragment](src/render/fragments/tokens.ts) keeps the session's token
-total and appends the latest request's cache-read share of prompt input, rounded
-to one decimal place with trailing zeros omitted. A partial hit displays at
-most `99.9%`, so `100%` means every input token was cached. Zero cache reads in
-the host's usage show `(0%)`. The suffix is omitted when the host leaves
-a required counter unavailable or reports a zero prompt size. The existing
-`tokens` switch governs both.
+total and appends a faint parenthesized suffix with the latest request's
+cache-read share of prompt input and, where the host exposes streaming decode
+timing, its output speed (`t/s`), separated by `, ` when both are present.
+Cache-hit share rounds to one decimal place with trailing zeros omitted, and a
+partial hit displays at most `99.9%` so `100%` means every input token was
+cached. Zero cache reads in the host's usage show `(0%)` (or `(0%, 48t/s)`).
+Output speed divides `output_tokens` (including thinking/reasoning tokens) by
+the streamed decode duration from first output token to last, requiring a
+minimum 500 ms window (`outputTokensPerSecond` in
+[session.ts](src/core/session.ts)) to filter single-chunk bursts and tiny
+replies; rates under `10` show up to one decimal place (`4.3t/s`), rates from
+`10` up round to whole integers (`48t/s`), and values rounding to `0` are
+omitted. Either value is omitted when unavailable, and the existing `tokens`
+switch governs the whole fragment.
 
 Hosts produce ordered [quota readings](src/core/limits.ts), including labels
 and error badges. The [limits fragment](src/render/fragments/limits.ts) rounds
@@ -265,7 +273,21 @@ plus output from token counts. For the cache percentage it divides
 in the selected log. A Codex 0.170.0 localhost probe recorded zero for
 missing cache details and repeated the preceding counters when a response
 omitted usage entirely. After new model output, a repeated cumulative input
-count cannot establish a fresh cache reading. The context gauge uses the last context
+count cannot establish a fresh cache reading. For output decode speed (`t/s`),
+a Codex 0.171.0 localhost probe verified that `item_completed` records for
+`Reasoning` and `AgentMessage` carry millisecond `started_at_ms` and
+`completed_at_ms` excluding TTFT, while `token_usage_record` carries
+per-response `usage.output_tokens` (including `reasoning_output_tokens`) before
+tool execution. [The rollout reader](src/hosts/codex/rollout.ts) spans
+`Reasoning`, `AgentMessage` and `Plan` `item_completed` timestamps, extends the
+end to any trailing client tool-call `response_item` timestamp
+(`function_call`, `custom_tool_call`, `local_shell_call`) when an earlier item
+established the stream start, and pairs that window with `token_usage_record`
+(falling back to fresh cumulative `token_count` output when no
+`token_usage_record` appears). Pure tool-call-only steps have no recorded
+stream-start timestamp and single-chunk bursts record 0 ms, so both preserve
+the previous rate; responses without usage, compaction, model switches and Fast
+tier toggles clear it. The context gauge uses the last context
 reading with Codex's baseline allowance, and compaction clears that reading.
 Quota selection prefers the active model's exact recorded slug, then the
 general Codex bucket. Labels follow the recorded window duration.
@@ -379,7 +401,21 @@ subscriptions. Other native widgets and dialogs still belong to OmO.
 assistant entries across branches and compaction history. Tokens sum
 uncached input and output. The latest assistant request supplies cache reads
 divided by the sum of input, cache reads and cache writes. Removing an observed
-edit copy also removes its cache reading. Tool counts use outer calls, and
+edit copy also removes its cache reading. For output decode speed (`t/s`),
+[registration](src/hosts/omo/register.ts) observes live `message_start`,
+`message_update` and `message_end` events with `performance.now()`, timing from
+the first content stream event (`thinking_start`/`thinking_delta`,
+`text_start`/`text_delta`, `toolcall_start`/`toolcall_delta`) to the last
+(`*_delta`/`*_end`) so pre-TTFT time after `message_start` is excluded. A
+2026-11-22 localhost probe on OmO 5.1.61 verified that `message_start` precedes
+TTFT on `openai-responses`, that both `anthropic-messages` and
+`openai-responses` bracket the decode window accurately through
+`message_update`, and that `usage.output` already includes `usage.reasoning`
+(matching `totalTokens`). Because persisted JSONL records only
+`ThinkingContent` start/end times and not text or tool stream starts, `t/s` is
+live-only and starts omitted after `/reload` or `/resume` until the next
+streamed reply. Observed assistant edits keep the prior rate; model switches,
+compaction and non-edit tree navigation clear it. Tool counts use outer calls, and
 agent counts use distinct task IDs from accepted spawns. Skills lack a canonical load receipt.
 For a native assistant edit that copies usage,
 registration writes a receipt naming the new entry. Older unobserved copies
@@ -438,7 +474,15 @@ skill roots and deduplicate within a turn.
 The status-line payload supplies the cache reading in `context_window.current_usage`.
 A saved Linux 1.5.8 payload reported 2,669 uncached input tokens, 8,113 cache
 reads and zero cache writes for the request. Its enclosing `total_input_tokens`
-was 15,295, so that field would give a different denominator.
+was 15,295, so that field would give a different denominator. Output decode
+speed (`t/s`) is intentionally omitted on Antigravity CLI: a 2026-11-22 live
+Linux `agy` 1.5.14 probe logged 47 `statusLine` refreshes across a full reply
+and observed zero timing/duration keys (`cost` was `null`), `total_output_tokens`
+and `current_usage.output_tokens` remaining `0`/`null` through all 300 ms
+streaming refreshes before jumping atomically to `10,300` at step completion,
+and `transcript.jsonl` flushing atomically with only 1-second `created_at` and
+no `completed_at` or `duration_ms`. That rules out an accurate decode `t/s`
+reading without mixing in TTFT and 300 ms–1 s quantization error.
 [Google status-line payload](https://antigravity.google/docs/cli/statusline)
 
 [Git cache](src/hosts/antigravity/vcs.ts) is scoped to the working directory.
@@ -490,6 +534,16 @@ state shapes. [Mod reference](https://code.claude.com/docs/en/plugins/mods/refer
   prompt neither read from nor written to the prompt cache.” The denominator
   therefore includes uncached input, cache reads and cache creation. In
   `ModelUsage`, “a count the response left out reads as zero.”
+  For output decode speed (`t/s`), [register.ts](src/hosts/claude/register.ts)
+  iterates main-loop `turn.step` chunks transparently, stamping `$.clock.now()`
+  once on the first output chunk (`thinking`, `text`, `tool`, `input`) and once
+  on `stop` (or completion), subtracting merged `serverToolUses` execution
+  intervals (`startedAt`–`endedAt`) and requiring at least two output chunks
+  over 500 ms. Opaque `engine` chunks do not distinguish a mid-step retry
+  marker, which is an accepted API limit. Subagent steps keep direct
+  `yield* next(e)` and do not replace the main rate. The latest rate persists
+  in `$.state` across hot reloads and clears on model switch, compaction,
+  `/clear`, resume and usage-less responses.
   Each main-loop `tool.call` increments the tool total. Calls to `Agent` and
   `Skill` also increment their own totals. Claude Code 2.1.323 describes
   `AgentLoop.agentId` as “absent on the main loop.”
@@ -618,9 +672,11 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   [platform-aware runner](tests/run-node.mjs). Codex tests with a localhost
   provider exercise the stock engine, saved events and TUI. The supplied
   responses test handling of provider data and tool calls. On Linux with Codex
-  0.170.0, the Fast-mode fixture supplied 285 cached tokens in a 1,000-token
-  prompt and the saved-log reader rendered `(28.5%)`. Repeating that
-  usage preserved the suffix. A response without usage cleared it. The standalone
+  0.171.0, the Fast-mode fixture supplied 285 cached tokens in a 1,000-token
+  prompt, verified a 700 ms streamed reply rendered `(28.5%, <rate>t/s)` on both
+  live polling and fresh rollout replay, preserved both suffixes across a
+  subsequent 0 ms fast burst, and cleared both suffixes when a response omitted
+  usage. The standalone
   fixture observed `token:3.2k(94.3%)` in the tmux row. The native skill
   test checks a child thread's token, tool, agent and skill totals. Model choice,
   billing and different provider timing need their own evidence.

@@ -50,7 +50,7 @@ function host(mode = 'tui') {
       if (factory) factory(api)
       else vargus(api, {})
     },
-    event(name: string, event: unknown = {}) { handlers.get(name)?.(event, ctx) },
+    event(name: string, event: unknown = {}, nextCtx: Context = ctx) { handlers.get(name)?.(event, nextCtx) },
     append(entry: SessionEntry) { entries.push(entry) },
     async command(args: string) {
       assert.ok(command)
@@ -177,6 +177,99 @@ test('native assistant edits preserve consumed tokens across live updates and re
     h.append({ ...original, id: 'second-response' })
     h.event('message_end')
     assert.match(text(), /token:270\(20%\)/)
+  } finally { h.event('session_shutdown') }
+})
+
+test('OmO live streaming computes decode t/s excluding TTFT and clears on model switch or compaction', t => {
+  const h = host()
+  let perf = 1000
+  t.mock.method(performance, 'now', () => perf)
+  const text = () => h.row?.render(200).join('').replace(/\x1b\[[0-9;]*m/g, '') ?? ''
+  h.load(); h.event('session_start')
+  try {
+    // 500ms TTFT after message_start before thinking_start, then 800ms stream for 120 output tokens => 150t/s
+    const assistantMsg = { role: 'assistant', usage: { input: 100, output: 120, cacheRead: 400, cacheWrite: 0 }, stopReason: 'stop' }
+    h.event('message_start', { message: { role: 'assistant' } })
+    perf += 500
+    h.event('message_update', { message: { role: 'assistant' }, assistantMessageEvent: { type: 'thinking_start' } })
+    perf += 400
+    h.event('message_update', { message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_delta' } })
+    perf += 400
+    h.event('message_update', { message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_end' } })
+    h.append({ id: 'm1', type: 'message', timestamp: '', message: assistantMsg })
+    h.event('message_end', { message: assistantMsg })
+    assert.match(text(), /token:220\(80%, 150t\/s\)/)
+
+    // Short burst (< 500ms) keeps the previous valid rate.
+    const shortMsg = { role: 'assistant', usage: { input: 100, output: 20, cacheRead: 400, cacheWrite: 0 }, stopReason: 'stop' }
+    h.event('message_start', { message: { role: 'assistant' } })
+    perf += 100
+    h.event('message_update', { message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_start' } })
+    perf += 100
+    h.event('message_update', { message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_end' } })
+    h.append({ id: 'm2', type: 'message', timestamp: '', message: shortMsg })
+    h.event('message_end', { message: shortMsg })
+    assert.match(text(), /token:340\(80%, 150t\/s\)/)
+
+    // Aborted, error and deferred replies keep the previous rate; assistant edit keeps the rate.
+    for (const stopReason of ['aborted', 'error', 'deferred'] as const) {
+      h.event('message_start', { message: { role: 'assistant' } })
+      perf += 600
+      h.event('message_end', { message: { role: 'assistant', stopReason, usage: { output: 0 } } })
+      assert.match(text(), /token:340\(80%, 150t\/s\)/)
+    }
+
+    h.event('session_before_tree', { preparation: { targetId: 'm1' } })
+    h.append({ id: 'm1-edit', type: 'message', timestamp: '', message: assistantMsg })
+    h.event('session_tree', { newLeafId: 'm1-edit', oldLeafId: 'm1' })
+    assert.match(text(), /token:340\(80%, 150t\/s\)/)
+
+    // Non-edit tree navigation clears the rate.
+    h.event('session_before_tree', { preparation: { targetId: 'm1' } })
+    h.event('session_tree', { newLeafId: 'm1', oldLeafId: 'm1-edit' })
+    assert.match(text(), /token:340\(80%\)(?!.*t\/s)/)
+
+    const streamTurn = (id: string, output: number, durationMs: number) => {
+      h.event('message_start', { message: { role: 'assistant' } })
+      h.event('message_update', { message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_delta' } })
+      perf += durationMs
+      h.event('message_update', { message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_delta' } })
+      const msg = { ...assistantMsg, usage: { input: 50, output, cacheRead: 150, cacheWrite: 0 } }
+      h.append({ id, type: 'message', timestamp: '', message: msg })
+      h.event('message_end', { message: msg })
+    }
+
+    // Provider-only switch, missing-previousModel switch, and model deselection clear the rate.
+    streamTurn('m3', 80, 1000)
+    assert.match(text(), /80t\/s\)/)
+    h.event('model_select', {
+      previousModel: { id: 'gpt-6.1-sol', provider: 'test' },
+      model: { id: 'gpt-6.1-sol', provider: 'other-provider' },
+    })
+    assert.doesNotMatch(text(), /t\/s/)
+
+    streamTurn('m4', 80, 1000)
+    assert.match(text(), /80t\/s\)/)
+    h.event('model_select', { model: { id: 'claude-opus-5-5', provider: 'anthropic' } })
+    assert.doesNotMatch(text(), /t\/s/)
+
+    streamTurn('m4b', 80, 1000)
+    assert.match(text(), /80t\/s\)/)
+    h.event('model_select', { model: undefined }, { ...h.ctx, model: undefined })
+    assert.doesNotMatch(text(), /t\/s/)
+
+    // Completed response with zero output clears the rate.
+    streamTurn('m5', 80, 1000)
+    assert.match(text(), /80t\/s\)/)
+    h.event('message_start', { message: { role: 'assistant' } })
+    h.event('message_end', { message: { role: 'assistant', stopReason: 'stop', usage: { input: 50, output: 0 } } })
+    assert.doesNotMatch(text(), /t\/s/)
+
+    // Compaction also clears a recorded rate.
+    streamTurn('m6', 80, 1000)
+    assert.match(text(), /80t\/s\)/)
+    h.event('session_compact')
+    assert.doesNotMatch(text(), /t\/s/)
   } finally { h.event('session_shutdown') }
 })
 
