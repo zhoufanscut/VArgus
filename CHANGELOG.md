@@ -6,6 +6,32 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-22
+
+### Added
+
+- Live output decode speed (`t/s`) on Antigravity CLI (`agy`) under the existing
+  `tokens` setting, completing `t/s` support across all four hosts, e.g.
+  `token:17.7k(0%, 106t/s)`. Infers the decode window from live `statusLine`
+  refreshes (ignoring per-second `quota.*.reset_in_seconds` countdowns,
+  state/transcript transitions and trailing 300 ms throttle refreshes within
+  450 ms, and compensating for Node startup latency via `process.uptime()`) to
+  `transcript.jsonl`'s `PLANNER_RESPONSE` flush (`mtimeMs`), using the shared
+  500 ms minimum window and formatting rules. Requires contiguous step
+  numbering and fails closed when trailing steps are not bounded tool results
+  within 2 s of `mtimeMs`. Preserves the previous rate across short bursts and
+  aborted/errored turns; clears it on model switches (keeping effort changes on
+  the same model), compaction (`CHECKPOINT`), `/rewind` and zero-output
+  replies; starts hidden on cold-start resume until the next streamed reply.
+- Version-3 Antigravity transcript cache with a durable replay `epoch` so
+  mid-transcript `/rewind` rewrites clear `t/s` even across `tokens: false`
+  toggles.
+
+### Fixed
+
+- Guard Antigravity `transcript.jsonl` replay against non-object JSONL lines
+  and whitespace-only tool names.
+
 ## [0.8.0] - 2026-11-22
 
 ### Added
@@ -439,7 +465,8 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
-[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/zhoufanscut/VArgus/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/zhoufanscut/VArgus/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/zhoufanscut/VArgus/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/zhoufanscut/VArgus/compare/v0.5.0...v0.6.0
