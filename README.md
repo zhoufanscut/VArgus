@@ -141,9 +141,9 @@ Effort values that cannot be compared use Alert. Codex reads the configured
 model catalog or its local cache, OmO uses the active model's metadata, and
 Claude Code and Antigravity use published defaults for recognised models.
 
-A row ending in `| ⚠ stale` shows the last readings VArgus could refresh. The
-marker clears on recovery. Each host’s guide explains when its display can
-detect a missed or failed update.
+A row ending in `| ⌛stale` (`| !:stale` on WSL) shows the last readings VArgus
+could refresh. The marker clears on recovery. Each host’s guide explains when
+its display can detect a missed or failed update.
 
 Open the guide for your host to configure the line
 and see how that host counts tokens, tools, agents and skills.

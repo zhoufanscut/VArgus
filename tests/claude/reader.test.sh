@@ -35,9 +35,9 @@ for shell in sh bash; do
   out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID=S1 "$shell" -c "$cmd"; echo "rc=$?")
   want=$(printf '\033[38;2;1;2;3m~/proj\033[0m | 中文 ✓rc=0')
   [ "$out" = "$want" ] || fail "$shell: present line: $out"
-  printf '1\nold reading | ⚠ stale\n' > "$data/S1/line.live"
+  printf '1\nold reading | ⌛stale\n' > "$data/S1/line.live"
   out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID=S1 "$shell" -c "$cmd")
-  [ "$out" = 'old reading | ⚠ stale' ] || fail "$shell: expired deadline: $out"
+  [ "$out" = 'old reading | ⌛stale' ] || fail "$shell: expired deadline: $out"
   printf '%s\nunused stale row\n' "$(( $(date +%s) + 60 ))" > "$data/S1/line.live"
   out=$(HOME="$reader_test_home" CLAUDE_CODE_SESSION_ID=S1 "$shell" -c "$cmd"; echo "rc=$?")
   [ "$out" = "$want" ] || fail "$shell: recovered reader: $out"

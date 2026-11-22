@@ -197,7 +197,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         display: omoDisplay(values.session),
         o: options, l: labels, t: theme, now,
       })
-      return stale ? staleLine(line, width) : line
+      return stale ? staleLine(line, width, { t: theme, l: labels, isWsl }) : line
     })
     const unsubscribe = options.rateLimits ? pi.onSubscriptionLimits(() => instance.update()) : () => {}
     const timer = setInterval(() => instance.update(), 1000)

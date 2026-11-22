@@ -13,13 +13,13 @@ function normalizeEffort(effort: string): string {
 }
 
 export function effortColor(t: Theme, effort: string | number, defaultEffort: string | undefined): Rgb {
-  const { gradLow, gradHigh } = t.rgb
-  if (typeof effort !== 'string') return gradHigh
+  const { calm, alert } = t.rgb
+  if (typeof effort !== 'string') return alert
   const level = normalizeEffort(effort)
   const baseline = normalizeEffort(defaultEffort ?? '') || 'high'
   const defaultRank = EFFORT_LEVELS.indexOf(baseline)
   const atOrAbove = level === baseline || (defaultRank >= 0 && EFFORT_LEVELS.indexOf(level) >= defaultRank)
-  return atOrAbove ? gradLow : gradHigh
+  return atOrAbove ? calm : alert
 }
 
 export const model: Fragment = ({ v, display, o, t }) => {
@@ -27,7 +27,7 @@ export const model: Fragment = ({ v, display, o, t }) => {
   if (!name) return null
   const suffix = speed ? t.paint('faint', `(${speed})`) : ''
   const effort = o.effort ? v.session.effort : undefined
-  if (effort === undefined || effort === '') return t.paint('gradLow', name) + suffix
+  if (effort === undefined || effort === '') return t.paint('label', name) + suffix
   const level = cleanText(String(effort)).toLowerCase()
   return t.paint('label', `${name}:`) + t.paint(effortColor(t, effort, v.session.defaultEffort), level) + suffix
 }

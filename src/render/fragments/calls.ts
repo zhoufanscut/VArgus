@@ -17,6 +17,6 @@ export const calls: Fragment = ({ v, display, l, t }) => {
   ]
   const parts = items
     .filter(([, n]) => n > 0)
-    .map(([kind, n]) => (text ? `${l[kind]}:` : ICONS[kind]) + t.paint('label', String(n)))
+    .map(([kind, n]) => (text ? t.paint('label', `${l[kind]}:${n}`) : ICONS[kind] + t.paint('label', String(n))))
   return parts.length ? parts.join(' ') : null
 }

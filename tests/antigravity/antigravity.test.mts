@@ -35,7 +35,7 @@ const plain = makeTheme('graphite', true)
 test('a failed Antigravity refresh retains the same conversation’s last row until recovery', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-agy-stale-'))
   const cacheDir = join(dir, 'cache'), brain = join(dir, 'brain', 'alpha')
-  const runtime = { cacheDir, home: dir, noColor: true, givenOptions: { repo: false, branch: false, status: false } }
+  const runtime = { cacheDir, home: dir, noColor: true, isWsl: false, givenOptions: { repo: false, branch: false, status: false } }
   const transcript = join(brain, 'transcript.jsonl')
   const payload = { conversation_id: 'alpha', model: 'gemini-4-carbon', cwd: '/repo', transcript_path: transcript }
   const transcriptCache = cachePath(cacheDir, 'transcript', transcript)
@@ -47,13 +47,23 @@ test('a failed Antigravity refresh retains the same conversation’s last row un
     // The next incremental read cannot restore this damaged skill list.
     await writeFile(transcriptCache, JSON.stringify({ ...JSON.parse(saved), seenSkillsInTurn: 42 }))
     await appendFile(transcript, '{}\n')
-    assert.equal(await renderAntigravityStatusLine(payload, runtime), healthy + ' | ⚠ stale')
+    assert.equal(await renderAntigravityStatusLine(payload, runtime), healthy + ' | ⌛stale')
     const other = await renderAntigravityStatusLine({ ...payload, conversation_id: 'beta', model: 'gemini-4-argon' }, runtime)
     assert.match(other, /argon/)
     assert.doesNotMatch(other, /carbon|stale/)
-    assert.equal(await renderAntigravityStatusLine(payload, runtime), healthy + ' | ⚠ stale')
+    assert.equal(await renderAntigravityStatusLine(payload, runtime), healthy + ' | ⌛stale')
     await writeFile(transcriptCache, saved)
     assert.equal(await renderAntigravityStatusLine(payload, runtime), healthy)
+    // Styled and WSL stale rows carry the theme separator/label and `!:stale`.
+    const wslRuntime = { ...runtime, noColor: false, isWsl: true }
+    const healthyWsl = await renderAntigravityStatusLine(payload, wslRuntime)
+    await writeFile(transcriptCache, JSON.stringify({ ...JSON.parse(saved), seenSkillsInTurn: 42 }))
+    await appendFile(transcript, '{}\n')
+    const theme = makeTheme('graphite', false)
+    assert.equal(
+      await renderAntigravityStatusLine(payload, wslRuntime),
+      healthyWsl + theme.paint('sep', ' | ') + theme.paint('label', '!:stale'),
+    )
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
@@ -105,11 +115,11 @@ test('Antigravity model catalog shortens Gemini/Claude families, keeps Orchestra
 test('Antigravity colour follows the published default or the high cutoff', () => {
   const theme = makeTheme('graphite', false)
   for (const [payload, name, effort, color, defaultEffort] of [
-    [{ display_name: 'Gemini 4 Hydrogen (Medium)' }, 'hydrogen', 'medium', 'gradHigh', 'high'],
-    [{ display_name: 'Gemini 4 Hydrogen (High)' }, 'hydrogen', 'high', 'gradLow', 'high'],
-    [{ id: 'gemini-4-neon-xhigh', display_name: 'Gemini 4 Neon (XHigh)', effort: 'xhigh' }, 'neon', 'xhigh', 'gradLow', 'high'],
-    [{ display_name: 'Gemini 4 Carbon (Medium)' }, 'carbon', 'medium', 'gradHigh', undefined],
-    [{ display_name: 'Gemini 4 Carbon (High)' }, 'carbon', 'high', 'gradLow', undefined],
+    [{ display_name: 'Gemini 4 Hydrogen (Medium)' }, 'hydrogen', 'medium', 'alert', 'high'],
+    [{ display_name: 'Gemini 4 Hydrogen (High)' }, 'hydrogen', 'high', 'calm', 'high'],
+    [{ id: 'gemini-4-neon-xhigh', display_name: 'Gemini 4 Neon (XHigh)', effort: 'xhigh' }, 'neon', 'xhigh', 'calm', 'high'],
+    [{ display_name: 'Gemini 4 Carbon (Medium)' }, 'carbon', 'medium', 'alert', undefined],
+    [{ display_name: 'Gemini 4 Carbon (High)' }, 'carbon', 'high', 'calm', undefined],
   ] as const) {
     const v = collectAntigravityPayload({ model: payload })
     assert.equal(v.session.defaultEffort, defaultEffort)

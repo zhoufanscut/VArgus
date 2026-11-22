@@ -5,11 +5,13 @@ import type { Fragment } from '../../core/types.ts'
 // (DESIGN, "Fragments").
 
 // Raw under 1k, one decimal of k under 1M, two decimals of M beyond. The k/M
-// switch is at 999,950, where one decimal of k would round to `1000.0k`
-// (VantageHUD's formatTokenCount).
+// switch (and calm -> alert flip) is at 999,950, where one decimal of k would
+// round to `1000.0k` and switches to `1.00M` (VantageHUD's formatTokenCount).
+const MILLION_THRESHOLD = 999_950
+
 export function formatTokenCount(tokens: number): string {
   if (tokens < 1000) return `${tokens}`
-  if (tokens < 999950) return `${(tokens / 1000).toFixed(1)}k`
+  if (tokens < MILLION_THRESHOLD) return `${(tokens / 1000).toFixed(1)}k`
   return `${(tokens / 1000000).toFixed(2)}M`
 }
 
@@ -34,5 +36,5 @@ export const tokens: Fragment = ({ v, l, t }) => {
   const rate = v.session.tokensPerSecond === undefined ? null : formatTokenRate(v.session.tokensPerSecond)
   if (rate !== null) details.push(`${rate}${l.tokensPerSecond}`)
   const suffix = details.length ? t.paint('faint', `(${details.join(', ')})`) : ''
-  return t.paint('label', `${l.tokens}:`) + t.paint('gradLow', formatTokenCount(total)) + suffix
+  return t.paint('label', `${l.tokens}:`) + t.paint(total >= MILLION_THRESHOLD ? 'alert' : 'calm', formatTokenCount(total)) + suffix
 }

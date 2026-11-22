@@ -41,7 +41,7 @@ async function refresh($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
   values.limits = options.rateLimits ? claudeQuotaReadings(quota, options, labels, now) : []
   const text = render({ v: values, display: claudeDisplay(values.session), o: options, l: labels, t: theme, now })
-  await writeLine($, writer, text, values.core.columns)
+  await writeLine($, writer, text, values.core.columns, { t: theme, l: labels, isWsl: values.core.isWsl })
 }
 
 async function isWsl($: EngineInterface): Promise<boolean> {

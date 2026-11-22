@@ -1,7 +1,8 @@
 import { describe, expect, mock, test, type MockClock } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
 
-import { dataDir, homeDir, moveArgv, removeArgv } from '../../src/hosts/claude/write'
+import { dataDir, homeDir, moveArgv, removeArgv, writeLine, type Writer } from '../../src/hosts/claude/write'
+import { makeTheme } from '../../src/theme'
 import { fixtureFsPath } from './fixture-path'
 
 // The line file (DESIGN, "The line file"), driven through the mod's own hooks.
@@ -124,8 +125,8 @@ describe('line file', () => {
     await $.session.start(start)
     await clock.advance(120_000)
     expect(w.writes).toHaveLength(1)
-    expect(w.checkIns[0]).toBe('6\n~/proj/x | ⚠ stale\n')
-    expect(w.checkIns.at(-1)).toBe('126\n~/proj/x | ⚠ stale\n')
+    expect(w.checkIns[0]).toBe('6\n~/proj/x | ⌛stale\n')
+    expect(w.checkIns.at(-1)).toBe('126\n~/proj/x | ⌛stale\n')
     w.id = 'S2'
     await clock.advance(1000)
     expect(w.writes.map(x => x.path)).toEqual([`${DATA}/S1/line.1.tmp`, `${DATA}/S2/line.1.tmp`])
@@ -165,12 +166,38 @@ describe('line file', () => {
     expect(texts).toContain('~/p3')
   })
 
-  test('CLAUDE_CONFIG_DIR picks the data folder', FOLDER_ONLY, async ($, on) => {
+  test('CLAUDE_CONFIG_DIR picks the data folder and styles line.live with the active theme', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
     const w = world(on, clock, { HOME: '/home/u', CLAUDE_CONFIG_DIR: '/cfg' })
+    const theme = makeTheme('graphite', false)
     await $.session.start(start)
     await clock.settle()
     expect(w.writes[0]?.path).toBe('/cfg/plugins/data/vargus-vargus/S1/line.3.tmp')
+    expect(w.checkIns[0]).toBe(
+      `6\n${theme.bold(theme.paint('text', '~/proj/x'))}${theme.paint('sep', ' | ')}⌛${theme.paint('label', 'stale')}\n`,
+    )
+    // A stale-style change alone refreshes line.live immediately within the 2s idle window.
+    const liveWrites: string[] = []
+    const stub = {
+      session: { id: async () => 'S1' },
+      clock: { now: async () => 3 },
+      fs: {
+        write: async (path: string, text: string) => {
+          if (path.endsWith('/line.live')) liveWrites.push(text)
+        },
+      },
+      process: {
+        run: async () => ({ exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }),
+      },
+    } as unknown as EngineInterface
+    const writer: Writer = { dir: '/cfg/data', tools: 'posix', tmpName: 'line.3.tmp', last: null, running: null, pending: null, ended: null }
+    await writeLine(stub, writer, '~/proj/x', undefined, { t: theme, isWsl: false })
+    await writeLine(stub, writer, '~/proj/x', undefined, { t: theme, isWsl: false })
+    expect(liveWrites).toHaveLength(1)
+    const ember = makeTheme('ember', false)
+    await writeLine(stub, writer, '~/proj/x', undefined, { t: ember, isWsl: true })
+    expect(liveWrites).toHaveLength(2)
+    expect(liveWrites[1]).toBe(`6\n~/proj/x${ember.paint('sep', ' | ')}${ember.paint('label', '!:stale')}\n`)
   })
 
   test('a relative CLAUDE_CONFIG_DIR: nothing written', FOLDER_ONLY, async ($, on) => {
@@ -248,6 +275,7 @@ describe('line file', () => {
     await $.session.start(start)
     await clock.settle()
     expect(w.runs).toEqual([['mv', '-f', `${DATA}/S1/line.3.tmp`, `${DATA}/S1/line`]])
+    expect(w.checkIns[0]).toBe('6\n~/proj/x | !:stale\n')
   })
 
   test('Windows: HOME set elsewhere, the folder still shortens against USERPROFILE', FOLDER_ONLY, async ($, on) => {

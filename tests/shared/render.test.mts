@@ -117,13 +117,57 @@ test('quota windows retain labels, stale marks, reset times and dollar amounts',
   assert.equal(limits(f), 'extra:40%($20.00/$50.00)(1m)')
 })
 
-test('stale rows keep the separator with the warning, fit complete readings, and leave empty rows empty', () => {
+test('stale rows style the separator and marker, fit complete readings, handle WSL and leave empty rows empty', () => {
   const row = 'sol | ctx:7% | token:3.2k'
-  assert.equal(staleLine(row), row + ' | ⚠ stale')
-  assert.equal(staleLine(row, 22), 'sol | ctx:7% | ⚠ stale')
-  assert.equal(staleLine(row, 8), '⚠ stale')
+  assert.equal(staleLine(row), row + ' | ⌛stale')
+  assert.equal(staleLine(row, 22), 'sol | ctx:7% | ⌛stale')
+  assert.equal(staleLine(row, 8), '⌛stale')
   assert.equal(staleLine(''), '')
-  const sep = '\x1b[38;2;1;2;3m | \x1b[0m'
-  assert.equal(staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 22),
-    'sol' + sep + 'ctx:7% | ⚠ stale')
+  const t = makeTheme('graphite', false)
+  const sep = t.paint('sep', ' | ')
+  assert.equal(
+    staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 22, { t }),
+    'sol' + sep + 'ctx:7%' + sep + '⌛' + t.paint('label', 'stale'),
+  )
+  assert.equal(
+    staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 8, { t }),
+    '⌛' + t.paint('label', 'stale'),
+  )
+  assert.equal(
+    staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 22, { t, isWsl: true }),
+    'sol' + sep + 'ctx:7%' + sep + t.paint('label', '!:stale'),
+  )
+  assert.equal(staleLine(row, 8, { isWsl: true }), '!:stale')
+
+  // Coloured trimming matches only rendered sep tokens, never literal ` | ` inside names.
+  const folderPipe = input()
+  folderPipe.t = t
+  folderPipe.v.core.cwd = '/home/u/a | b'
+  folderPipe.v.session.model = 'claude-opus-5-5'
+  folderPipe.v.session.effort = 'high'
+  folderPipe.display = displaySession(folderPipe.v.session, shortModelName)
+  const folderRow = render(folderPipe)
+  assert.equal(staleLine(folderRow, 15, { t }), '⌛' + t.paint('label', 'stale'))
+
+  const repoPipe = input()
+  repoPipe.t = t
+  repoPipe.v.core.cwd = '/home/u/x'
+  repoPipe.v.session.model = 'claude-opus-5-5'
+  repoPipe.v.session.effort = 'high'
+  repoPipe.display = displaySession(repoPipe.v.session, shortModelName)
+  repoPipe.v.vcs = { ...initialVcs(), kind: 'git', repo: ' | foo', branch: 'main' }
+  const repoRow = render(repoPipe)
+  const expectedPrefix = render({ ...repoPipe, o: { ...DEFAULTS, repo: false, branch: false } })
+  assert.equal(staleLine(repoRow, 34, { t }), expectedPrefix + sep + '⌛' + t.paint('label', 'stale'))
+
+  const wtPipe = input()
+  wtPipe.t = t
+  wtPipe.v.core.cwd = '/home/u/x'
+  wtPipe.v.session.model = 'claude-opus-5-5'
+  wtPipe.v.session.effort = 'high'
+  wtPipe.display = displaySession(wtPipe.v.session, shortModelName)
+  wtPipe.v.vcs = { ...initialVcs(), kind: 'git', repo: 'R', branch: 'main', worktree: 'wt | 2' }
+  const wtRow = render(wtPipe)
+  const beforeBranch = render({ ...wtPipe, o: { ...DEFAULTS, branch: false } })
+  assert.equal(staleLine(wtRow, 55, { t }), beforeBranch + sep + '⌛' + t.paint('label', 'stale'))
 })

@@ -1,11 +1,12 @@
 import { rm } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { homedir, release } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
 import { restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, savedFooterSettings, FooterSettings } from '../../hosts/codex/footer.ts'
 import { cachedModelDefault } from '../../hosts/codex/model-defaults.ts'
 import { resolveCodexOptions } from '../../hosts/codex/options.ts'
 import { RolloutReader } from '../../hosts/codex/rollout.ts'
 import { Views, canHoldReadings, selectedView, type View, type ViewScreen } from '../../hosts/codex/views.ts'
+import { en } from '../../i18n/en.ts'
 import { TmuxOutput } from '../../outputs/tmux/client.ts'
 import { PaneInput } from '../../outputs/tmux/input.ts'
 import { applicationTarget } from '../../outputs/tmux/target.ts'
@@ -24,6 +25,8 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const file = recordPath(target), views = new Views(spec.home, thread, spec.transcript), input = new PaneInput(target)
   const output = new TmuxOutput(target.socket, target.pane)
   const options = resolveCodexOptions(spec.options), theme = makeTheme(options.theme, !!process.env.NO_COLOR)
+  const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
+  const staleStyle = { t: theme, l: en, isWsl }
   const footerSettings = new FooterSettings(cwd => savedFooterSettings(cwd, spec.home))
   const modelDefault = options.model && options.effort
     ? cachedModelDefault(spec.home, cwd => footerSettings.modelCatalog(cwd)) : undefined
@@ -102,7 +105,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
           let value = readers.get(view.thread)
           if (!value) {
             const reader = new RolloutReader(view.file, view.thread, view.cwd, homedir(), modelDefault)
-            value = { reader, line: codexLine(reader.collector, options, theme) }; readers.set(view.thread, value)
+            value = { reader, line: codexLine(reader.collector, options, theme, isWsl) }; readers.set(view.thread, value)
           }
           await value.reader.poll()
           width = await output.width()
@@ -122,7 +125,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
       const keepFailedReading = attached && readingError && view && lastReadings?.thread === view.thread
       if (line) {
         if (!attached) { await output.attach(); attached = true }
-        await output.update(line, width)
+        await output.update(line, width, staleStyle)
       } else if (attached && !keepFailedReading && codexComposer(screen, '')) {
         await output.detach(); attached = false; lastReadings = undefined
       } else if (attached && !keepFailedReading) await output.update('')

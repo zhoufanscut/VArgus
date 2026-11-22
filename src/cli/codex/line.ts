@@ -7,13 +7,14 @@ import { makeTheme } from '../../theme/index.ts'
 import { en } from '../../i18n/en.ts'
 import type { FragmentInput } from '../../core/types.ts'
 
-export function codexLine(collector: CodexCollector, o: CodexOptions, t: ReturnType<typeof makeTheme>) {
+export function codexLine(collector: CodexCollector, o: CodexOptions, t: ReturnType<typeof makeTheme>, isWsl = false) {
   const refreshGit = o.repo || o.branch || o.status ? pollGit() : undefined
   let confirmed: FragmentInput | undefined
   const line = async (width: number): Promise<string> => {
     const v = collector.snapshot()
     if (!v) return ''
     v.core.columns = width
+    v.core.isWsl = isWsl
     refreshGit?.(v)
     const frame = { v, display: codexDisplay(v.session), o, l: en, t, now: Date.now() }
     const result = render(frame)

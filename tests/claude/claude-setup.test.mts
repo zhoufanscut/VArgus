@@ -144,11 +144,11 @@ test('reinstall upgrades the old VArgus age-check readers in place', { skip: pro
       env: { PATH: process.env.PATH, CLAUDE_CODE_SESSION_ID: 'S1' },
     })
     assert.equal(read.stdout, 'idle row')
-    await writeFile(line + '.live', '1\nidle row | ⚠ stale\n')
+    await writeFile(line + '.live', '1\nidle row | ⌛stale\n')
     const expired = await exec('sh', ['-c', statusLine.command], {
       env: { PATH: process.env.PATH, CLAUDE_CODE_SESSION_ID: 'S1' },
     })
-    assert.equal(expired.stdout, 'idle row | ⚠ stale')
+    assert.equal(expired.stdout, 'idle row | ⌛stale')
     await rm(line + '.live')
   }
 })

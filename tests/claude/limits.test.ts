@@ -110,19 +110,21 @@ describe('limits fragment', () => {
     expect(draw({ error: 'rate_limited' })).toBe('[API 429]')
   })
 
-  test('colours: labels and resets in label, percent by the gradient, * faint, 429 faint, errors gradMid', async () => {
+  test('colours: labels in label, percent calm <80% and alert >=80%, * cost resets and 429 faint, auth/err alert', async () => {
     const base = makeTheme('graphite', true)
     const t: Theme = {
       ...base,
-      paint: (c, text) => `<${typeof c === 'string' ? c : 'g' + c.join(',')}>${text}`,
-      gradient: p => [p, 0, 0],
+      paint: (c, text) => `<${typeof c === 'string' ? c : 'rgb'}>${text}`,
     }
     expect(draw({ api: api({ monthly: { percent: 12, resetsAt: NOW + 5 * MIN } }), lastSuccessAt: NOW, error: 'network' }, {}, { t }))
-      .toBe('<label>1m:<g12,0,0>12%<faint>*<label>(~5m)')
+      .toBe('<label>1m:<calm>12%<faint>*<faint>(~5m)')
+    expect(draw({ engine: [{ kind: 'five_hour', percentUsed: 79.4 }, { kind: 'seven_day', percentUsed: 79.5 }] }, {}, { t }))
+      .toBe('<label>5h:<calm>79% <label>7d:<alert>80%')
     expect(draw({ error: 'rate_limited' }, {}, { t })).toBe('<faint>[API 429]')
-    expect(draw({ error: 'auth' }, {}, { t })).toBe('<gradMid>[API auth]')
+    expect(draw({ error: 'auth' }, {}, { t })).toBe('<alert>[API auth]')
+    expect(draw({ error: 'network' }, {}, { t })).toBe('<alert>[API err]')
     expect(draw({ engine: [{ kind: 'spend_limit', percentUsed: 130 }] }, { spendLimit: true }, { t }))
-      .toBe('<label>spend:<g100,0,0>130%')
+      .toBe('<label>spend:<alert>130%')
   })
 
   test('every word comes from the labels table', async () => {

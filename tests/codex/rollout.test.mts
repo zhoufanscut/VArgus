@@ -88,8 +88,8 @@ test('Codex effort colour follows the exact model in the current local catalog',
     const r = new RolloutReader(file, 'thread-a', '/repo', dir, cachedModelDefault(dir, () => null))
     const options = resolveCodexOptions({ repo: false, branch: false, status: false })
     const line = codexLine(r.collector, options, theme)
-    const calm = theme.paint('label', 'sol:') + theme.paint('gradLow', 'low')
-    const alert = theme.paint('label', 'sol:') + theme.paint('gradHigh', 'low')
+    const calm = theme.paint('label', 'sol:') + theme.paint('calm', 'low')
+    const alert = theme.paint('label', 'sol:') + theme.paint('alert', 'low')
     const saveCatalog = (originalSol: string) => writeFile(catalog, JSON.stringify({ models: [
       { slug: 'gpt-6.1-sol', default_reasoning_level: 'low' },
       { slug: 'gpt-6-sol', default_reasoning_level: originalSol },
@@ -135,14 +135,14 @@ test('Codex uses a configured catalog for the saved workspace before the home ca
     const first = { ...meta, payload: { ...meta.payload, model_provider: 'openai' } }
     await writeFile(file, JSON.stringify(first) + '\n' + context('/repo', 'low'))
     await reader.poll()
-    assert.ok((await line(200)).includes(theme.paint('gradLow', 'low')))
+    assert.ok((await line(200)).includes(theme.paint('calm', 'low')))
     await appendFile(file, context('/custom', 'high'))
     await reader.poll()
-    assert.ok((await line(200)).includes(theme.paint('gradHigh', 'high')))
+    assert.ok((await line(200)).includes(theme.paint('alert', 'high')))
     await rm(catalog)
     await appendFile(file, context('/custom', 'low'))
     await reader.poll()
-    assert.ok((await line(200)).includes(theme.paint('gradHigh', 'low')))
+    assert.ok((await line(200)).includes(theme.paint('alert', 'low')))
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 

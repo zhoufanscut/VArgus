@@ -99,9 +99,11 @@ and colours percentages, formats amounts and reset times, skips expired
 windows, and keeps windows without a known reset. Host-marked spend windows
 can exceed 100%. Each host decides which readings are current, stale or absent.
 
-A whole-row freshness warning appends ` | ⚠ stale` to the last available readings.
-The [formatter](src/render/freshness.ts) drops trailing readings when needed to
-fit the warning. Missing individual metrics retain their own display rules.
+A whole-row freshness warning appends ` | ⌛stale` (` | !:stale` on WSL) to the
+last available readings, using `sep` for the divider and `label` for the text
+(leaving `⌛` unstyled). The [formatter](src/render/freshness.ts) drops trailing
+readings when needed to fit the warning. Missing individual metrics retain their
+own display rules.
 
 ### Config
 
@@ -157,25 +159,43 @@ a second plugin rewrote a shared Ember request to Daylight. The picker and row
 used Daylight through a reload. VArgus remembers a rewrite with the shared value
 that requested it and retires that association when the file value changes.
 
-The displayed context percentage is rounded. Colour changes at 70% and 85%,
-with `COMPRESS?` from 80% through 84% and `CRITICAL` from 85%. WSL uses text
-call-count marks. Hosts choose the context supplied to the renderer, including
-whether an unknown reading is omitted or starts at `ctx:0%`.
+The displayed context percentage is rounded and uses `calm` below 80% and `alert`
+from 80%, with no text suffixes. WSL uses text call-count and stale marks
+(`T:`, `A:`, `S:`, `!:stale`) painted in `label`. Hosts choose the context
+supplied to the renderer, including whether an unknown reading is omitted or
+starts at `ctx:0%`.
 
 ### Colours
 
 [Themes](src/theme/index.ts) use 24-bit SGR styles and default to `graphite`.
+Each palette in [palettes.ts](src/theme/palettes.ts) defines 9 tokens: `text`,
+`label`, `faint`, `sep`, `calm`, `alert`, `add`, `del` and `track`.
 The palette registry uses own-property lookup and falls back for unknown
 names. When a host enables `NO_COLOR`, the theme returns plain text. External
 text passes through [control-character sanitization](src/render/text.ts) before
 styling. The tmux output translates the renderer's styles without recursively
 expanding content from paths or branches.
 
-Effort uses Calm at or above the model's default and Alert below it. An absent
-default uses `high`. An exact match to the baseline is Calm even for an
-unfamiliar named level. Unranked or numeric values that cannot be compared use
-Alert. The host supplies the baseline separately from the model's display name.
-[Model fragment and comparison](src/render/fragments/model.ts)
+- Location anchors (`folder`, `repo` name and `branch` / detached ref name) use
+  bold `text`.
+- Prefixes (`xxx:`), the model name (with or without effort), detached `@`,
+  call-count numbers, and stale text (`⌛stale` with unstyled `⌛`, or WSL
+  `T:`/`A:`/`S:`/`!:stale`) use `label`.
+- Secondary parentheticals (`(fast)`/`(ultrafast)`, rate-limit reset countdowns
+  and spend amounts, token cache/speed details, `(wt:x)`), stale `*` and
+  `[API 429]` use `faint`.
+- Readings with a threshold use two flat tiers (`calm` / `alert`): `ctx` and
+  rate-limit percentages flip at 80%, `tokens` flips at `1.00M` (999,950
+  tokens, matching its `k`/`M` switch), and `session` age flips at 12 hours.
+  Effort uses `calm` at or above the model's default and `alert` below it. An
+  absent default uses `high`. An exact match to the baseline is `calm` even for
+  an unfamiliar named level. Unranked or numeric values that cannot be compared
+  use `alert`. The host supplies the baseline separately from the model's
+  display name. [Model fragment and comparison](src/render/fragments/model.ts)
+- `[API auth]`, `[API err]` and in-progress Git operations (`(rebase …)`,
+  `(merge)`, etc.) use `alert`.
+- Working-tree counts use `add` (`+`, `⇡`), `del` (`✗`, `!`, `⇣`) and `track`
+  (`?`).
 
 ### Languages
 
@@ -674,7 +694,7 @@ VantageHUD 0.6.0 is the read-only reference for these rules.
 | Rule | Why it matters in VArgus |
 |---|---|
 | Preserve fragment order, label text and terminal-column fitting. | A narrow row keeps the higher-priority fragments and handles wide characters. See [Fragments](#fragments) and [Languages](#languages). |
-| Use a palette registry with safe lookup and shared percentage tiers. | Unexpected names fall back to a known palette. See [Colours](#colours). |
+| Use a palette registry with safe lookup and flat status tiers. | Unexpected names fall back to a known palette; VArgus uses two flat tiers (`calm` and `alert`). See [Colours](#colours). |
 | Omit expired quota readings and keep Claude's usage cache separate by provider and config directory. | After an account switch in the same directory, the previous account's cached reading can still appear. See [Usage cache and staleness](#usage-cache-and-staleness). |
 | Use the host's OAuth handle without refreshing its credential. | The usage read leaves the login lifecycle with the host. See [Claude data sources](#data-sources). |
 | Pace repository status, resolve the actual worktree and count SVN item and property changes. | Reading status stays bounded and the branch reflects the session's repository. See [Repository readings](#repository-readings). |

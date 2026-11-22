@@ -182,7 +182,7 @@ describe('session collector', () => {
     await $.session.start(start)
     w.model = 'claude-sonnet-5'
     await $.session.measure({ context: { window: 200000, percent: 86 }, rateLimits: [], changed: ['context'] })
-    expect(await line(clock, w)).toBe('sonnet | ctx:86% CRITICAL | session:0m')
+    expect(await line(clock, w)).toBe('sonnet | ctx:86% | session:0m')
   })
 
   test('/clear and resume start the counts over, in $.state too; other ends keep them', MINE, async ($, on) => {

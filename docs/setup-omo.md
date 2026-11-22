@@ -36,7 +36,7 @@ extensions can compete with VArgus; disabling VArgus restores OmO's built-in foo
 not an earlier custom footer.
 
 The widget checks the time of the last successful collection when it draws.
-After five seconds without one, it adds `| ⚠ stale` to the last readings.
+After five seconds without one, it adds `| ⌛stale` (`| !:stale` on WSL) to the last readings.
 The next successful update clears it. A frozen OmO UI can show a change only
 after drawing resumes.
 

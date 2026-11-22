@@ -30,11 +30,11 @@ test('each palette uses calm at or above the model default or high cutoff', () =
   for (const name of Object.keys(PALETTES)) {
     const t = makeTheme(name, false)
     for (const [effort, defaultEffort, color] of [
-      ['low', 'low', t.rgb.gradLow], ['medium', 'medium', t.rgb.gradLow], ['high', 'xhigh', t.rgb.gradHigh],
-      ['low', 'medium', t.rgb.gradHigh], ['HIGH', 'medium', t.rgb.gradLow], ['ultra', 'max', t.rgb.gradLow],
-      ['medium', undefined, t.rgb.gradHigh], ['high', undefined, t.rgb.gradLow],
-      ['xhigh', undefined, t.rgb.gradLow], ['max', undefined, t.rgb.gradLow], ['ultra', undefined, t.rgb.gradLow],
-      ['odd', 'medium', t.rgb.gradHigh], [4096, 'medium', t.rgb.gradHigh],
+      ['low', 'low', t.rgb.calm], ['medium', 'medium', t.rgb.calm], ['high', 'xhigh', t.rgb.alert],
+      ['low', 'medium', t.rgb.alert], ['HIGH', 'medium', t.rgb.calm], ['ultra', 'max', t.rgb.calm],
+      ['medium', undefined, t.rgb.alert], ['high', undefined, t.rgb.calm],
+      ['xhigh', undefined, t.rgb.calm], ['max', undefined, t.rgb.calm], ['ultra', undefined, t.rgb.calm],
+      ['odd', 'medium', t.rgb.alert], [4096, 'medium', t.rgb.alert],
     ] as const) {
       assert.deepEqual(effortColor(t, effort, defaultEffort), color, `${name}: ${effort} with default ${defaultEffort}`)
       v.session.effort = effort
@@ -83,7 +83,8 @@ test('Fast mode stays beside the model when effort is hidden or unavailable', ()
   assert.equal(model(codexInput(v)), 'sol:max(fast)')
   assert.equal(model(codexInput(v, { ...defaults, effort: false })), 'sol(fast)')
   const t = makeTheme('graphite', false)
-  assert.equal(model(codexInput(v, defaults, t)), t.paint('label', 'sol:') + t.paint(t.rgb.gradLow, 'max') + t.paint('faint', '(fast)'))
+  assert.equal(model(codexInput(v, defaults, t)), t.paint('label', 'sol:') + t.paint(t.rgb.calm, 'max') + t.paint('faint', '(fast)'))
+  assert.equal(model(codexInput(v, { ...defaults, effort: false }, t)), t.paint('label', 'sol') + t.paint('faint', '(fast)'))
   v.session.effort = undefined
   assert.equal(model(codexInput(v)), 'sol(fast)')
   v.session.fast = false
@@ -154,7 +155,7 @@ test('OmO speed suffixes follow effort and stay visible when effort is hidden', 
   v.session.fast = true
   const t = makeTheme('graphite', false)
   assert.equal(model({ ...input(), t }),
-    t.paint('label', 'sol:') + t.paint(t.rgb.gradLow, 'high') + t.paint('faint', '(ultrafast)'))
+    t.paint('label', 'sol:') + t.paint(t.rgb.calm, 'high') + t.paint('faint', '(ultrafast)'))
   v.session.fast = false
   for (const [display, id, name] of [
     [codexDisplay, 'gpt-6.1-sol-fast', 'gpt-6.1-sol-fast'],

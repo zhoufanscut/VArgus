@@ -107,7 +107,7 @@ If the row is blank and the current view is unknown, see
 [narrow terminals and SSH](#narrow-terminals-and-ssh).
 
 If the worker misses its check-ins, the next bar redraw shows the last readings
-with `| ⚠ stale`. This also applies when a previously readable transcript
+with `| ⌛stale` (`| !:stale` on WSL). This also applies when a previously readable transcript
 becomes unreadable while its view is still identified. The marker clears after a successful update, including a
 normal update while you type. The bar follows your existing `status-interval`.
 With periodic redraws disabled, the marker can appear on the next redraw.

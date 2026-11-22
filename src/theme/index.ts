@@ -31,7 +31,6 @@ export function resolvePalette(name: string): { name: string; rgb: Record<TokenN
 export function makeTheme(name: string, noColor: boolean): Theme {
   const palette = resolvePalette(name)
   const rgb = palette.rgb
-  const stops = [rgb.gradLow, rgb.gradMid, rgb.gradHigh] as const
   return {
     name: palette.name,
     rgb,
@@ -43,15 +42,5 @@ export function makeTheme(name: string, noColor: boolean): Theme {
     },
     // 22 ends bold alone, so a bold run never cuts a colour around it.
     bold: text => (noColor ? text : `${ESC}1m${text}${ESC}22m`),
-    // Three flat tiers, not a ramp: calm below bounds[0], watch to bounds[1],
-    // alert from bounds[1] (VantageHUD's gradientColor: a fixed hue reads as
-    // a state faster than a position on a ramp). Percent clamped to 0..100.
-    gradient: (percent, bounds = [70, 85]) => {
-      const p = Math.min(100, Math.max(0, percent))
-      let tier = 0
-      while (tier < bounds.length && p >= bounds[tier]!) tier++
-      // more bounds than two (outside the type) still give the alert tier
-      return stops[Math.min(tier, stops.length - 1)]!
-    },
   }
 }

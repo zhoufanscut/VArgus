@@ -93,3 +93,15 @@ test('Codex renders a detached tag and linked worktree by default and with a leg
     }
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
+
+test('codexLine forwards isWsl to call counts and preserves it when paused', async () => {
+  const collector = new CodexCollector('/repo', undefined)
+  collector.start('/repo', 0)
+  collector.snapshot()!.session.counts.tools = 3
+  const colored = makeTheme('graphite', false)
+  const options = resolveCodexOptions({ repo: false, branch: false, status: false, session: false })
+  const line = codexLine(collector, options, colored, true)
+  const live = await line(200)
+  assert.ok(live.includes(colored.paint('label', 'T:3')))
+  assert.equal(line.paused(200), live)
+})

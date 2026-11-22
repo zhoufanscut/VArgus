@@ -10,6 +10,7 @@ import { DEFAULTS } from '../../src/options.ts'
 import { calls } from '../../src/render/fragments/calls.ts'
 import { context } from '../../src/render/fragments/context.ts'
 import { folder } from '../../src/render/fragments/folder.ts'
+import { staleLine } from '../../src/render/freshness.ts'
 import { model } from '../../src/render/fragments/model.ts'
 import { session } from '../../src/render/fragments/session.ts'
 import { tokens } from '../../src/render/fragments/tokens.ts'
@@ -46,12 +47,13 @@ const cases: [string, Fragment, FragmentInput, string[], string[]][] = [
   ['folder', folder, input({}), ['~/proj'], []],
   ['model', model, input({ model: 'claude-opus-5-5[1m]', effort: 'high' }), ['opus', 'high'], []],
   ['context', context, input({ contextPercent: 20 }), [], ['context']],
-  ['context compress', context, input({ contextPercent: 82 }), [], ['context', 'compress']],
-  ['context critical', context, input({ contextPercent: 90 }), [], ['context', 'critical']],
+  ['context alert', context, input({ contextPercent: 90 }), [], ['context']],
   ['tokens', tokens, input({ counts, cacheHitPercent: 23, tokensPerSecond: 48 }), [], ['tokens', 'tokensPerSecond']],
   ['session', session, input({ startedAt: 0 }), [], ['session']],
   ['calls emoji', calls, input({ counts }), [], []],
   ['calls text', calls, input({ counts }, true), [], ['tool', 'agent', 'skill']],
+  ['stale emoji', f => staleLine('a', undefined, { t: f.t, l: f.l, isWsl: false }), input({}), ['a'], ['stale']],
+  ['stale text', f => staleLine('a', undefined, { t: f.t, l: f.l, isWsl: true }), input({}, true), ['a'], ['staleMark', 'stale']],
 ]
 
 describe('labels', () => {

@@ -37,9 +37,12 @@ export async function renderAntigravityStatusLine(
   const id = payload.conversation_id || payload.session_id
   if (typeof id !== 'string' || !id.trim()) return collectLine(payload, runtime)
   const dir = runtime.cacheDir ?? defaultCacheDir()
+  const isWsl = runtime.isWsl ?? detectWsl(process.env)
+  const noColor = runtime.noColor ?? Boolean(process.env.NO_COLOR)
+  const options = resolveOptions(runtime.givenOptions ?? {})
   const key = JSON.stringify([runtime.appDataDir ?? process.env.ANTIGRAVITY_APP_DATA_DIR, runtime.home ?? homedir(),
     id, payload.workspace?.current_dir ?? payload.cwd ?? runtime.fallbackCwd ?? process.cwd(),
-    resolveOptions(runtime.givenOptions ?? {}), runtime.noColor ?? Boolean(process.env.NO_COLOR)])
+    options, noColor, isWsl])
   const file = cachePath(dir, 'row', key)
   const previous = await readCache<string>(file)
   let line: string
@@ -48,8 +51,11 @@ export async function renderAntigravityStatusLine(
   } catch (error) {
     if (!previous || typeof previous !== 'string') throw error
     const width = payload.terminal_width
-    return STATUSLINE_PADDING + staleLine(previous.slice(STATUSLINE_PADDING.length),
-      width && width > 0 ? width - STATUSLINE_PADDING.length : undefined)
+    return STATUSLINE_PADDING + staleLine(
+      previous.slice(STATUSLINE_PADDING.length),
+      width && width > 0 ? width - STATUSLINE_PADDING.length : undefined,
+      { t: makeTheme(options.theme, noColor), l: resolveLabels('en'), isWsl },
+    )
   }
   if (line !== previous) await writeCache(dir, file, line).catch(() => {})
   return line

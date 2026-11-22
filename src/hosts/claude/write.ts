@@ -2,7 +2,7 @@ import { dataDir, homeDir, DRIVE_PATH } from './paths'
 export { DATA_FOLDER, dataDir, homeDir } from './paths'
 import type { EngineInterface } from 'claude-code'
 
-import { REFRESH_GRACE_MS, staleLine } from '../../render/freshness'
+import { REFRESH_GRACE_MS, staleLine, type StaleStyle } from '../../render/freshness'
 
 export type Writer = {
   // <data>, absolute, with `/` separators; null when the config folder is
@@ -17,10 +17,10 @@ export type Writer = {
   tools: 'posix' | 'cmd'
   // line.<t>.tmp: one temp file per loaded copy of the mod.
   tmpName: string
-  last: { id: string; text: string; checkedAt: number; columns?: number } | null
+  last: { id: string; text: string; checkedAt: number; columns?: number; stale?: string } | null
   // the write loop while it runs
   running: Promise<void> | null
-  pending: { text: string; columns?: number } | null
+  pending: { text: string; columns?: number; style?: StaleStyle } | null
   // the id of the session that ended, written no more while $.session.id()
   // still gives it (0.75 s after the one resume measured), until another
   // session ends in this process; a resume back to it ends the session in
@@ -53,14 +53,14 @@ export async function createWriter($: EngineInterface): Promise<Writer> {
 // One write runs at a time; a newer text waiting
 // replaces an older one. The id is read on every write: /clear and a resume
 // change it with no session.start.
-export function writeLine($: EngineInterface, w: Writer, text: string, columns?: number): Promise<void> {
-  w.pending = { text, columns }
+export function writeLine($: EngineInterface, w: Writer, text: string, columns?: number, style?: StaleStyle): Promise<void> {
+  w.pending = { text, columns, style }
   if (!w.running) {
     w.running = drain($, w).finally(() => {
       w.running = null
       // a text still waiting when the loop ended: it came in after the last
       // check, or its write failed (tried once more)
-      if (w.pending !== null) writeLine($, w, w.pending.text, w.pending.columns).catch(() => {})
+      if (w.pending !== null) writeLine($, w, w.pending.text, w.pending.columns, w.pending.style).catch(() => {})
     })
   }
   return w.running
@@ -133,7 +133,7 @@ function backslash(path: string): string {
 
 async function drain($: EngineInterface, w: Writer): Promise<void> {
   while (w.pending !== null) {
-    const { text, columns } = w.pending
+    const { text, columns, style } = w.pending
     w.pending = null
     const id = await $.session.id()
     if (!w.dir || !id || id === w.ended) continue
@@ -141,8 +141,9 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
     const line = `${folder}/line`
     let checkedAt = await $.clock.now()
     const last = w.last
+    const stale = staleLine(text, columns, style)
     const unchanged = last?.id === id && last.text === text
-    if (unchanged && last.columns === columns && checkedAt >= last.checkedAt && checkedAt - last.checkedAt < 2000) continue
+    if (unchanged && last.columns === columns && last.stale === stale && checkedAt >= last.checkedAt && checkedAt - last.checkedAt < 2000) continue
     if (!unchanged) {
       const tmp = `${folder}/${w.tmpName}`
       const argv = moveArgv(w, tmp, line)
@@ -162,7 +163,7 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
     }
     // A reader accepts only a complete deadline and newline-terminated stale row.
     const deadline = Math.ceil((checkedAt + REFRESH_GRACE_MS) / 1000)
-    await $.fs.write(line + '.live', `${deadline}\n${staleLine(text, columns)}\n`)
-    w.last = { id, text, checkedAt, columns }
+    await $.fs.write(line + '.live', `${deadline}\n${stale}\n`)
+    w.last = { id, text, checkedAt, columns, stale }
   }
 }

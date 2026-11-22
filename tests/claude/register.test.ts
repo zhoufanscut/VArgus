@@ -163,17 +163,17 @@ describe('register: the line as the host sets it up', () => {
     const theme = makeTheme('graphite', false)
     await $.session.start(start)
     await step($, { model: 'claude-opus-5-5[1m]', effort: 'medium' })
-    expect(await line(clock, w)).toContain(theme.paint('gradLow', 'medium'))
+    expect(await line(clock, w)).toContain(theme.paint('calm', 'medium'))
     await step($, { model: 'claude-opus-4-7', effort: 'high', agentId: 'a1' })
-    expect(await line(clock, w)).toContain(theme.paint('gradLow', 'medium'))
+    expect(await line(clock, w)).toContain(theme.paint('calm', 'medium'))
     w.model = 'claude-opus-4-7'
     await step($, { model: w.model, effort: 'high' })
-    expect(await line(clock, w)).toContain(theme.paint('gradHigh', 'high'))
+    expect(await line(clock, w)).toContain(theme.paint('alert', 'high'))
     w.model = 'unknown-model'
     await step($, { model: w.model, effort: 'max' })
-    expect(await line(clock, w)).toContain(theme.paint('gradLow', 'max'))
+    expect(await line(clock, w)).toContain(theme.paint('calm', 'max'))
     await step($, { model: w.model, effort: 'medium' })
-    expect(await line(clock, w)).toContain(theme.paint('gradHigh', 'medium'))
+    expect(await line(clock, w)).toContain(theme.paint('alert', 'medium'))
   })
 
   test('startup requests closure of the old detail pane and applies the saved theme',

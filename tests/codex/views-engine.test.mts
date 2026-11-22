@@ -5,7 +5,7 @@ import { createServer } from 'node:http'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rename } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { tmpdir, release } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -393,14 +393,15 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     const visibleRow = async () => (await tmux('display-message', '-p', '-t', pane, '#{E:status-format[0]}')).replace(/#\[[^\]]*\]/g, '')
     const healthy = await visibleRow()
     assert.match(healthy, new RegExp('token:' + expected.get(lastPath)!.tokens.replace('.', '\\.')))
+    const staleMark = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release())) ? '!:stale' : '⌛stale'
     await rename(transcript, held)
-    await wait(visibleRow, / \| ⚠ stale$/)
-    assert.equal(await visibleRow(), await row() + ' | ⚠ stale')
+    await wait(visibleRow, new RegExp(' \\| ' + staleMark + '$'))
+    assert.equal(await visibleRow(), await row() + ' | ' + staleMark)
     await wait(async () => (await records())[0]?.error ?? '', /ENOENT/)
     await delay(400)
     assert.match((await records())[0].error, /ENOENT/)
     await rename(held, transcript)
-    await wait(async () => (await visibleRow()).includes('⚠ stale') ? '' : 'fresh', /^fresh$/)
+    await wait(async () => (await visibleRow()).includes(staleMark) ? '' : 'fresh', /^fresh$/)
     await wait(row, new RegExp('token:' + expected.get(lastPath)!.tokens.replace('.', '\\.')))
     // A narrow pane that clips the contextual identity must blank rather than guess.
     await tmux('resize-window', '-t', 'test', '-x', '24', '-y', '40')

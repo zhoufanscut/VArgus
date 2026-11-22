@@ -2,12 +2,13 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { lstat, mkdir, mkdtemp, readFile, writeFile, readdir, rm, symlink } from 'node:fs/promises'
 import { fixtureCheckout } from '../checkout.mts'
-import { tmpdir } from 'node:os'
+import { tmpdir, release } from 'node:os'
 import { join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import vargus, { type OmoApi } from '../../src/hosts/omo/register.ts'
 import { main } from '../../src/cli.ts'
 import type { SessionEntry } from '../../src/hosts/omo/contracts.ts'
+import { makeTheme } from '../../src/theme/index.ts'
 
 function host(mode = 'tui') {
   const entries: SessionEntry[] = []
@@ -96,24 +97,38 @@ test('OmO warns on a redraw after missed updates and clears the warning after re
   const h = host()
   let now = 1000
   t.mock.method(Date, 'now', () => now)
+  const hadNoColor = 'NO_COLOR' in process.env
+  const savedNoColor = process.env.NO_COLOR
+  delete process.env.NO_COLOR
+  const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
+  const theme = makeTheme('graphite', false)
+  const staleMark = isWsl ? '!:stale' : '⌛stale'
+  const styledSuffix = theme.paint('sep', ' | ') + (isWsl ? theme.paint('label', '!:stale') : '⌛' + theme.paint('label', 'stale'))
   h.load(); h.event('session_start')
-  const text = () => h.row!.render(200)[0]!.replace(/\x1b\[[0-9;]*m/g, '')
+  const raw = () => h.row!.render(200)[0]!
+  const text = () => raw().replace(/\x1b\[[0-9;]*m/g, '')
   try {
+    const healthyRaw = raw()
     const healthy = text()
     now += 4500
     assert.equal(text(), healthy)
     h.ctx.getContextUsage = () => { throw new Error('collection failed') }
     h.event('message_end')
     now += 501
-    assert.equal(text(), healthy + ' | ⚠ stale')
+    assert.equal(raw(), healthyRaw + styledSuffix)
+    assert.equal(text(), healthy + ' | ' + staleMark)
     h.ctx.getContextUsage = () => {
       now += 6000
       return { tokens: 750, contextWindow: 1000, percent: 75 }
     }
     h.event('message_end')
     assert.match(text(), /ctx:75%/)
-    assert.doesNotMatch(text(), /⚠ stale/)
-  } finally { h.event('session_shutdown') }
+    assert.doesNotMatch(text(), new RegExp(staleMark))
+  } finally {
+    h.event('session_shutdown')
+    if (hadNoColor) process.env.NO_COLOR = savedNoColor
+    else delete process.env.NO_COLOR
+  }
 })
 
 test('OmO configuration changes rendering and keeps a disabled session disabled', async () => {

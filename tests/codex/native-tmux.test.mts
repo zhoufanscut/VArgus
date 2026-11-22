@@ -4,6 +4,7 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TmuxOutput } from '../../src/outputs/tmux/client.ts'
+import { makeTheme } from '../../src/theme/index.ts'
 
 // Exercise the Windows branch on every platform. Commands use the psmux 3.4.0
 // option-list contract; windows.test.mts complements this with real psmux.
@@ -134,15 +135,22 @@ test('native stale readings occupy only the VArgus slot in each layout', async t
       const rows = () => [r.server.expand(r.server.options.get('status-left')!), r.server.expand(r.server.formats[1]!)]
       const at = scalar ? 0 : 1
       assert.match(rows()[at]!, /ctx:7%/)
-      assert.doesNotMatch(rows().join(''), /⚠ stale/)
+      assert.doesNotMatch(rows().join(''), /⌛stale/)
       now += 6000
-      assert.match(rows()[at]!, /sol \| ctx:7% \| ⚠ stale/)
-      assert.doesNotMatch(rows()[1 - at]!, /⚠ stale/)
+      assert.match(rows()[at]!, /sol \| ctx:7% \| ⌛stale/)
+      assert.doesNotMatch(rows()[1 - at]!, /⌛stale/)
       await output.update('sol | ctx:7%')
-      assert.doesNotMatch(rows().join(''), /⚠ stale/)
+      assert.doesNotMatch(rows().join(''), /⌛stale/)
+      const t = makeTheme('graphite', false)
+      await output.update('sol | ctx:7%', undefined, { t, isWsl: false })
+      now += 6000
+      assert.ok(rows()[at]!.includes('#[fg=#3f3f3f,nobold] | #[fg=default,nobold]⌛#[fg=#9e9e9e,nobold]stale'))
+      await output.update('sol | ctx:7%', undefined, { t, isWsl: true })
+      now += 6000
+      assert.ok(rows()[at]!.includes('#[fg=#3f3f3f,nobold] | #[fg=#9e9e9e,nobold]!:stale'))
       await output.update('')
       now += 6000
-      assert.doesNotMatch(rows().join(''), /⚠ stale/)
+      assert.doesNotMatch(rows().join(''), /⌛stale|!:stale/)
       await output.detach()
       assert.equal(r.server.value('@vargus_deadline'), '')
       assert.equal(r.server.value('@vargus_header_deadline'), '')

@@ -1,16 +1,10 @@
 import type { Fragment } from '../../core/types.ts'
 
-// 4. context: `ctx:20%` (DESIGN, "Fragments"; VantageHUD's elements/context.js
-// with its default thresholds, built in per DESIGN "Config").
-// The colour moves at WARNING and CRITICAL (gradLow / gradMid / gradHigh), so
-// it flips in step with the CRITICAL word; COMPRESS? shows from COMPACT.
-const WARNING = 70
-const COMPACT = 80
-const CRITICAL = 85
+// 4. context: `ctx:20%` (DESIGN, "Fragments"): calm below 80%, alert from 80%.
+const ALERT_PERCENT = 80
 
 export const context: Fragment = ({ display, l, t }) => {
   if (display.contextPercent === undefined) return null
   const percent = Math.min(100, Math.max(0, Math.round(display.contextPercent)))
-  const suffix = percent >= CRITICAL ? ` ${l.critical}` : percent >= COMPACT ? ` ${l.compress}` : ''
-  return t.paint('label', `${l.context}:`) + t.paint(t.gradient(percent, [WARNING, CRITICAL]), `${percent}%${suffix}`)
+  return t.paint('label', `${l.context}:`) + t.paint(percent >= ALERT_PERCENT ? 'alert' : 'calm', `${percent}%`)
 }

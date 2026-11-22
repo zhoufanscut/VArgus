@@ -21,7 +21,7 @@ import { makeTheme } from '../../src/theme/index.ts'
 
 const t = makeTheme('aurora', false)
 const plain = makeTheme('aurora', true)
-const { gradLow, gradMid, gradHigh } = t.rgb
+const { calm, alert } = t.rgb
 
 function input(
   session: Partial<Values['session']> = {},
@@ -52,16 +52,17 @@ describe('model', () => {
   })
 
   test('off and none are the same level, with minimal below low', () => {
-    assert.deepEqual(effortColor(t, 'off', 'none'), gradLow)
-    assert.deepEqual(effortColor(t, 'minimal', 'none'), gradLow)
-    assert.deepEqual(effortColor(t, 'minimal', 'low'), gradHigh)
+    assert.deepEqual(effortColor(t, 'off', 'none'), calm)
+    assert.deepEqual(effortColor(t, 'minimal', 'none'), calm)
+    assert.deepEqual(effortColor(t, 'minimal', 'low'), alert)
   })
 
-  test('opus:high, label then effort colour; effort off or absent: the name alone, calm', () => {
+  test('opus:high, label then effort colour; effort off or absent: the name alone in label', () => {
     const m = 'claude-opus-5-5[1m]'
     assert.equal(model(input({ model: m, effort: 'high' })), 'opus:high')
-    assert.equal(model(input({ model: m, effort: 'high', defaultEffort: 'medium' }, {}, { color: true })), t.paint('label', 'opus:') + t.paint(gradLow, 'high'))
-    assert.equal(model(input({ model: m, effort: 'high' }, { effort: false }, { color: true })), t.paint(gradLow, 'opus'))
+    assert.equal(model(input({ model: m, effort: 'high', defaultEffort: 'medium' }, {}, { color: true })), t.paint('label', 'opus:') + t.paint(calm, 'high'))
+    assert.equal(model(input({ model: m, effort: 'high' }, { effort: false }, { color: true })), t.paint('label', 'opus'))
+    assert.equal(model(input({ model: m }, {}, { color: true })), t.paint('label', 'opus'))
     assert.equal(model(input({ model: m })), 'opus')
     assert.equal(model(input({})), null)
   })
@@ -97,20 +98,20 @@ describe('outside text is cleaned', () => {
 })
 
 describe('context', () => {
-  test('70 / 80 / 85: colour at 70 and 85, COMPRESS? from 80, CRITICAL from 85', () => {
+  test('percentage only: calm below 80%, alert from 80%', () => {
     const at = (p: number) => context(input({ contextPercent: p }, {}, { color: true }))
-    const want = (rgb: typeof gradLow, text: string) => t.paint('label', 'ctx:') + t.paint(rgb, text)
-    assert.equal(at(69), want(gradLow, '69%'))
-    assert.equal(at(70), want(gradMid, '70%'))
-    assert.equal(at(79), want(gradMid, '79%'))
-    assert.equal(at(80), want(gradMid, '80% COMPRESS?'))
-    assert.equal(at(84), want(gradMid, '84% COMPRESS?'))
-    assert.equal(at(85), want(gradHigh, '85% CRITICAL'))
+    const want = (rgb: typeof calm, text: string) => t.paint('label', 'ctx:') + t.paint(rgb, text)
+    assert.equal(at(69), want(calm, '69%'))
+    assert.equal(at(79.4), want(calm, '79%'))
+    assert.equal(at(79.5), want(alert, '80%'))
+    assert.equal(at(80), want(alert, '80%'))
+    assert.equal(at(85), want(alert, '85%'))
+    assert.equal(at(100), want(alert, '100%'))
   })
 
   test('rounded and clamped; a supplied zero fallback shows 0%', () => {
     assert.equal(context(input({ contextPercent: 19.6 })), 'ctx:20%')
-    assert.equal(context(input({ contextPercent: 140 })), 'ctx:100% CRITICAL')
+    assert.equal(context(input({ contextPercent: 140 })), 'ctx:100%')
     assert.equal(context(input({})), 'ctx:0%')
   })
 })
@@ -120,8 +121,11 @@ describe('tokens', () => {
     assert.deepEqual([0, 999, 1000, 69_500, 999_949, 999_950, 12_345_678].map(formatTokenCount), ['0', '999', '1.0k', '69.5k', '999.9k', '1.00M', '12.35M'])
   })
 
-  test('token:69.5k, label then gradLow; hidden at zero', () => {
-    assert.equal(tokens(input({ counts: counts({ tokens: 69_500 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(gradLow, '69.5k'))
+  test('token count is calm under 1M (999,950) and alert from 1.00M; hidden at zero', () => {
+    assert.equal(tokens(input({ counts: counts({ tokens: 69_500 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(calm, '69.5k'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 999_949 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(calm, '999.9k'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 999_950 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(alert, '1.00M'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 1_500_000 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(alert, '1.50M'))
     assert.equal(tokens(input({})), null)
   })
 
@@ -152,7 +156,7 @@ describe('tokens', () => {
     assert.equal(tokens(input({ counts: total, cacheHitPercent: 99.4, tokensPerSecond: 48.4 })), 'token:69.5k(99.4%, 48t/s)')
     assert.equal(
       tokens(input({ counts: total, cacheHitPercent: 99.4, tokensPerSecond: 48.4 }, {}, { color: true })),
-      t.paint('label', 'token:') + t.paint(gradLow, '69.5k') + t.paint('faint', '(99.4%, 48t/s)'),
+      t.paint('label', 'token:') + t.paint(calm, '69.5k') + t.paint('faint', '(99.4%, 48t/s)'),
     )
     assert.equal(tokens(input({ counts: total, cacheHitPercent: 99.4, tokensPerSecond: 0.04 })), 'token:69.5k(99.4%)')
   })
@@ -163,12 +167,11 @@ describe('session time', () => {
     assert.deepEqual([0, 45.9, 59, 60, 192, 1439, 1440, 3180].map(formatDuration), ['0m', '45m', '59m', '1h0m', '3h12m', '23h59m', '1d0h', '2d5h'])
   })
 
-  test('since startedAt; tier colour over 8 h (calm < 5.6 h, alert from 6.8 h); hidden until known', () => {
+  test('since startedAt; calm under 12 h, alert from 12 h; hidden until known', () => {
     const at = (min: number) => session(input({ startedAt: 1000 }, {}, { now: 1000 + min * 60_000 + 59_999, color: true }))
-    assert.equal(at(24), t.paint('label', 'session:') + t.paint(gradLow, '24m'))
-    assert.equal(at(335), t.paint('label', 'session:') + t.paint(gradLow, '5h35m'))
-    assert.equal(at(336), t.paint('label', 'session:') + t.paint(gradMid, '5h36m'))
-    assert.equal(at(408), t.paint('label', 'session:') + t.paint(gradHigh, '6h48m'))
+    assert.equal(at(24), t.paint('label', 'session:') + t.paint(calm, '24m'))
+    assert.equal(at(719), t.paint('label', 'session:') + t.paint(calm, '11h59m'))
+    assert.equal(at(720), t.paint('label', 'session:') + t.paint(alert, '12h0m'))
     assert.equal(session(input({ startedAt: 5000 }, {}, { now: 0 })), 'session:0m')
     assert.equal(session(input({})), null)
   })
@@ -184,7 +187,11 @@ describe('call counts', () => {
     assert.equal(calls(input({ counts: counts({ tools: 1 }) }, {}, { color: true })), '🔧' + t.paint('label', '1'))
   })
 
-  test('text on WSL: T:73 A:2 S:1', () => {
+  test('text on WSL: T:73 A:2 S:1 painted in label', () => {
     assert.equal(calls(input({ counts: c }, {}, { isWsl: true })), 'T:73 A:2 S:1')
+    assert.equal(
+      calls(input({ counts: c }, {}, { isWsl: true, color: true })),
+      `${t.paint('label', 'T:73')} ${t.paint('label', 'A:2')} ${t.paint('label', 'S:1')}`,
+    )
   })
 })

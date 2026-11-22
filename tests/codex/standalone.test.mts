@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename, cp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { tmpdir, release } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -339,8 +339,8 @@ trust_level = "trusted"
       const entryPath = join(replacement, 'src/cli.ts')
       const sourcePath = join(replacement, 'src/cli/codex/worker.ts')
       const source = await readFile(sourcePath, 'utf8'), entrySource = await readFile(entryPath, 'utf8')
-      assert.equal(source.split('await output.update(line, width)').length, 2)
-      const changed = source.replace('await output.update(line, width)', 'await output.update(line + " RELOAD_SOURCE_B", width)')
+      assert.equal(source.split('await output.update(line, width, staleStyle)').length, 2)
+      const changed = source.replace('await output.update(line, width, staleStyle)', 'await output.update(line + " RELOAD_SOURCE_B", width, staleStyle)')
       await writeFile(sourcePath, changed)
       const control = (action: string, flags: string[] = []) => exec(process.execPath, [entryPath, action, ...flags], {
         cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1', CODEX_THREAD_ID: first.thread },
@@ -358,10 +358,11 @@ trust_level = "trusted"
       await rename(first.transcript, first.transcript + '.held')
       await assert.rejects(control('reload'))
       assert.equal((await runtime()).pid, first.pid, 'unreadable transcript keeps healthy helper')
+      const staleMark = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release())) ? '!:stale' : '⌛stale'
       const expanded = async () => (await tmux('display-message', '-p', '-t', pane, '#{E:status-format[0]}')).replace(/#\[[^\]]*\]/g, '')
-      await wait(expanded, /token:6\.4k.*⚠ stale/)
+      await wait(expanded, new RegExp('token:6\\.4k.*' + staleMark))
       await rename(first.transcript + '.held', first.transcript)
-      await wait(async () => (await expanded()).includes('⚠ stale') ? 'stale' : await row(), /token:6\.4k/)
+      await wait(async () => (await expanded()).includes(staleMark) ? 'stale' : await row(), /token:6\.4k/)
       assert.match((await control('reload')).stdout, /helper reloaded/)
       await wait(row, /RELOAD_SOURCE_B/)
       const second = await runtime()

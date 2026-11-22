@@ -145,15 +145,19 @@ describe('vcs fragments', () => {
     assert.equal(branch(input({ kind: 'svn', branch: 'T', revision: '9' }, marked)), '⟦branch⟧:T')
   })
 
-  test('colours as VantageHUD git.js', () => {
-    const tag: Theme = { ...makeTheme('graphite', true), paint: (c, s) => `<${String(c)}>${s}</>` }
+  test('colours: bold text for repo/branch, faint worktree, alert git ops, del for conflicts', () => {
+    const tag: Theme = {
+      ...makeTheme('graphite', true),
+      paint: (c, s) => `<${String(c)}>${s}</>`,
+      bold: s => `<b>${s}</b>`,
+    }
     const all = counts({ staged: 1, modified: 1, untracked: 1, conflicted: 1, ahead: 1, behind: 1 })
     const f = input({ kind: 'git', repo: 'R', branch: 'B', worktree: 'W', counts: all }, en, tag)
-    assert.equal(repo(f), '<label>repo:</><gradLow>R</>')
-    assert.equal(branch(f), '<label>branch:</><gradLow>B</> <label>(wt:</><gradLow>W</><label>)</>')
-    assert.equal(status(f), '<gradHigh>✗1</> <add>+1</> <del>!1</> <track>?1</> <add>⇡1</> <del>⇣1</>')
+    assert.equal(repo(f), '<label>repo:</><b><text>R</></b>')
+    assert.equal(branch(f), '<label>branch:</><b><text>B</></b> <faint>(wt:W)</>')
+    assert.equal(status(f), '<del>✗1</> <add>+1</> <del>!1</> <track>?1</> <add>⇡1</> <del>⇣1</>')
     const d = input({ kind: 'git', detached: { name: 'N', onBranch: false, operation: 'gitMerge', progress: '' } },
       en, tag)
-    assert.equal(branch(d), '<label>branch:</><label>@</><gradLow>N</> <gradMid>(merge)</>')
+    assert.equal(branch(d), '<label>branch:</><label>@</><b><text>N</></b> <alert>(merge)</>')
   })
 })

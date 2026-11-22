@@ -157,8 +157,8 @@ During a rebase it shows the branch being rebased when available.
 The spend limit (`spendLimit`) defaults to off.
 Claude shows the account-wide five-hour and seven-day limits when available.
 
-- **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only the usage
-  colours carry hue). All but `daylight` assume a dark terminal.
+- **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only alert and
+  VCS counts carry hue). All but `daylight` assume a dark terminal.
 - **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.
   Other programs Claude Code starts see it too.
 
@@ -206,7 +206,7 @@ install or replace the command in the original scope using the manual setup abov
   others), it hands cmd nothing: the line is written in place (a refresh can catch it
   half-written) and session folders are not removed.
 - A line can lag the session by up to about two seconds. If the mod stops checking in,
-  the reader shows the last readings with `| ⚠ stale` after their deadline expires.
+  the reader shows the last readings with `| ⌛stale` (`| !:stale` on WSL) after their deadline expires.
   A fresh check-in clears the marker. Old readers need the reader upgrade above.
 
 ## Readings

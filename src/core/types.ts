@@ -10,7 +10,7 @@ import type { VcsValues } from './vcs.ts'
 export type Rgb = readonly [number, number, number]
 
 export type TokenName =
-  | 'text' | 'label' | 'faint' | 'sep' | 'gradLow' | 'gradMid' | 'gradHigh' | 'add' | 'del' | 'track'
+  | 'text' | 'label' | 'faint' | 'sep' | 'calm' | 'alert' | 'add' | 'del' | 'track'
 
 // A resolved palette and the only way colour codes enter the line
 // (DESIGN, "Colours"): with NO_COLOR every call returns its text unchanged.
@@ -19,8 +19,6 @@ export type Theme = {
   rgb: Record<TokenName, Rgb>
   paint: (color: TokenName | Rgb, text: string) => string
   bold: (text: string) => string
-  // the three-stop gauge colour for a percent; bounds default to [70, 85]
-  gradient: (percent: number, bounds?: readonly [number, number]) => Rgb
 }
 
 export type CoreValues = {
@@ -28,7 +26,7 @@ export type CoreValues = {
   home: string | undefined
   // the row's width from the PromptHint viewport; undefined until it arrives
   columns: number | undefined
-  // WSL: call counts as text (DESIGN, "Config")
+  // WSL: call counts and stale marker as text (DESIGN, "Config")
   isWsl: boolean
 }
 
