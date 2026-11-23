@@ -219,18 +219,20 @@ setting is involved. Usage reads share the 90-second cache. Direct third-party
 providers deliberately bypass `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. Kimi's
 direct usage endpoint is experimental, so its response shape may change.
 
-Claude's token total includes the main conversation and subagents since the mod
-first loaded, or since the last `/clear` or in-session resume. Cache reads and
-writes are excluded. The cache-hit percentage and output decode speed (`t/s`)
-in parentheses follow the latest main-conversation request. Claude Code counts
-missing provider cache counters as zero. Output speed divides `output_tokens`
-by the streamed generation span (first thinking, text or tool chunk to stop,
-excluding server-side tool execution spans) when at least 0.5 s elapsed across
-multiple chunks; shorter steps keep the previous rate, and model switches,
-compaction, `/clear`, resume and usage-less responses clear it.
-Subagent replies contribute only to the token total. Tool, agent and
-skill counts come from main-loop tool starts. Separate teammates in their own
-panes are outside that collector.
+Claude's token total and tool, agent and skill counts cover the main
+conversation by default since the mod first loaded, or since the last `/clear`
+or in-session resume. Cache reads and writes are excluded. Enable
+`includeSubagents` (**Include subagents** in `/config`) to fold in-process
+subagent tokens, tools, agents and skills into those totals immediately,
+including activity already recorded in the session. The cache-hit percentage
+and output decode speed (`t/s`) in parentheses always follow the latest
+main-conversation request. Claude Code counts missing provider cache counters
+as zero. Output speed divides `output_tokens` by the streamed generation span
+(first thinking, text or tool chunk to stop, excluding server-side tool
+execution spans) when at least 0.5 s elapsed across multiple chunks; shorter
+steps keep the previous rate, and model switches, compaction, `/clear`, resume
+and usage-less responses clear it. Separate teammates in their own panes are
+outside that collector.
 
 See the [Claude design](../DESIGN.md#scope) for data sources and verification
 limits, and [VantageHUD's presentation rules](../DESIGN.md#rules-carried-over-from-vantagehud)

@@ -317,4 +317,86 @@ describe('register: the line as the host sets it up', () => {
     expect(rows[1]!.value).toBe('ember')
     expect(await line(clock, w)).toContain(sep('ember'))
   })
+
+  test('includeSubagents syncs between vargus.jsonc and the picker and toggles the running row', NO_VCS, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    mock.store(on)
+    const profile = '/home/u/.claude'
+    const w = world(on, clock, { HOME: '/home/u', CLAUDE_CONFIG_DIR: profile, NO_COLOR: '1' }, false)
+    const provider = { plugin: 'vargus@vargus', tier: 'user' } as const
+    const row: ConfigRow = {
+      key: 'vargus.includeSubagents', label: 'Include subagents', kind: 'boolean', value: false,
+      provider, isLocked: false,
+    }
+    let file = '{"includeSubagents":true}\n'
+    let staged = ''
+    let backup: string | undefined
+    const edits: string[] = []
+    const operations: string[] = []
+    on('fs.exists', async ($, e) => ({
+      value: e.path.endsWith('/vargus.jsonc') || (e.path.endsWith('/picker-backups.json') && backup !== undefined),
+    }))
+    on('fs.read', async ($, e) => {
+      if (e.path.endsWith('/vargus.jsonc')) return { value: file }
+      if (e.path.endsWith('/picker-backups.json') && backup !== undefined) return { value: backup }
+      throw new Error('ENOENT')
+    })
+    on('fs.stat', async ($, e) => ({
+      value: { kind: 'file', isLink: false, realPath: e.path, size: file.length, mtimeMs: 0 },
+    }))
+    on('config.list', async () => ({ value: [row] }))
+    on('config.set', async ($, e) => {
+      row.value = e.value
+      edits.push(`${e.key}=${String(e.value)}`)
+      return { value: row.value }
+    })
+    on('process.run', async ($, e) => {
+      const index = e.argv.findIndex(arg => arg.endsWith('/replace-config.sh'))
+      if (index >= 0) {
+        const op = e.argv[index + 1]!
+        if (op === 'save') {
+          const input = e.init?.stdin ?? ''
+          const before = backup ?? ''
+          backup = input.slice(before.length)
+        } else {
+          operations.push(op)
+          if (op === 'prepare') staged = e.init?.stdin?.slice(file.length) ?? ''
+          if (op === 'commit') file = staged
+        }
+      }
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+    on('command.run', async () => ({ text: 'opened' }))
+    const command = (name: string) => $.command.run({
+      command: name, args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 },
+    })
+
+    await $.session.start(start)
+    await step($)
+    await step($, { agentId: 'a1' })
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls', agentId: 'a1' } as never)
+    expect(await line(clock, w)).toContain('token:6(37.5%) | session:0m | 🔧1')
+
+    // Opening /config copies the shared true choice into the picker.
+    await command('config')
+    expect(row.value).toBe(true)
+    expect(edits).toEqual(['vargus.includeSubagents=true'])
+
+    // Setting false in the picker (matching given default false) updates vargus.jsonc and the running row.
+    const setFalse = {
+      key: row.key, previous: true, value: false, provider: row.provider, origin: { kind: 'composer' },
+    } as const
+    expect(await $.config.set(setFalse)).toEqual({ value: false })
+    expect(file).toBe('{"includeSubagents":false}\n')
+    expect(operations).toEqual(['prepare', 'commit'])
+    const afterFalse = await line(clock, w)
+    expect(afterFalse).toContain('token:3(37.5%) | session:0m')
+    expect(afterFalse).not.toContain('🔧')
+
+    // Removing the key from vargus.jsonc and reloading/opening /config keeps the saved native false.
+    file = '{}\n'
+    await command('reload-plugins')
+    await command('config')
+    expect(row.value).toBe(false)
+  })
 })

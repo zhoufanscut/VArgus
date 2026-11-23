@@ -11,6 +11,7 @@
   // "tokens": true,         // Show session tokens, latest prompt-cache hit rate and output speed (t/s).
   // "session": true,        // Show elapsed session time.
   // "callCounts": true,     // Show tool, agent and skill counts where available.
+  // "includeSubagents": false, // Include subagent tokens, tools, agents and skills (currently Claude Code).
 
   // Rate limits
   // "rateLimits": true,        // Show usage and reset times for available limits.

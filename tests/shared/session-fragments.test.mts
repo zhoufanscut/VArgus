@@ -2,7 +2,7 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import type { FragmentInput, Values } from '../../src/core/types.ts'
-import { initialSession, outputTokensPerSecond } from '../../src/core/session.ts'
+import { addCounts, initialSession, outputTokensPerSecond } from '../../src/core/session.ts'
 import { displaySession, shortModelName } from '../../src/render/session.ts'
 import { initialVcs } from '../../src/core/vcs.ts'
 import { en } from '../../src/i18n/en.ts'
@@ -193,5 +193,17 @@ describe('call counts', () => {
       calls(input({ counts: c }, {}, { isWsl: true, color: true })),
       `${t.paint('label', 'T:73')} ${t.paint('label', 'A:2')} ${t.paint('label', 'S:1')}`,
     )
+  })
+
+  test('addCounts sums full or partial counts without mutating inputs', () => {
+    const base = { tokens: 100, tools: 3, agents: 1, skills: 2 }
+    const extra = { tokens: 50, tools: 4, agents: 2, skills: 1 }
+    assert.deepEqual(addCounts(base, extra), { tokens: 150, tools: 7, agents: 3, skills: 3 })
+    assert.deepEqual(addCounts(base, { tokens: 25 }), { tokens: 125, tools: 3, agents: 1, skills: 2 })
+    const copy = addCounts(base)
+    assert.deepEqual(copy, base)
+    assert.notEqual(copy, base)
+    assert.deepEqual(base, { tokens: 100, tools: 3, agents: 1, skills: 2 })
+    assert.deepEqual(extra, { tokens: 50, tools: 4, agents: 2, skills: 1 })
   })
 })

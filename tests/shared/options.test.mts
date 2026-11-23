@@ -1,12 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { DEFAULTS, editOption, parseOptions } from '../../src/options.ts'
+import { DEFAULTS, editOption, parseOptions, resolveOptions } from '../../src/options.ts'
 import { resolveCodexOptions, workerOptions } from '../../src/hosts/codex/options.ts'
 
 test('the sample lists shared defaults in order and each switch can be enabled on its own', async () => {
   const example = await readFile('vargus.sample.jsonc', 'utf8')
   assert.deepEqual(parseOptions(example), { theme: 'graphite' })
+  assert.equal(DEFAULTS.includeSubagents, false)
+  assert.equal(resolveOptions({}).includeSubagents, false)
+  assert.equal(resolveOptions({ includeSubagents: true }).includeSubagents, true)
+  assert.equal(resolveOptions({ includeSubagents: 'yes' }).includeSubagents, false)
   const uncommented = example.replace(/^(\s*)\/\/ (")/gm, '$1$2')
   const sample = parseOptions(uncommented)
   assert.deepEqual(sample, resolveCodexOptions({}))

@@ -9,6 +9,7 @@ export const DEFAULTS = {
   tokens: true,
   session: true,
   callCounts: true,
+  includeSubagents: false,
   rateLimits: true,
   repo: true,
   branch: true,

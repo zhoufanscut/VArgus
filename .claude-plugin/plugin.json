@@ -59,6 +59,12 @@
       "description": "Show tool calls, agents and skills (\ud83d\udd2773 \ud83e\udd162 \u26a11)",
       "default": true
     },
+    "includeSubagents": {
+      "type": "boolean",
+      "title": "Include subagents",
+      "description": "Include subagent tokens, tools, agents and skills in session totals",
+      "default": false
+    },
     "rateLimits": {
       "type": "boolean",
       "title": "Rate limits",

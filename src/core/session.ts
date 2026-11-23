@@ -59,6 +59,16 @@ export function initialCounts(saved?: Partial<Counts>): Counts {
   return { tokens, tools, agents, skills }
 }
 
+export function addCounts(a: Counts, b?: Partial<Counts>): Counts {
+  if (!b) return { ...a }
+  return {
+    tokens: a.tokens + (b.tokens ?? 0),
+    tools: a.tools + (b.tools ?? 0),
+    agents: a.agents + (b.agents ?? 0),
+    skills: a.skills + (b.skills ?? 0),
+  }
+}
+
 
 export function initialSession(): SessionValues {
   return {

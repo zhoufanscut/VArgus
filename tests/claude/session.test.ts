@@ -1,5 +1,5 @@
 import { describe, expect, mock, test, type Engine, type MockClock } from 'claude-code/testing'
-import type { On, TurnStepChunk, TurnStepInput, TurnStepServerToolUse } from 'claude-code'
+import type { ConfigRow, On, TurnStepChunk, TurnStepInput, TurnStepServerToolUse } from 'claude-code'
 
 // The session collector (src/hosts/claude/collect/session.ts), driven through the mod's own
 // hooks; what it collected is read off the line it writes.
@@ -37,7 +37,7 @@ type World = {
   id: string
 }
 
-function world(on: On, clock: MockClock): World {
+function world(on: On, clock: MockClock, mockProcess = true): World {
   const w: World = {
     lines: [], model: 'claude-opus-5-5[1m]', startedAt: 0, percent: 20, usageRefused: false, usageCalls: 0, usageHeld: false, releaseUsage: undefined, saved: undefined, restore: undefined, compactSkipped: false, id: 'S1',
     usage: { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 90000, cache_creation_input_tokens: 7000 },
@@ -61,7 +61,7 @@ function world(on: On, clock: MockClock): World {
     if (!e.path.endsWith('.live')) w.lines.push(e.text)
     return { value: undefined }
   })
-  on('process.run', async () => ({
+  if (mockProcess) on('process.run', async () => ({
     value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
   }))
   on('turn.step', async function* ($, e) {
@@ -127,26 +127,26 @@ describe('session collector', () => {
     const calls = w.usageCalls
     await step($, { effort: 'low', agentId: 'a1' })
     expect(w.usageCalls).toBe(calls)
-    expect(await line(clock, w)).toBe('opus:high | ctx:21% | token:3.0k(91.8%) | session:0m')
+    expect(await line(clock, w)).toBe('opus:high | ctx:21% | token:1.5k(91.8%) | session:0m')
   })
 
-  test('tokens: input + output of every step, subagents too; cache tokens left out', MINE, async ($, on) => {
+  test('tokens: main-only by default (cache tokens left out); subagents stay separate until enabled', MINE, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     await $.session.start(start)
     w.usage = { input_tokens: 12000, output_tokens: 300, cache_read_input_tokens: 500000, cache_creation_input_tokens: 4000 }
     await step($)
     await step($, { agentId: 'a1' })
-    expect(await line(clock, w)).toContain('token:24.6k(96.9%)')
+    expect(await line(clock, w)).toContain('token:12.3k(96.9%)')
     w.usage = null
     await step($)
-    expect(await line(clock, w)).toContain('token:24.6k |')
+    expect(await line(clock, w)).toContain('token:12.3k |')
     // the step's response is passed on unchanged
     w.usage = { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 3, cache_creation_input_tokens: 4 }
     expect((await step($)).usage).toEqual({ ...w.usage, model: 'claude-opus-5-5' })
   })
 
-  test('call counts include main-loop tool calls with separate Agent and Skill totals', MINE, async ($, on) => {
+  test('call counts show main-loop tool calls by default and persist subagent calls separately', MINE, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock)
     await $.session.start(start)
@@ -157,11 +157,14 @@ describe('session collector', () => {
     await call('Skill', { skill: 's' })
     await call('Workflow', { name: 'w' })
     await call('Workflow', { name: 'w', resumeFromRunId: 'r1' })
-    // a subagent's call is not counted
+    // a subagent's call is recorded separately and hidden under the default option
     await call('Bash', { command: 'ls', agentId: 'a1' })
     expect(await line(clock, w)).toBe('opus | ctx:20% | session:0m | 🔧5 🤖1 ⚡1')
     await clock.settle()
-    expect(w.saved).toEqual({ tokens: 0, tools: 5, agents: 1, skills: 1 })
+    expect(w.saved).toEqual({
+      tokens: 0, tools: 5, agents: 1, skills: 1,
+      subagents: { tokens: 0, tools: 1, agents: 0, skills: 0 },
+    })
   })
 
   test('session time from usage().startedAt on the mod\'s clock', MINE, async ($, on) => {
@@ -398,24 +401,24 @@ describe('session collector', () => {
     await step($)
     expect(await line(clock, w)).toContain('token:4.5k(91.8%, 250t/s)')
 
-    // A subagent's slower stream does not replace the main loop's rate.
+    // A subagent's slower stream does not replace the main loop's rate or add tokens under default options.
     w.streamChunks = [
       { chunk: { kind: 'text', index: 0, text: 'sub' } },
       { delayMs: 5000, chunk: { kind: 'text', index: 0, text: 'agent' } },
       { chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage!, model: 'claude-opus-5-5' } } },
     ]
     await step($, { agentId: 'a1' })
-    expect(await line(clock, w)).toContain('token:6.0k(91.8%, 250t/s)')
+    expect(await line(clock, w)).toContain('token:4.5k(91.8%, 250t/s)')
 
     // Hot reload restores the rate from $.state.
     await clock.settle()
     w.restore = w.saved
     await $.session.start(start)
-    expect(await line(clock, w)).toContain('token:6.0k(91.8%, 250t/s)')
+    expect(await line(clock, w)).toContain('token:4.5k(91.8%, 250t/s)')
 
     // A model switch clears the stale rate.
     w.model = 'claude-sonnet-5'
-    expect(await line(clock, w)).toContain('token:6.0k(91.8%) |')
+    expect(await line(clock, w)).toContain('token:4.5k(91.8%) |')
 
     // Record another rate, then verify unfinished server tools, interrupted steps,
     // missing usage, compaction, /clear, and stepStarting model switches.
@@ -428,19 +431,19 @@ describe('session collector', () => {
     w.serverToolUses = [{ id: 'st-open', name: 'advisor', input: {}, startedAt: clock.now() + 1000 }]
     await step($, { model: 'claude-sonnet-5' })
     w.serverToolUses = undefined
-    expect(await line(clock, w)).toContain('token:7.5k(91.8%, 500t/s)')
+    expect(await line(clock, w)).toContain('token:6.0k(91.8%, 500t/s)')
 
     // Interrupted step (usage null, stopReason null) preserves the rate.
     w.streamChunks = []
     w.usage = null
     w.stopReason = null
     await step($, { model: 'claude-sonnet-5' })
-    expect(await line(clock, w)).toContain('token:7.5k(91.8%, 500t/s)')
+    expect(await line(clock, w)).toContain('token:6.0k(91.8%, 500t/s)')
 
     // Completed step without usage clears both cache hit and t/s.
     w.stopReason = 'end_turn'
     await step($, { model: 'claude-sonnet-5' })
-    expect(await line(clock, w)).toContain('token:7.5k |')
+    expect(await line(clock, w)).toContain('token:6.0k |')
 
     // Compaction clears t/s.
     w.usage = { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 90000, cache_creation_input_tokens: 7000 }
@@ -450,13 +453,13 @@ describe('session collector', () => {
       { chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage, model: 'claude-sonnet-5' } } },
     ]
     await step($, { model: 'claude-sonnet-5' })
-    expect(await line(clock, w)).toContain('token:9.0k(91.8%, 500t/s)')
+    expect(await line(clock, w)).toContain('token:7.5k(91.8%, 500t/s)')
     await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
-    expect(await line(clock, w)).toContain('token:9.0k |')
+    expect(await line(clock, w)).toContain('token:7.5k |')
 
     // stepStarting with a new model persists the clear to $.state even if the step is interrupted before refresh.
     await step($, { model: 'claude-sonnet-5' })
-    expect(await line(clock, w)).toContain('token:10.5k(91.8%, 500t/s)')
+    expect(await line(clock, w)).toContain('token:9.0k(91.8%, 500t/s)')
     w.streamChunks = []
     w.usage = null
     w.stopReason = null
@@ -518,5 +521,207 @@ describe('session collector', () => {
     expect(first.done).toBe(false)
     await gen.return(undefined as never)
     expect(w.streamClosed).toBe(closedBefore + 1)
+  })
+
+  const MINE_WITH_SUBAGENTS = { options: { ...MINE.options, includeSubagents: true } }
+
+  test('includeSubagents: true folds subagent tokens and calls while keeping ctx, cache%, t/s and effort main-only', MINE_WITH_SUBAGENTS, async ($, on) => {
+    const clock = mock.clock(on, { now: 1000 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    const call = (tool: string, more: Record<string, unknown> = {}) =>
+      $.tool.call({ tool, tool_use_id: `u${Math.random()}`, ...more } as never)
+
+    // Main-loop step: 12.3k tokens, 96.9% cache hit, 300 output tokens over 1200ms => 250t/s.
+    w.percent = 21
+    w.usage = { input_tokens: 12000, output_tokens: 300, cache_read_input_tokens: 500000, cache_creation_input_tokens: 4000 }
+    w.streamChunks = [
+      { delayMs: 500, chunk: { kind: 'text', index: 0, text: 'a' } },
+      { delayMs: 1200, chunk: { kind: 'text', index: 0, text: 'b' } },
+      { chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage, model: 'claude-opus-5-5' } } },
+    ]
+    await step($, { effort: 'high' })
+    await call('Bash', { command: 'ls' })
+    await call('Agent', { description: 'd', prompt: 'p' })
+
+    // Subagent step + tools: adds tokens and calls, leaves effort, ctx, cache% and t/s untouched.
+    w.percent = 22
+    w.usage = { input_tokens: 12000, output_tokens: 300, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+    w.streamChunks = [
+      { chunk: { kind: 'text', index: 0, text: 'sub' } },
+      { delayMs: 5000, chunk: { kind: 'text', index: 0, text: 'agent' } },
+      { chunk: { kind: 'stop', stopReason: 'end_turn', usage: { ...w.usage, model: 'claude-opus-5-5' } } },
+    ]
+    const calls = w.usageCalls
+    await step($, { effort: 'low', agentId: 'a1' })
+    expect(w.usageCalls).toBe(calls)
+    await call('Bash', { command: 'pwd', agentId: 'a1' })
+    await call('Agent', { description: 'nested', prompt: 'p', agentId: 'a1' })
+    await call('Skill', { skill: 's', agentId: 'a1' })
+
+    expect(await line(clock, w)).toBe('opus:high | ctx:21% | token:24.6k(96.9%, 250t/s) | session:0m | 🔧5 🤖2 ⚡1')
+    await clock.settle()
+    expect(w.saved).toEqual({
+      tokens: 12300, tools: 2, agents: 1, skills: 0,
+      subagents: { tokens: 12300, tools: 3, agents: 1, skills: 1 },
+      cacheHitPercent: (100 * 500000) / (12000 + 500000 + 4000),
+      tokensPerSecond: 250,
+    })
+  })
+
+  test('includeSubagents: true displays subagent-only activity when main counts are zero', MINE_WITH_SUBAGENTS, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    await step($, { agentId: 'a1' })
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls', agentId: 'a1' } as never)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:1.5k | session:0m | 🔧1')
+  })
+
+  test('hot-reload restore enables subagent counts retroactively from $.state (false -> true)', MINE_WITH_SUBAGENTS, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    w.restore = {
+      tokens: 1500, tools: 2, agents: 1, skills: 0,
+      subagents: { tokens: 3000, tools: 4, agents: 1, skills: 2 },
+      cacheHitPercent: 9000 / 98,
+    }
+    await $.session.start(start)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:4.5k(91.8%) | session:0m | 🔧6 🤖2 ⚡2')
+  })
+
+  test('hot-reload restore hides subagent counts retroactively (true -> false) while keeping them persisted', MINE, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    w.restore = {
+      tokens: 1500, tools: 2, agents: 1, skills: 0,
+      subagents: { tokens: 3000, tools: 4, agents: 1, skills: 2 },
+      cacheHitPercent: 9000 / 98,
+    }
+    await $.session.start(start)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:1.5k(91.8%) | session:0m | 🔧2 🤖1')
+    await step($)
+    await clock.settle()
+    expect(w.saved).toEqual({
+      tokens: 3000, tools: 2, agents: 1, skills: 0,
+      subagents: { tokens: 3000, tools: 4, agents: 1, skills: 2 },
+      cacheHitPercent: 9000 / 98,
+    })
+  })
+
+  test('in-process applyOptions toggles includeSubagents via reload-plugins, config and matching config.set', MINE, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock, false)
+    mock.store(on)
+    const provider = { plugin: 'vargus@vargus', tier: 'user' as const }
+    const row: ConfigRow = {
+      key: 'vargus.includeSubagents', label: 'Include subagents', kind: 'boolean',
+      value: false, provider, isLocked: false,
+    }
+    let file = '{}\n'
+    let staged = ''
+    on('fs.exists', async ($, e) => ({ value: e.path.endsWith('/vargus.jsonc') }))
+    on('fs.read', async ($, e) => {
+      if (e.path.endsWith('/vargus.jsonc')) return { value: file }
+      throw new Error('ENOENT')
+    })
+    on('fs.stat', async ($, e) => ({
+      value: { kind: 'file', isLink: false, realPath: e.path, size: file.length, mtimeMs: 0 },
+    }))
+    on('config.list', async () => ({ value: [row] }))
+    on('config.set', async ($, e) => {
+      row.value = e.value
+      return { value: row.value }
+    })
+    on('process.run', async ($, e) => {
+      const index = e.argv.findIndex(arg => arg.endsWith('/replace-config.sh'))
+      if (index >= 0) {
+        const op = e.argv[index + 1]
+        if (op === 'prepare') staged = e.init?.stdin?.slice(file.length) ?? ''
+        if (op === 'commit') file = staged
+      }
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+    on('command.run', async () => ({ text: 'ok' }))
+    const command = (name: string) => $.command.run({
+      command: name, args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 },
+    })
+
+    await $.session.start(start)
+    await step($)
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+    await step($, { agentId: 'a1' })
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'u2', command: 'pwd', agentId: 'a1' } as never)
+    await $.tool.call({ tool: 'Agent', tool_use_id: 'u3', description: 'd', prompt: 'p', agentId: 'a1' } as never)
+    await $.tool.call({ tool: 'Skill', tool_use_id: 'u4', skill: 's', agentId: 'a1' } as never)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:1.5k(91.8%) | session:0m | 🔧1')
+
+    file = '{"includeSubagents":true}\n'
+    await command('reload-plugins')
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:3.0k(91.8%) | session:0m | 🔧4 🤖1 ⚡1')
+
+    file = '{"includeSubagents":false}\n'
+    await command('config')
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:1.5k(91.8%) | session:0m | 🔧1')
+
+    file = '{"includeSubagents":true}\n'
+    await command('reload-plugins')
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:3.0k(91.8%) | session:0m | 🔧4 🤖1 ⚡1')
+
+    // Setting false matches given.includeSubagents (false), triggering in-process applyOptions.
+    expect(await $.config.set({
+      key: 'vargus.includeSubagents', previous: true, value: false, provider, origin: { kind: 'composer' },
+    })).toEqual({ value: false })
+    expect(file).toBe('{"includeSubagents":false}\n')
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:1.5k(91.8%) | session:0m | 🔧1')
+  })
+
+  test('legacy $.state without subagents resets in-memory subagentCounts cleanly on session.start', MINE_WITH_SUBAGENTS, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    await step($, { agentId: 'a1' })
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls', agentId: 'a1' } as never)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:1.5k | session:0m | 🔧1')
+
+    w.restore = { tokens: 5000, tools: 2, agents: 0, skills: 0 }
+    await $.session.start(start)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:5.0k | session:0m | 🔧2')
+
+    await step($)
+    await clock.settle()
+    expect(w.saved).toEqual({ tokens: 6500, tools: 2, agents: 0, skills: 0, cacheHitPercent: 9000 / 98 })
+  })
+
+  test('/clear and resume reset both main and subagent counts in memory and $.state', MINE_WITH_SUBAGENTS, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock)
+    await $.session.start(start)
+    await step($)
+    await step($, { agentId: 'a1' })
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls', agentId: 'a1' } as never)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:3.0k(91.8%) | session:0m | 🔧1')
+    await clock.settle()
+    expect((w.saved as { subagents?: unknown }).subagents).toEqual({ tokens: 1500, tools: 1, agents: 0, skills: 0 })
+
+    await $.session.end({ reason: 'clear', sessionId: 'S1', resume: { id: 'S1' } })
+    w.id = 'S2'
+    await clock.settle()
+    expect(w.saved).toEqual({ tokens: 0, tools: 0, agents: 0, skills: 0 })
+    expect(await line(clock, w)).toBe('opus | ctx:0%')
+    await step($)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:1.5k(91.8%) | session:0m')
+
+    await step($, { agentId: 'a2' })
+    await $.tool.call({ tool: 'Skill', tool_use_id: 'u2', skill: 's', agentId: 'a2' } as never)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:3.0k(91.8%) | session:0m | 🔧1 ⚡1')
+
+    await $.session.end({ reason: 'resume', sessionId: 'S2', resume: { id: 'S3' } })
+    w.id = 'S3'
+    await clock.settle()
+    expect(w.saved).toEqual({ tokens: 0, tools: 0, agents: 0, skills: 0 })
+    expect(await line(clock, w)).toBe('opus | ctx:0%')
+    await step($)
+    expect(await line(clock, w)).toBe('opus | ctx:20% | token:1.5k(91.8%) | session:0m')
   })
 })

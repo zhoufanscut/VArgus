@@ -3,7 +3,8 @@ import type { EngineInterface, Register, SessionStartInput, Timer, TurnStepChunk
 import { initialClaudeLimits, claudeQuotaReadings } from './quota'
 import { measuredLimits, startLimits, stopLimits } from './collect/limits'
 import {
-  compacted, initialSession, measured, sessionEnding, setModel, startSession, stepDone, stepStarting, toolCalled,
+  compacted, effectiveCounts, initialSession, measured, sessionEnding, setModel, startSession, stepDone, stepStarting,
+  toolCalled,
 } from './collect/session'
 import { initialVcs, startVcs, stopVcs, toolCalledVcs } from './collect/vcs'
 import type { Theme, Values } from '../../core/types'
@@ -40,7 +41,8 @@ async function refresh($: EngineInterface): Promise<void> {
   setModel($, values.session, await $.session.model().catch(() => values.session.model))
   const now = await $.clock.now()
   values.limits = options.rateLimits ? claudeQuotaReadings(quota, labels, now) : []
-  const text = render({ v: values, display: claudeDisplay(values.session), o: options, l: labels, t: theme, now })
+  const session = { ...values.session, counts: effectiveCounts(values.session, options.includeSubagents) }
+  const text = render({ v: { ...values, session }, display: claudeDisplay(session), o: options, l: labels, t: theme, now })
   await writeLine($, writer, text, values.core.columns, { t: theme, l: labels, isWsl: values.core.isWsl })
 }
 

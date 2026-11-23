@@ -4,23 +4,28 @@
 // (the hook passes `next(e)` on unchanged and returns what `next` gave).
 //
 // What each count means, against VantageHUD 0.6.0 (src/hud/token-tally.js):
-// - tokens: `input_tokens + output_tokens` of every `turn.step` result's usage,
-//   main loop and subagents together. Cache read and cache creation tokens are
-//   left out, as VantageHUD's tokensFromUsage left them out ("`ctx:` is the
-//   cache-inclusive gauge"); `input_tokens` is the uncached part alone
-//   (ModelUsage), so nothing is counted twice. One `turn.step` is one request
-//   with its settled usage, so VantageHUD's per-message.id de-duplication and
-//   its `~` for unsettled rows have nothing to do here.
-// - tools, agents, skills: the main loop's `tool.call`s
-//   (`e.agentId` absent), as VantageHUD counted the lead transcript's tool_use
-//   blocks. Each call counts when it starts, including a call later refused.
+// - tokens: `input_tokens + output_tokens` of `turn.step` results' usage.
+//   Cache read and cache creation tokens are left out, as VantageHUD's
+//   tokensFromUsage left them out ("`ctx:` is the cache-inclusive gauge");
+//   `input_tokens` is the uncached part alone (ModelUsage), so nothing is
+//   counted twice. One `turn.step` is one request with its settled usage, so
+//   VantageHUD's per-message.id de-duplication and its `~` for unsettled rows
+//   have nothing to do here.
+// - tools, agents, skills: `tool.call` starts, including a call later refused.
 //   Calls to `Agent` and `Skill` also increment their respective totals.
 //   Counting `agent.spawn` would include agents started by plugins.
+// - main vs subagent split: main-loop (`e.agentId` absent) and in-process
+//   subagent (`e.agentId` present) tokens and call counts are tracked and
+//   persisted separately in `$.state`. `includeSubagents` defaults to false
+//   (main loop only); enabling it adds the recorded subagent counts at render
+//   time while keeping cache hit, decode speed, context and effort main-only.
 // Edges: a hook above VArgus that answers without `next` hides that event
 // from it; the tool names are the 2.1.300 tool table's (VantageHUD also
 // counted `Task`, `proxy_Task`, `proxy_Skill`, which that table lacks).
 
-import { cacheHitFromSplitInput, initialCounts, outputTokensPerSecond, type SessionValues } from '../../../core/session'
+import {
+  addCounts, cacheHitFromSplitInput, initialCounts, outputTokensPerSecond, type Counts, type SessionValues,
+} from '../../../core/session'
 export { initialSession, type SessionValues } from '../../../core/session'
 import type {
   EngineInterface, SessionCompactInput, SessionCompactResult, SessionContextUsage, SessionEndInput,
@@ -57,6 +62,15 @@ const DEFAULT_EFFORTS = new Map([
 let saving: Promise<unknown> = Promise.resolve()
 let sessionGeneration = 0
 let lastStepModel: string | undefined
+let subagentCounts: Counts = initialCounts()
+
+export function effectiveCounts(values: SessionValues, includeSubagents: boolean): Counts {
+  return includeSubagents ? addCounts(values.counts, subagentCounts) : values.counts
+}
+
+function hasCounts(c: Counts): boolean {
+  return c.tokens > 0 || c.tools > 0 || c.agents > 0 || c.skills > 0
+}
 
 function serverToolDurationMs(
   uses: readonly TurnStepServerToolUse[] | undefined,
@@ -91,6 +105,7 @@ function serverToolDurationMs(
 function save($: EngineInterface, values: SessionValues): void {
   saving = saving.then(() => {
     const saved: VargusCounts = { ...values.counts }
+    if (hasCounts(subagentCounts)) saved.subagents = { ...subagentCounts }
     if (values.cacheHitPercent !== undefined) saved.cacheHitPercent = values.cacheHitPercent
     if (values.tokensPerSecond !== undefined) saved.tokensPerSecond = values.tokensPerSecond
     return $.state.set(COUNTS, saved)
@@ -143,6 +158,7 @@ export async function startSession($: EngineInterface, values: SessionValues): P
     const saved = (await $.state.get(COUNTS)).value
     if (saved) {
       values.counts = initialCounts(saved)
+      subagentCounts = initialCounts(saved.subagents)
       values.cacheHitPercent = saved.cacheHitPercent
       values.tokensPerSecond = saved.tokensPerSecond
     }
@@ -191,7 +207,10 @@ export async function stepDone(
   timing?: StepTiming,
 ): Promise<void> {
   const usage = r.usage
-  if (usage) values.counts.tokens += usage.input_tokens + usage.output_tokens
+  if (usage) {
+    const target = e.agentId === undefined ? values.counts : subagentCounts
+    target.tokens += usage.input_tokens + usage.output_tokens
+  }
   const mainResponse = e.agentId === undefined && (usage !== null || r.stopReason !== null)
   if (mainResponse) {
     values.cacheHitPercent = cacheHitFromSplitInput(
@@ -219,8 +238,7 @@ export async function stepDone(
 }
 
 export function toolCalled($: EngineInterface, e: ToolCallInput, values: SessionValues): void {
-  if (e.agentId !== undefined) return
-  const c = values.counts
+  const c = e.agentId === undefined ? values.counts : subagentCounts
   c.tools += 1
   if (e.tool === 'Agent') c.agents += 1
   else if (e.tool === 'Skill') c.skills += 1
@@ -235,6 +253,7 @@ export function sessionEnding($: EngineInterface, e: SessionEndInput, values: Se
   sessionGeneration += 1
   lastStepModel = undefined
   values.counts = initialCounts()
+  subagentCounts = initialCounts()
   values.cacheHitPercent = undefined
   values.tokensPerSecond = undefined
   values.contextPercent = undefined

@@ -111,6 +111,8 @@ own display rules.
 [Shared defaults](src/options.ts) and the Claude manifest agree on picker keys
 and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
 The shared `callCounts` setting controls the tool, agent and skill counts together.
+The shared `includeSubagents` setting defaults to `false`, keeping token and call
+counts on the active conversation unless enabled (currently read by Claude Code).
 Codex's [startup hook option](src/hosts/codex/options.ts) defaults on.
 Explicit activation or hook installation enables its tmux integration.
 
@@ -589,7 +591,16 @@ state shapes. [Mod reference](https://code.claude.com/docs/en/plugins/mods/refer
 ### Data sources
 
 - [Session collector](src/hosts/claude/collect/session.ts) sums uncached
-  input plus output from `turn.step` usage, including observed subagents.
+  input plus output from `turn.step` usage and counts `tool.call` starts (with
+  `Agent` and `Skill` also incrementing their own totals), storing main-loop
+  (`e.agentId` absent) and in-process subagent (`e.agentId` present) counts
+  separately in memory and in `$.state` (top-level main fields plus optional
+  nested `subagents` inside `counts`, omitted when all four subagent counts are
+  zero). With `includeSubagents: false`
+  (default), the row displays main-loop counts only; with
+  `includeSubagents: true`, [register.ts](src/hosts/claude/register.ts) adds
+  the recorded subagent counts at render time so toggling the option reflects
+  prior session activity immediately without mutating main counts.
   The cache reading follows completed main-loop requests. Claude Code 2.1.323's
   `ModelUsage` describes `input_tokens` as “the part of the
   prompt neither read from nor written to the prompt cache.” The denominator
@@ -602,12 +613,10 @@ state shapes. [Mod reference](https://code.claude.com/docs/en/plugins/mods/refer
   intervals (`startedAt`–`endedAt`) and requiring at least two output chunks
   over 500 ms. Opaque `engine` chunks do not distinguish a mid-step retry
   marker, which is an accepted API limit. Subagent steps keep direct
-  `yield* next(e)` and do not replace the main rate. The latest rate persists
-  in `$.state` across hot reloads and clears on model switch, compaction,
-  `/clear`, resume and usage-less responses.
-  Each main-loop `tool.call` increments the tool total. Calls to `Agent` and
-  `Skill` also increment their own totals. Claude Code 2.1.323 describes
-  `AgentLoop.agentId` as “absent on the main loop.”
+  `yield* next(e)` and do not replace the main rate or cache reading. The
+  latest rate persists in `$.state` across hot reloads and clears on model
+  switch, compaction, `/clear`, resume and usage-less responses.
+  Claude Code 2.1.323 describes `AgentLoop.agentId` as “absent on the main loop.”
 - `session.measure` supplies live context and engine limits. The collector
   reads `$.session.usage()` after main-loop steps for context. Main-thread
   compaction clears the old context until the next step. Clear and in-session
