@@ -980,11 +980,50 @@ test('OmoSubagents excludes admission-exhausted chains, carries refused run fenc
   assert.equal(snap.tools, 1)
   assert.deepEqual([...snap.skills.keys()], ['st_00000004'])
   assert.deepEqual([...snap.skills.get('st_00000004')!], ['kept'])
-  assert.deepEqual(snap.refusedTasks.get('st_00000001'), { runStartEpoch: 0, runEpoch: 1 })
+  assert.deepEqual(snap.refusedTasks.get('st_00000001'), [{ runStartEpoch: 0, runEpoch: 1 }])
   assert.equal(snap.refusedTasks.has('st_00000002'), false)
-  assert.deepEqual(snap.refusedTasks.get('st_00000003'), { runStartEpoch: 0, runEpoch: 0 })
-  assert.deepEqual(snap.refusedTasks.get('st_00000004'), { runStartEpoch: 1, runEpoch: 1 })
-  assert.deepEqual(snap.refusedTasks.get('st_00000005'), { runStartEpoch: 2, runEpoch: 2 })
+  assert.deepEqual(snap.refusedTasks.get('st_00000003'), [{ runStartEpoch: 0, runEpoch: 0 }])
+  assert.deepEqual(snap.refusedTasks.get('st_00000004'), [{ runStartEpoch: 1, runEpoch: 1 }])
+  assert.deepEqual(snap.refusedTasks.get('st_00000005'), [{ runStartEpoch: 2, runEpoch: 2 }])
   assert.equal(snap.refusedTasks.has('st_00000006'), false)
   assert.equal(snap.refusedTasks.has('st_00000007'), false)
+
+  const id = 'st_00000004'
+  await rm(join(stateDir, 'tasks', id + '.json'))
+  const expired = await reader.refresh(project, 'root', 20_000)
+  assert.deepEqual([...expired.skills.get(id)!], ['kept'])
+
+  // A launched run between two refusals keeps its own skill, even after both records expire.
+  const parent = { parent_session_id: 'child-mid-turn', root_session_id: 'root' }
+  const receipt = (epoch: number, skill: string) => JSON.stringify({
+    id: 'spawn-' + epoch, type: 'message', message: {
+      role: 'toolResult', toolName: 'task',
+      details: { mode: 'spawn', task_id: id, run_epoch: epoch, status: 'pending', skills: { resolved: [skill] } },
+    },
+  }) + '\n'
+  await writeChildJsonl(stateDir, 'st_00000002', '002.jsonl', receipt(2, 'review'))
+  await writeTask(stateDir, id, { ...parent, status: 'completed', child_session_id: 'revived',
+    run_start_epoch: 2, notification: { run_epoch: 2 } })
+  const launched = await reader.refresh(project, 'root', 30_000)
+  assert.ok(launched.taskIds.has(id))
+  assert.deepEqual([...launched.skills.get(id)!].sort(), ['kept', 'review'])
+
+  await writeChildJsonl(stateDir, 'st_00000002', '003.jsonl', receipt(3, 'lint'))
+  const later = await writeTask(stateDir, id, { ...parent, status: 'error', failure_kind: 'model_unavailable',
+    run_start_epoch: 3, notification: { run_epoch: 3 } })
+  await reader.refresh(project, 'root', 40_000)
+  await rm(later)
+  const expiredAgain = await reader.refresh(project, 'root', 50_000)
+  assert.deepEqual([...expiredAgain.skills.get(id)!].sort(), ['kept', 'review'])
+  assert.deepEqual(expired.refusedTasks.get(id), [{ runStartEpoch: 1, runEpoch: 1 }])
+
+  // Subsequent evidence of a launch corrects epoch 3 alone. Epoch 1's skill stays excluded.
+  await writeTask(stateDir, id, { ...parent, status: 'completed', child_session_id: 'confirmed',
+    run_start_epoch: 3, notification: { run_epoch: 3 } })
+  const corrected = await reader.refresh(project, 'root', 60_000)
+  assert.deepEqual([...corrected.skills.get(id)!].sort(), ['kept', 'lint', 'review'])
+
+  await mkdir(join(project, '.omo'))
+  await writeFile(join(project, '.omo', 'omo.json'), JSON.stringify({ task: { state_dir: join(root, 'other-store') } }))
+  assert.equal((await reader.refresh(project, 'root', 70_000)).refusedTasks.size, 0)
 })

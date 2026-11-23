@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url'
 import vargus, { type OmoApi } from '../../src/hosts/omo/register.ts'
 import { main } from '../../src/cli.ts'
 import { collectOmoAgents, collectOmoSubagentSkills } from '../../src/hosts/omo/collect.ts'
-import { projectStateKey } from '../../src/hosts/omo/subagents.ts'
+import { OmoSubagents, projectStateKey } from '../../src/hosts/omo/subagents.ts'
 import type { HistoryReducer, SessionEntry } from '../../src/hosts/omo/contracts.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 
@@ -1251,6 +1251,17 @@ test('OmO reconciles queued pending receipts against store refusals, excludes ad
     await command!.handler('config {"includeSubagents":true}', ctx)
     const reconciledLine = await waitForLine(/(?:🤖1|A:1)(?!.*(?:⚡|S:))/)
     assert.doesNotMatch(reconciledLine, /⚡|S:/)
+
+    // Expiry removes the store record while the parent's queued receipt survives.
+    await rm(join(stateDir, 'tasks', 'st_00000002.json'))
+    now += 24 * 60 * 60 * 1000
+    const refresh = t.mock.method(OmoSubagents.prototype, 'refresh')
+    handlers.get('tool_execution_end')?.({}, ctx)
+    await refresh.mock.calls[0]!.result
+    refresh.mock.restore()
+    const afterExpiry = lineText()
+    assert.match(afterExpiry, /(?:🤖1|A:1)\b/)
+    assert.doesNotMatch(afterExpiry, /⚡|S:/)
 
     // 2. Other OmO 5.1.61 provisional receipt shapes reconciled against store refusals:
     //    - queued task whose fallback chain exhausted at admission (run_epoch 0 -> 1, run_start_epoch 0)

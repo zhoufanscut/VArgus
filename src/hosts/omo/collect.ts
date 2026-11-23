@@ -18,12 +18,12 @@ type AssistantUsage = { tokens: number; cacheHitPercent: number | undefined }
 
 export type OmoSubagentSkillMap = ReadonlyMap<string, ReadonlySet<string>>
 
-export type OmoRefusedRun = {
+export type OmoRunRange = {
   readonly runStartEpoch: number
   readonly runEpoch: number
 }
 
-export type OmoRefusedTaskMap = ReadonlyMap<string, OmoRefusedRun>
+export type OmoRefusedTaskMap = ReadonlyMap<string, readonly OmoRunRange[]>
 
 export type OmoSpawnReceipt = {
   readonly confirmed: boolean
@@ -125,7 +125,7 @@ function isProvisionalSpawnReceipt(item: Record<string, unknown>): boolean {
   return item.status === 'error' && item.failure_kind === undefined
 }
 
-export function isRefusedProvisionalRun(epoch: number | undefined, refusal: OmoRefusedRun): boolean {
+export function isRefusedProvisionalRun(epoch: number | undefined, refusal: OmoRunRange): boolean {
   if (refusal.runStartEpoch > refusal.runEpoch) return false
   if (epoch === undefined) return refusal.runStartEpoch === 0
   return epoch >= refusal.runStartEpoch && epoch <= refusal.runEpoch
@@ -138,7 +138,7 @@ export function reconcileOmoSpawns(
   const agents = new Set<string>()
   const skills = new Map<string, Set<string>>()
   for (const [taskId, receipt] of spawns) {
-    const refusal = refusedTasks.get(taskId)
+    const refusals = refusedTasks.get(taskId)
     let kept = receipt.confirmed
     let taskSkills: Set<string> | undefined
     const addAll = (names: ReadonlySet<string>) => {
@@ -152,7 +152,7 @@ export function reconcileOmoSpawns(
     }
     if (receipt.confirmed) addAll(receipt.confirmedSkills)
     for (const [epoch, runSkills] of receipt.provisionalRuns) {
-      if (refusal && isRefusedProvisionalRun(epoch, refusal)) continue
+      if (refusals?.some(run => isRefusedProvisionalRun(epoch, run))) continue
       kept = true
       addAll(runSkills)
     }

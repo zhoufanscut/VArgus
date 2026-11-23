@@ -542,7 +542,11 @@ launch facts (queued `pending`, slow-admission `running`, held `paused`, or
 bare foreground-batch `error` without `failure_kind`, in parent history or
 nested child JSONLs) for the same task and
 run are reconciled away along with their provisional skills while retaining
-previously launched runs under a reused task ID. Child JSONLs are read
+previously launched runs under a reused task ID. The collector remembers observed
+refusal ranges in memory for the current session, working directory and task
+store. When OmO expires a record, its queued receipts stay excluded. A new
+record for the same task ID can revise the counts for its own run.
+Child JSONLs are read
 incrementally with raw-`Buffer` line carry so multi-byte UTF-8 and partial lines
 are never split, resetting from offset 0 on inode change or shrink and pruning
 removed/expunged caches. Polling uses a 1-second floor when any matched task is

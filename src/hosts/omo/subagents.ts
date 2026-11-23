@@ -10,8 +10,8 @@ import {
   parseOmoRunEpoch,
   reconcileOmoSpawns,
   type OmoHistory,
-  type OmoRefusedRun,
   type OmoRefusedTaskMap,
+  type OmoRunRange,
   type OmoSubagentSkillMap,
 } from './collect.ts'
 
@@ -405,7 +405,7 @@ type ParsedTask = {
   readonly childSessionId: string | undefined
   readonly active: boolean
   readonly refusedPreLaunch: boolean
-  readonly refusedRun: OmoRefusedRun | undefined
+  readonly run: OmoRunRange | undefined
 }
 
 type CachedTask = {
@@ -424,7 +424,7 @@ type JsonlFileState = {
   state: OmoHistory
 }
 
-function parseRefusedRun(raw: Record<string, unknown>): OmoRefusedRun | undefined {
+function parseRunRange(raw: Record<string, unknown>): OmoRunRange | undefined {
   const hasNotification = Object.hasOwn(raw, 'notification') && raw.notification !== undefined
   if (hasNotification && !isPlainObject(raw.notification)) return undefined
   const notification = hasNotification ? raw.notification as Record<string, unknown> : undefined
@@ -451,8 +451,19 @@ function parseTaskRecord(raw: unknown): ParsedTask | null {
     ? raw.child_session_id : undefined
   const active = typeof raw.status === 'string' && NON_TERMINAL_STATUSES.has(raw.status)
   const refusedPreLaunch = isPreLaunchTaskRefusal(raw)
-  const refusedRun = refusedPreLaunch ? parseRefusedRun(raw) : undefined
-  return { taskId: raw.task_id, parentSessionId, rootSessionId, childSessionId, active, refusedPreLaunch, refusedRun }
+  return { taskId: raw.task_id, parentSessionId, rootSessionId, childSessionId, active, refusedPreLaunch, run: parseRunRange(raw) }
+}
+
+function updateRefusedRuns(refusals: Map<string, readonly OmoRunRange[]>, task: ParsedTask, refused: boolean): void {
+  const { taskId, run } = task
+  const previous = refusals.get(taskId)
+  if (!run || (!refused && !previous)) return
+  // A revive advances past the previous run's epochs. New evidence for this run
+  // can replace its own refusal while a different run's refusal still applies.
+  const runs = previous?.filter(old => old.runEpoch < run.runStartEpoch || old.runStartEpoch > run.runEpoch) ?? []
+  if (refused) runs.push(run)
+  if (runs.length) refusals.set(taskId, runs)
+  else refusals.delete(taskId)
 }
 
 function consumeJsonlLine(file: JsonlFileState, lineBuf: Buffer): void {
@@ -491,8 +502,8 @@ export class OmoSubagents {
     return this.current
   }
 
-  private reset(): void {
-    this.stateDir = ''
+  private reset(stateDir = ''): void {
+    this.stateDir = stateDir
     this.current = EMPTY_SNAPSHOT
     this.hasActive = false
     this.timing = null
@@ -542,11 +553,7 @@ export class OmoSubagents {
     try {
       const stateDir = await resolveOmoTaskStateDir(cwd, this.resolveOptions)
       if (this.isStale(generation)) return
-      if (stateDir !== this.stateDir) {
-        this.stateDir = stateDir
-        this.taskCache.clear()
-        this.fileCache.clear()
-      }
+      if (stateDir !== this.stateDir) this.reset(stateDir)
 
       const tasksDir = join(stateDir, 'tasks')
       let names: string[]
@@ -594,7 +601,8 @@ export class OmoSubagents {
       let tools = 0
       const taskIds = new Set<string>()
       const skills = new Map<string, Set<string>>()
-      const refusedTasks = new Map<string, OmoRefusedRun>()
+      // OmO can expire a refused task while the parent still has its queued receipt.
+      const refusedTasks = new Map(this.current.refusedTasks)
       const childHistories: OmoHistory[] = []
       let hasActive = false
 
@@ -620,11 +628,9 @@ export class OmoSubagents {
           tools += history.counts.tools
           childHistories.push(history)
         }
-        if (!task.refusedPreLaunch || taskHasWork) {
-          taskIds.add(task.taskId)
-        } else if (task.refusedRun !== undefined) {
-          refusedTasks.set(task.taskId, task.refusedRun)
-        }
+        const refused = task.refusedPreLaunch && !taskHasWork
+        if (!refused) taskIds.add(task.taskId)
+        updateRefusedRuns(refusedTasks, task, refused)
       }
 
       for (const history of childHistories) {
