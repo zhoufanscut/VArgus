@@ -49,14 +49,23 @@ export class Views {
       } finally { lines.close(); stream.destroy() }
     }
   }
-  family(): View[] {
-    const result = new Set([this.root])
+  private reachable(threadId: string): Set<string> {
+    const visited = new Set([threadId])
     for (;;) {
-      const size = result.size
-      for (const v of this.known.values()) if (v.parent && result.has(v.parent)) result.add(v.thread)
-      if (size === result.size) break
+      const size = visited.size
+      for (const v of this.known.values()) if (v.parent && visited.has(v.parent)) visited.add(v.thread)
+      if (size === visited.size) break
     }
-    return [...this.known.values()].filter(v => result.has(v.thread))
+    return visited
+  }
+  descendants(threadId: string): View[] {
+    const visited = this.reachable(threadId)
+    visited.delete(threadId)
+    return [...this.known.values()].filter(v => visited.has(v.thread))
+  }
+  family(): View[] {
+    const visited = this.reachable(this.root)
+    return [...this.known.values()].filter(v => visited.has(v.thread))
   }
   restoreCandidates(threads: Iterable<string>): View[] {
     const pending = new Set(threads), family = new Set(this.family().map(view => view.thread))

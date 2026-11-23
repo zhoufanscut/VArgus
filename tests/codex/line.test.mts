@@ -137,3 +137,57 @@ test('codexLine renders SVN working copies outside Git', { skip: process.platfor
   await ready(collector, 'svnproj')
   assert.match(await line(500), /repo:svnproj \| branch:trunk \| \?1/)
 })
+
+test('codexLine folds extraCounts without mutating the collector, keeps viewed metrics and VCS live, and preserves folded counts when paused', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-line-extra-'))
+  try {
+    const cwd = await repository(dir, 'project')
+    const collector = new CodexCollector(cwd, undefined)
+    collector.start(cwd, 0)
+    const snap = collector.snapshot()!
+    snap.session.model = 'gpt-6.1-sol'
+    snap.session.effort = 'high'
+    collector.updateUsage({
+      total: { inputTokens: 42424, cachedInputTokens: 40000, outputTokens: 777, totalTokens: 43201 },
+      last: { inputTokens: 42424, cachedInputTokens: 40000, outputTokens: 777, totalTokens: 43201 },
+      modelContextWindow: 190000,
+    })
+    collector.recordResponseRate(150, 1000)
+    snap.session.counts.tools = 2
+    snap.session.counts.agents = 1
+    snap.session.counts.skills = 1
+
+    const line = codexLine(collector, resolveCodexOptions({ session: false }), theme)
+    const extra = { tokens: 5000, tools: 3, agents: 2, skills: 4 }
+    const first = await line(500, extra)
+    assert.match(first, /ctx:18%/)
+    assert.match(first, /token:8\.2k\(94\.3%, 150t\/s\)/)
+    assert.match(first, /🔧5 🤖3 ⚡5/)
+    assert.deepEqual(collector.snapshot()!.session.counts, { tokens: 3201, tools: 2, agents: 1, skills: 1 },
+      'folding extraCounts must not mutate the live collector counts')
+    assert.equal(line.paused(500), first + ' | ⌛stale', 'paused snapshot must retain folded counts')
+
+    // Live async pollVcs() must still populate v.vcs even when extraCounts is passed.
+    await ready(collector, 'project')
+    const withVcs = await line(500, extra)
+    assert.match(withVcs, /token:8\.2k\(94\.3%, 150t\/s\)/)
+    assert.match(withVcs, /🔧5 🤖3 ⚡5/)
+    assert.match(withVcs, /repo:project \| branch:project \| \?1/)
+    assert.equal(line.paused(500), withVcs + ' | ⌛stale')
+
+    // Rendering without extraCounts returns to the viewed thread's own totals.
+    const selfOnly = await line(500)
+    assert.match(selfOnly, /token:3\.2k\(94\.3%, 150t\/s\)/)
+    assert.match(selfOnly, /🔧2 🤖1 ⚡1/)
+    assert.doesNotMatch(selfOnly, /token:8\.2k/)
+
+    // A zero-token main collector still renders folded descendant counts without mutating itself.
+    const empty = new CodexCollector(cwd, undefined)
+    empty.start(cwd, 0)
+    const emptyLine = codexLine(empty, resolveCodexOptions({ session: false, repo: false, branch: false, status: false }), theme)
+    const foldedEmpty = await emptyLine(500, { tokens: 1500, tools: 1, agents: 0, skills: 2 })
+    assert.match(foldedEmpty, /token:1\.5k/)
+    assert.match(foldedEmpty, /🔧1 ⚡2/)
+    assert.deepEqual(empty.snapshot()!.session.counts, { tokens: 0, tools: 0, agents: 0, skills: 0 })
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})

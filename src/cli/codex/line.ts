@@ -1,3 +1,4 @@
+import { addCounts, type Counts } from '../../core/session.ts'
 import { CodexCollector } from '../../hosts/codex/collect.ts'
 import { codexDisplay } from '../../hosts/codex/display.ts'
 import type { CodexOptions } from '../../hosts/codex/options.ts'
@@ -11,15 +12,18 @@ import type { FragmentInput } from '../../core/types.ts'
 export function codexLine(collector: CodexCollector, o: CodexOptions, t: ReturnType<typeof makeTheme>, isWsl = false) {
   const refreshVcs = o.repo || o.branch || o.status ? pollVcs() : undefined
   let confirmed: FragmentInput | undefined
-  const line = async (width: number): Promise<string> => {
+  const line = async (width: number, extraCounts?: Counts): Promise<string> => {
     const v = collector.snapshot()
     if (!v) return ''
     v.core.columns = width
     v.core.isWsl = isWsl
     refreshVcs?.(v)
-    const frame = { v, display: codexDisplay(v.session), o, l: en, t, now: Date.now() }
+    const renderedValues = extraCounts
+      ? { ...v, session: { ...v.session, counts: addCounts(v.session.counts, extraCounts) } }
+      : v
+    const frame = { v: renderedValues, display: codexDisplay(renderedValues.session), o, l: en, t, now: Date.now() }
     const result = render(frame)
-    if (result) confirmed = { ...frame, ...structuredClone({ v, display: frame.display }), o: { ...o } }
+    if (result) confirmed = { ...frame, ...structuredClone({ v: renderedValues, display: frame.display }), o: { ...o } }
     return result
   }
   return Object.assign(line, {

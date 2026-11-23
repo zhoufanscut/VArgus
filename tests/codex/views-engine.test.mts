@@ -467,3 +467,269 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     await removeNativeFixture(dir)
   }
 })
+
+test('official Codex includeSubagents folds nested and paginated forked descendants per viewed subtree and reloads cleanly', { timeout: 90000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-subagents-engine-'))
+  const checkout = await fixtureCheckout(dir)
+  const cfg = join(dir, 'codex'), project = join(dir, 'project'), temporary = join(dir, 'tmp')
+  for (const folder of [cfg, project, temporary]) await mkdir(folder)
+  const skillDir = join(project, '.agents', 'skills', 'alpha')
+  await mkdir(skillDir, { recursive: true })
+  const skillFile = join(skillDir, 'SKILL.md')
+  await writeFile(skillFile, '---\nname: alpha\ndescription: alpha fixture.\n---\nalpha body.\n')
+  const sharedConfig = join(checkout, 'vargus.jsonc')
+  await writeFile(sharedConfig, JSON.stringify({ includeSubagents: true }))
+
+  const env = nativeFixtureEnv(dir, { CODEX_HOME: cfg, TMPDIR: temporary, VARGUS_LOCAL_TEST_KEY: 'local-test-only',
+    NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', TMUX: '', TMUX_PANE: '' })
+  let posts = 0, parentSpawned = false, midSpawned = false, grandRead = false
+  const provider = createServer(async (req, res) => {
+    if (req.method !== 'POST') { res.end('{}'); return }
+    let text = ''; for await (const part of req) text += String(part)
+    const request = JSON.parse(text)
+    const title = request.text?.format !== undefined
+    const task = request.input?.filter((i: any) => i.type === 'agent_message').at(-1)
+    const recipient = task?.recipient
+    const id = `response_${++posts}`
+    let calls: any[] = []
+    let usage = { input_tokens: 42424, input_tokens_details: { cached_tokens: 40000 }, output_tokens: 777, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 43201 }
+    let reply = title ? JSON.stringify({ title: 'Subagent folding fixture' }) : 'ROOT FINAL RESPONSE'
+
+    if (title) {
+      usage = { input_tokens: 100, input_tokens_details: { cached_tokens: 0 }, output_tokens: 10, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 110 }
+    } else if (recipient === '/root/mid/grand') {
+      if (!grandRead) {
+        grandRead = true
+        calls = [{
+          type: 'function_call', name: 'exec_command', namespace: 'functions', id: 'fc_grand_cat', call_id: 'call_grand_cat',
+          arguments: JSON.stringify({ cmd: 'cat ' + JSON.stringify(skillFile), workdir: project, max_output_tokens: 1000 }),
+        }]
+        usage = { input_tokens: 4000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 100, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 4100 }
+      } else {
+        reply = 'GRANDCHILD DONE'
+        usage = { input_tokens: 2000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 100, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 2100 }
+      }
+    } else if (recipient === '/root/mid') {
+      if (!midSpawned) {
+        midSpawned = true
+        calls = [{
+          type: 'function_call', name: 'spawn_agent', namespace: 'collaboration', id: 'fc_grand', call_id: 'call_grand',
+          arguments: JSON.stringify({ message: 'GRANDCHILD task.', agent_type: 'default', task_name: 'grand', fork_turns: 'none' }),
+        }]
+        usage = { input_tokens: 5000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 100, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 5100 }
+      } else {
+        reply = 'MID CHILD DONE'
+        usage = { input_tokens: 3000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 100, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 3100 }
+      }
+    } else if (recipient === '/root/forked') {
+      reply = 'FORKED CHILD DONE'
+      usage = { input_tokens: 10000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 200, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 10200 }
+    } else if (!parentSpawned) {
+      parentSpawned = true
+      calls = [
+        {
+          type: 'function_call', name: 'spawn_agent', namespace: 'collaboration', id: 'fc_mid', call_id: 'call_mid',
+          arguments: JSON.stringify({ message: 'MID_CHILD task.', agent_type: 'default', task_name: 'mid', fork_turns: 'none' }),
+        },
+        {
+          type: 'function_call', name: 'spawn_agent', namespace: 'collaboration', id: 'fc_forked', call_id: 'call_forked',
+          arguments: JSON.stringify({ message: 'FORKED_CHILD task.', agent_type: 'default', task_name: 'forked', fork_turns: 'all' }),
+        },
+      ]
+      usage = { input_tokens: 1000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 10, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 1010 }
+    }
+
+    const events = calls.length ? [
+      { type: 'response.created', response: { id } },
+      ...calls.flatMap((item, index) => [
+        { type: 'response.output_item.added', output_index: index, item: { ...item, arguments: '' } },
+        { type: 'response.function_call_arguments.delta', item_id: item.id, output_index: index, delta: item.arguments },
+        { type: 'response.function_call_arguments.done', item_id: item.id, output_index: index, arguments: item.arguments },
+        { type: 'response.output_item.done', output_index: index, item },
+      ]),
+      { type: 'response.completed', response: { id, usage } },
+    ] : [
+      { type: 'response.created', response: { id } },
+      { type: 'response.output_item.done', item: { type: 'message', role: 'assistant', id: `msg_${id}`,
+        content: [{ type: 'output_text', text: reply }] } },
+      { type: 'response.completed', response: { id, usage } },
+    ]
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', Connection: 'close',
+      'x-codex-primary-used-percent': '27.5', 'x-codex-primary-window-minutes': '300' })
+    res.end(events.map(e => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join(''))
+  })
+  provider.listen(0, '127.0.0.1'); await once(provider, 'listening')
+  const port = (provider.address() as { port: number }).port
+  await writeFile(join(cfg, 'config.toml'), `model = "gpt-6.1-sol"
+model_provider = "local_mock"
+model_reasoning_effort = "low"
+model_context_window = 200000
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+check_for_update_on_startup = false
+[agents]
+max_depth = 3
+[features]
+plugins = false
+[tui]
+status_line = ["session-id"]
+screen_reader_detection_done = true
+fullscreen_transcript = false
+status_line_use_colors = true
+[tui.model_availability_nux]
+"gpt-6.1-sol" = 99
+[model_providers.local_mock]
+name = "Local test"
+base_url = "http://127.0.0.1:${port}/v1"
+env_key = "VARGUS_LOCAL_TEST_KEY"
+wire_api = "responses"
+supports_websockets = false
+requires_openai_auth = false
+[projects.${JSON.stringify(project)}]
+trust_level = "trusted"
+`)
+  const socket = join(dir, 'tmux')
+  const tmux = async (...args: string[]) => (await exec('tmux', ['-S', socket, ...args], { env })).stdout.replace(/\n$/, '')
+  let pane = ''
+  const screen = () => tmux('capture-pane', '-p', '-t', pane)
+  const row = async () => {
+    try { return (await tmux('show-options', '-p', '-v', '-t', pane, '@vargus_line')).replace(/#\[[^\]]*\]/g, '') } catch { return '' }
+  }
+  const wait = async (read: () => Promise<string>, match: RegExp, ms = 15000) => {
+    let got = '', until = Date.now() + ms
+    do { got = await read(); if (match.test(got)) return got; await delay(100) } while (Date.now() < until)
+    assert.match(got, match, await screen()); return got
+  }
+  let controls = 0
+  const submit = async (text: string) => {
+    const marker = text.startsWith('!') ? `VARGUS_CONTROL_DONE_${++controls}` : ''
+    if (marker) text += `; printf '\\n${marker}\\n'`
+    const buffer = `vargus-sub-test-${process.pid}-${Date.now()}`
+    await tmux('set-buffer', '-b', buffer, text)
+    await tmux('paste-buffer', '-p', '-d', '-b', buffer, '-t', pane)
+    const literal = text.replace(/\s+/g, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    await wait(async () => (await screen()).replace(/\s+/g, ''), new RegExp(literal))
+    await delay(200)
+    await tmux('send-keys', '-t', pane, 'Enter')
+    if (marker) {
+      await wait(screen, new RegExp('^\\s*(?:└ )?' + marker + '\\s*$', 'm'))
+      const activity = async () => {
+        const value = await screen()
+        return value.slice(value.lastIndexOf(marker) + marker.length)
+      }
+      await wait(async () => {
+        const value = await activity()
+        return /^\s*Worked for /m.test(value) && !/^• (?:Running|Working) /m.test(value) ? 'idle' : 'busy'
+      }, /^idle$/)
+    }
+  }
+  const command = (action: string, extra = '') => '!PATH=' + quote(env.PATH!) + ' COLUMNS=80 ' + quote(join(checkout, 'bin/vargus')) + ' ' + action + (extra ? ' ' + extra : '')
+  try {
+    await startTestDaemon(cfg, env)
+    await tmux('-f', '/dev/null', 'new-session', '-d', '-s', 'test', '-x', '157', '-y', '53', 'sleep 120')
+    pane = await tmux('display-message', '-p', '#{pane_id}')
+    await tmux('set-window-option', 'remain-on-exit', 'on')
+    const launch = ['env', `CODEX_HOME=${cfg}`, `TMPDIR=${temporary}`, 'VARGUS_LOCAL_TEST_KEY=local-test-only',
+      'NO_PROXY=127.0.0.1,localhost', 'no_proxy=127.0.0.1,localhost', `PATH=${env.PATH}`, 'codex', '--no-alt-screen', '-C', project].map(quote).join(' ')
+    await tmux('respawn-pane', '-k', '-t', pane, launch)
+    await wait(screen, /Ask Codex/)
+    await delay(1000)
+
+    const controlRoot = join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`)
+    const records = async () => {
+      const values: any[] = []
+      for (const name of await readdir(controlRoot)) if (name.endsWith('.json')) {
+        try { values.push(JSON.parse(await readFile(join(controlRoot, name), 'utf8'))) } catch (e) { if ((e as any).code !== 'ENOENT') throw e }
+      }
+      return values
+    }
+
+    await submit(command('on', '--socket ' + quote(socket)))
+    await wait(row, /session:/)
+    const active = (await records())[0]
+
+    await submit('Spawn mid and forked subagents.')
+    await wait(screen, /ROOT FINAL RESPONSE/)
+    // Root (4211, 0, 2, 0) + mid (8200, 0, 1, 0) + grand (6200, 1, 0, 1) + forked (10200, 0, 0, 0)
+    // = 28811 (28.8k) tokens, 1 tool, 3 agents, 1 skill; cache hit remains root's 94.3%.
+    const foldedMain = await wait(row, /token:28\.8k\(94\.3%\)/, 20000)
+    assert.match(foldedMain, /🔧1 🤖3 ⚡1/)
+
+    // Visit both direct children via Alt+Left and verify subtree-scoped folding:
+    // /root/mid folds mid + grandchild; /root/forked (paginated forked leaf) shows self-only.
+    const expectedByPath = new Map<string, { tokens: RegExp; calls: RegExp; absent?: RegExp }>([
+      ['/root/mid', { tokens: /token:14\.4k\(0%\)/, calls: /🔧1 🤖1 ⚡1/ }],
+      ['/root/forked', { tokens: /token:10\.2k\(0%\)/, calls: /.*/, absent: /🔧|🤖|⚡/ }],
+    ])
+    const childFooter = async () => {
+      const text = await screen(), at = text.lastIndexOf('Viewing sub-agent')
+      return at < 0 ? '' : text.slice(at)
+    }
+    const settled = async (target: typeof active.target, match: RegExp) => {
+      let matched = ''
+      await wait(async () => {
+        const snapshot = await new PaneInput(target).snapshot()
+        if (!codexComposer(snapshot, '')) return ''
+        const text = await childFooter()
+        const m = text.match(match)
+        if (!m) return ''
+        matched = m[1]!
+        return matched
+      }, /.+/)
+      return matched
+    }
+    const visited = new Set<string>()
+    let lastPath = ''
+    for (let i = 0; i < 2; i++) {
+      await tmux('send-keys', '-t', pane, 'M-Left')
+      const path = await settled(active.target, lastPath
+        ? new RegExp('`(' + (lastPath === '/root/mid' ? '/root/forked' : '/root/mid') + ')`')
+        : /`(\/root\/(?:mid|forked))`/)
+      lastPath = path
+      const spec = expectedByPath.get(path)!
+      const childRow = await wait(row, spec.tokens)
+      assert.match(childRow, spec.calls, path)
+      if (spec.absent) assert.doesNotMatch(childRow, spec.absent, path)
+      // Wait for footer clear (/statusline --clear) to finish before navigating.
+      await wait(async () => {
+        const snapshot = await new PaneInput(active.target).snapshot()
+        return codexComposer(snapshot, '') && !/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/.test(await childFooter()) ? 'ready' : ''
+      }, /^ready$/)
+      visited.add(path)
+    }
+    assert.equal(visited.size, 2)
+
+    // Return to Main, flip includeSubagents to false in vargus.jsonc, reload, and verify self-only counts.
+    await tmux('send-keys', '-t', pane, 'M-Left')
+    await wait(row, /token:28\.8k\(94\.3%\)/)
+    await writeFile(sharedConfig, JSON.stringify({ includeSubagents: false }))
+    await exec(join(checkout, 'bin/vargus'), ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
+    const reloaded = (await records())[0]
+    const selfMain = await wait(row, /token:4\.2k\(94\.3%\)/)
+    assert.match(selfMain, /🤖2/)
+    assert.doesNotMatch(selfMain, /🔧|⚡/)
+    await wait(async () => codexComposer(await new PaneInput(reloaded.target).snapshot(), '') ? 'ready' : '', /^ready$/)
+
+    // Visiting /root/mid under includeSubagents: false also excludes its grandchild.
+    let seen = ''
+    for (let i = 0; i < 2; i++) {
+      await tmux('send-keys', '-t', pane, 'M-Left')
+      seen = await settled(reloaded.target, seen
+        ? new RegExp('`(' + (seen === '/root/mid' ? '/root/forked' : '/root/mid') + ')`')
+        : /`(\/root\/(?:mid|forked))`/)
+      if (seen === '/root/mid') break
+      // Wait for the reloaded worker to finish clearing the intermediate child's footer.
+      await wait(row, /token:10\.2k\(0%\)/)
+      await wait(async () => codexComposer(await new PaneInput(reloaded.target).snapshot(), '') ? 'ready' : '', /^ready$/)
+    }
+    assert.equal(seen, '/root/mid')
+    const selfMid = await wait(row, /token:8\.2k\(0%\)/)
+    assert.match(selfMid, /🤖1/)
+    assert.doesNotMatch(selfMid, /🔧|⚡/)
+  } finally {
+    await tmux('kill-server').catch(() => {})
+    await exec('codex', ['app-server', 'daemon', 'stop'], { env, timeout: 10000 }).catch(() => {})
+    provider.closeAllConnections(); await new Promise<void>(done => provider.close(() => done()))
+    await removeNativeFixture(dir)
+  }
+})

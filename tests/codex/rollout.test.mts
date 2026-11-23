@@ -492,3 +492,81 @@ test('Codex rollout computes decode t/s from model item spans and token_usage_re
     thread_settings: { model: 'gpt-6-luna', cwd: '/repo', service_tier: 'default' } } })
   assert.equal(r.collector.snapshot()!.session.tokensPerSecond, undefined)
 })
+
+test('RolloutReader.attributable gates clean, paginated, mixed and replaced-then-regrown transcripts', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-attributable-'))
+  const jsonl = (records: unknown[]) => records.map(r => JSON.stringify(r) + '\n').join('')
+  try {
+    // 1. Clean transcript: false before session_meta, true after, then latches false if replaced even after regrowing.
+    const cleanFile = join(dir, 'clean.jsonl')
+    await writeFile(cleanFile, '')
+    const clean = new RolloutReader(cleanFile, 'thread-a', '/repo', dir)
+    assert.equal(clean.attributable, false)
+    await clean.poll(false)
+    assert.equal(clean.attributable, false)
+    await writeFile(cleanFile, jsonl([meta, count]))
+    await clean.poll(false)
+    assert.equal(clean.attributable, true)
+    assert.equal(clean.collector.snapshot()!.session.counts.tokens, 3201)
+    // Shrink file to trigger replacement detection, then regrow beyond previous offset.
+    await writeFile(cleanFile, '')
+    await assert.rejects(clean.poll(false), /replaced/)
+    assert.equal(clean.attributable, false)
+    await writeFile(cleanFile, jsonl([meta, count, count, count]))
+    await assert.rejects(clean.poll(false), /replaced/, 'replaced-file error must stay latched after later growth')
+    assert.equal(clean.attributable, false)
+
+    // 2. Paginated forked child stays attributable until an ordinal-less record arrives.
+    const paginatedFile = join(dir, 'paginated.jsonl')
+    const childMeta = { ...meta, ordinal: 0, payload: { ...meta.payload,
+      history_mode: 'paginated', subagent_history_start_ordinal: 2 } }
+    await writeFile(paginatedFile, jsonl([
+      childMeta,
+      { ...meta, ordinal: 1, payload: { ...meta.payload, id: 'parent' } },
+      { ...count, ordinal: 2 },
+    ]))
+    const paginated = new RolloutReader(paginatedFile, 'thread-a', '/repo', dir)
+    await paginated.poll(false)
+    assert.equal(paginated.attributable, true)
+    assert.equal(paginated.collector.snapshot()!.session.counts.tokens, 3201)
+    await appendFile(paginatedFile, jsonl([count]))
+    await assert.rejects(paginated.poll(false), /valid ordinal/)
+    assert.equal(paginated.attributable, false)
+
+    // 3. Non-paginated mixed child flips attributable to false and stays false after clean appends.
+    const mixedFile = join(dir, 'mixed.jsonl')
+    await writeFile(mixedFile, jsonl([meta, { ...meta, payload: { ...meta.payload, id: 'parent' } }]))
+    const mixed = new RolloutReader(mixedFile, 'thread-a', '/repo', dir)
+    await assert.rejects(mixed.poll(false), /another Codex thread/)
+    assert.equal(mixed.attributable, false)
+    await appendFile(mixedFile, jsonl([count]))
+    await mixed.poll(false)
+    assert.equal(mixed.attributable, false)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('RolloutReader.poll(false) skips modelDefault lookups and poll(true) resolves them on unchanged file size', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-poll-default-'))
+  try {
+    const file = join(dir, 'rollout.jsonl')
+    const first = { ...meta, payload: { ...meta.payload, model_provider: 'openai' } }
+    await writeFile(file, [first, settings].map(record => JSON.stringify(record) + '\n').join(''))
+    let lookups = 0
+    const modelDefault = async (model: string, cwd: string) => {
+      lookups++
+      assert.equal(model, 'gpt-6.1-sol')
+      assert.equal(cwd, '/repo')
+      return 'high'
+    }
+    const reader = new RolloutReader(file, 'thread-a', '/repo', dir, modelDefault)
+    await reader.poll(false)
+    assert.equal(lookups, 0)
+    assert.equal(reader.collector.snapshot()!.session.defaultEffort, undefined)
+    await reader.poll(false)
+    assert.equal(lookups, 0)
+    // Promoting the reader to active view resolves defaultEffort even when file size has not changed.
+    await reader.poll(true)
+    assert.equal(lookups, 1)
+    assert.equal(reader.collector.snapshot()!.session.defaultEffort, 'high')
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})

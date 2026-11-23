@@ -80,6 +80,10 @@ export class RolloutReader {
     this.collector = new CodexCollector(cwd, home)
   }
 
+  get attributable(): boolean {
+    return this.selected && this.countersAttributed && this.historyError === undefined
+  }
+
   private resetGenWindow(): void {
     this.genStartMs = undefined
     this.genEndMs = undefined
@@ -258,30 +262,38 @@ export class RolloutReader {
     }
   }
 
-  async poll(): Promise<void> {
+  async poll(resolveModelDefault = true): Promise<void> {
     if (this.historyError) throw new Error(this.historyError)
     const file = await open(this.file, 'r')
     try {
-      if ((await file.stat()).size < this.offset) throw new Error('The Codex transcript was replaced; turn VArgus off and on again.')
-      const buffer = Buffer.alloc(64 * 1024)
-      for (;;) {
-        const { bytesRead } = await file.read(buffer, 0, buffer.length, this.offset)
-        if (!bytesRead) break
-        this.offset += bytesRead
-        this.pending += this.decoder.decode(buffer.subarray(0, bytesRead), { stream: true })
-        let end: number
-        while ((end = this.pending.indexOf('\n')) >= 0) {
-          const line = this.pending.slice(0, end)
-          this.pending = this.pending.slice(end + 1)
-          if (line) this.observe(JSON.parse(line))
+      const { size } = await file.stat()
+      if (size < this.offset) {
+        this.historyError = 'The Codex transcript was replaced; turn VArgus off and on again.'
+        throw new Error(this.historyError)
+      }
+      if (size > this.offset) {
+        const buffer = Buffer.alloc(64 * 1024)
+        for (;;) {
+          const { bytesRead } = await file.read(buffer, 0, buffer.length, this.offset)
+          if (!bytesRead) break
+          this.offset += bytesRead
+          this.pending += this.decoder.decode(buffer.subarray(0, bytesRead), { stream: true })
+          let end: number
+          while ((end = this.pending.indexOf('\n')) >= 0) {
+            const line = this.pending.slice(0, end)
+            this.pending = this.pending.slice(end + 1)
+            if (line) this.observe(JSON.parse(line))
+          }
         }
       }
     } finally { await file.close() }
-    const v = this.collector.snapshot()
-    if (v) {
-      const { session } = v
-      session.defaultEffort = this.modelProvider === 'openai' && session.model
-        ? await this.modelDefault?.(session.model, v.core.cwd) : undefined
+    if (resolveModelDefault) {
+      const v = this.collector.snapshot()
+      if (v) {
+        const { session } = v
+        session.defaultEffort = this.modelProvider === 'openai' && session.model
+          ? await this.modelDefault?.(session.model, v.core.cwd) : undefined
+      }
     }
   }
 }

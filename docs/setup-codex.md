@@ -215,8 +215,15 @@ that saved layout; it does not remove your `thread-id` preference.
 ## Readings and view changes
 
 The helper follows the displayed parent or subagent through Alt+Left/Right and
-`/subagents`. Each view shows its own recorded readings; child totals are not
-aggregated. VArgus matches Codex's contextual agent label to saved session metadata.
+`/subagents`. By default (`includeSubagents: false`), each view shows its own
+recorded readings and child totals are not aggregated. Setting
+`includeSubagents: true` folds saved, attributable descendant threads' tokens,
+tools, agents and skills into the displayed view (Main shows the whole saved
+family; a subagent view shows its own subtree; ephemeral, ambiguous, unreadable,
+replaced and unsupported mixed-history logs are skipped). Context, cache hit %,
+output speed (`t/s`), model, effort, Fast mode, session age, rate limits and
+repository readings always follow the displayed thread. VArgus matches Codex's
+contextual agent label to saved session metadata.
 If a popup, clipped label or ambiguous agent path prevents identification, the row
 blanks until the view can be identified again or the snapshot rules below apply.
 At an empty composer, blank content also releases this pane's extra tmux row.
@@ -235,7 +242,8 @@ details. Pure tool-call-only steps without a recorded stream-start timestamp and
 sub-0.5 s bursts preserve the previous speed. Compaction, a response without
 fresh usage, or changing the model or Fast tier clears the affected suffix.
 Tool counts replay completed visible items and exclude `!` controls. `🤖2` counts
-recorded subagent starts in the displayed conversation; `⚡3` counts observed skill
+recorded subagent starts in the displayed conversation (or its attributable
+subtree when `includeSubagents` is enabled); `⚡3` counts observed skill
 loads, once per skill path per user turn. Context defaults to `ctx:0%` until
 recorded; other missing readings stay hidden.
 Live readings come from saved transcripts and update as Codex writes them.

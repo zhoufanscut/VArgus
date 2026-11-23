@@ -1,6 +1,7 @@
 import { rm } from 'node:fs/promises'
 import { homedir, release } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
+import { addCounts, type Counts } from '../../core/session.ts'
 import { restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, savedFooterSettings, FooterSettings } from '../../hosts/codex/footer.ts'
 import { cachedModelDefault } from '../../hosts/codex/model-defaults.ts'
 import { resolveCodexOptions } from '../../hosts/codex/options.ts'
@@ -20,6 +21,26 @@ import {
 
 type Request = { id: string; action: 'on' | 'off' }
 
+export async function foldDescendantCounts(
+  descendants: readonly View[],
+  getReader: (view: View) => RolloutReader,
+): Promise<Counts | undefined> {
+  let extraCounts: Counts | undefined
+  for (const child of descendants) {
+    const childReader = getReader(child)
+    try {
+      await childReader.poll(false)
+      if (childReader.attributable) {
+        const counts = childReader.collector.snapshot()?.session.counts
+        if (counts) extraCounts = extraCounts ? addCounts(extraCounts, counts) : { ...counts }
+      }
+    } catch {
+      // Skip unreadable, replaced, or mixed-history descendant logs without affecting the active view.
+    }
+  }
+  return extraCounts
+}
+
 export async function rowWorker(spec: Spec): Promise<number> {
   const { target, thread } = spec
   const file = recordPath(target), views = new Views(spec.home, thread, spec.transcript), input = new PaneInput(target)
@@ -30,7 +51,16 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const footerSettings = new FooterSettings(cwd => savedFooterSettings(cwd, spec.home))
   const modelDefault = options.model && options.effort
     ? cachedModelDefault(spec.home, cwd => footerSettings.modelCatalog(cwd)) : undefined
-  const readers = new Map<string, { reader: RolloutReader; line: ReturnType<typeof codexLine> }>()
+  const readers = new Map<string, RolloutReader>()
+  const lines = new Map<string, ReturnType<typeof codexLine>>()
+  const getReader = (targetView: View): RolloutReader => {
+    let reader = readers.get(targetView.thread)
+    if (!reader) {
+      reader = new RolloutReader(targetView.file, targetView.thread, targetView.cwd, homedir(), modelDefault)
+      readers.set(targetView.thread, reader)
+    }
+    return reader
+  }
   const suppressed = new Set<string>()
   let mode = spec.mode, selected: string | undefined, error: string | undefined
   let stopping = false, attached = false, refreshAt = 0, renderAt = 0
@@ -102,15 +132,19 @@ export async function rowWorker(spec: Spec): Promise<number> {
       if (view) {
         readingError = undefined
         try {
-          let value = readers.get(view.thread)
-          if (!value) {
-            const reader = new RolloutReader(view.file, view.thread, view.cwd, homedir(), modelDefault)
-            value = { reader, line: codexLine(reader.collector, options, theme, isWsl) }; readers.set(view.thread, value)
+          const reader = getReader(view)
+          await reader.poll(true)
+          let viewLine = lines.get(view.thread)
+          if (!viewLine) {
+            viewLine = codexLine(reader.collector, options, theme, isWsl)
+            lines.set(view.thread, viewLine)
           }
-          await value.reader.poll()
+          const extraCounts = options.includeSubagents && (options.tokens || options.callCounts)
+            ? await foldDescendantCounts(views.descendants(view.thread), getReader)
+            : undefined
           width = await output.width()
-          line = await value.line(width)
-          if (line) lastReadings = { thread: view.thread, label: cleanText(view.path ?? 'main'), line: value.line }
+          line = await viewLine(width, extraCounts)
+          if (line) lastReadings = { thread: view.thread, label: cleanText(view.path ?? 'main'), line: viewLine }
         } catch (e) { readingError = (e as Error).message }
       } else if (hold) {
         width = await output.width()

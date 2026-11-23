@@ -272,3 +272,37 @@ test('context percentages separated from an agent label retain draft identity', 
   explicit.lines[explicit.lines.length - 1] = '  ' + foreign + ' · Main [default] · 68% context left'
   assert.equal(selectedView(explicit, family, parent), undefined, 'a foreign ID still blocks Main fallback')
 })
+
+test('descendants returns proper subtree views with cycle safety and excludes foreign roots', () => {
+  const views = new Views('/unused', 'root')
+  // Insert out of topological order to verify fixed-point closure.
+  views.known.set('deep', { thread: 'deep', parent: 'nested', path: '/root/first/nested/deep', file: '/deep', cwd: '/project' })
+  views.known.set('nested', { thread: 'nested', parent: 'first', path: '/root/first/nested', file: '/nested', cwd: '/project' })
+  views.known.set('first', { thread: 'first', parent: 'root', path: '/root/first', file: '/first', cwd: '/project' })
+  views.known.set('second', { thread: 'second', parent: 'root', path: '/root/second', file: '/second', cwd: '/project' })
+  views.known.set('root', { thread: 'root', file: '/root', cwd: '/project' })
+  views.known.set('other', { thread: 'other', file: '/other', cwd: '/project' })
+  views.known.set('foreign', { thread: 'foreign', parent: 'other', path: '/root/first', file: '/foreign', cwd: '/project' })
+
+  const ids = (list: { thread: string }[]) => new Set(list.map(v => v.thread))
+  assert.deepEqual(ids(views.descendants('root')), new Set(['first', 'second', 'nested', 'deep']))
+  assert.deepEqual(ids(views.family()), new Set(['root', 'first', 'second', 'nested', 'deep']))
+  assert.deepEqual(ids(views.descendants('first')), new Set(['nested', 'deep']))
+  assert.deepEqual(ids(views.descendants('nested')), new Set(['deep']))
+  assert.deepEqual(views.descendants('second'), [])
+  assert.deepEqual(views.descendants('missing'), [])
+
+  // Self-loop and mutual cycles terminate and never include the queried thread itself.
+  const cyclic = new Views('/unused', 'root')
+  cyclic.known.set('root', { thread: 'root', parent: 'child', file: '/root', cwd: '/project' })
+  cyclic.known.set('child', { thread: 'child', parent: 'root', file: '/child', cwd: '/project' })
+  cyclic.known.set('grand', { thread: 'grand', parent: 'child', file: '/grand', cwd: '/project' })
+  cyclic.known.set('self', { thread: 'self', parent: 'self', file: '/self', cwd: '/project' })
+  cyclic.known.set('cycA', { thread: 'cycA', parent: 'cycB', file: '/a', cwd: '/project' })
+  cyclic.known.set('cycB', { thread: 'cycB', parent: 'cycA', file: '/b', cwd: '/project' })
+  assert.deepEqual(ids(cyclic.descendants('root')), new Set(['child', 'grand']))
+  assert.deepEqual(ids(cyclic.family()), new Set(['root', 'child', 'grand']))
+  assert.deepEqual(ids(cyclic.descendants('child')), new Set(['root', 'grand']))
+  assert.deepEqual(cyclic.descendants('self'), [])
+  assert.deepEqual(ids(cyclic.descendants('cycA')), new Set(['cycB']))
+})

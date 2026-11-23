@@ -112,7 +112,7 @@ own display rules.
 and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
 The shared `callCounts` setting controls the tool, agent and skill counts together.
 The shared `includeSubagents` setting defaults to `false`, keeping token and call
-counts on the active conversation unless enabled (currently read by Claude Code).
+counts on the active conversation unless enabled (currently read by Claude Code and Codex CLI).
 Codex's [startup hook option](src/hosts/codex/options.ts) defaults on.
 Explicit activation or hook installation enables its tmux integration.
 
@@ -295,9 +295,23 @@ Each visible thread has a JSONL reader and collector. The reader keeps partial
 UTF-8 and incomplete records between polls. It uses the saved
 `subagent_history_start_ordinal` in paginated child histories to skip inherited
 activity while retaining inherited skill catalogs for later reads. A
-paginated reader with a valid boundary stops if a later ordinal is invalid.
-Unsupported mixed histories can yield an identity error and lose attributed
-agent and skill counts. The row only replays data the engine saved.
+paginated reader with a valid boundary stops if a later ordinal is invalid, and
+a replaced transcript (`size < offset`) latches its error so later file growth
+cannot resume reading mid-file bytes. Unsupported mixed histories can yield an
+identity error and lose attributed agent and skill counts. The row only replays
+data the engine saved.
+
+With `includeSubagents: false` (default), or when both `tokens` and `callCounts`
+are `false`, the worker polls only the displayed thread. With
+`includeSubagents: true` (and `tokens` or `callCounts` enabled), the worker also
+polls saved descendant threads of the viewed thread (`Views.descendants`)
+without creating per-descendant VCS pollers or resolving descendant model
+defaults, folding each attributable descendant's tokens, tools, agents and
+skills into the rendered row and paused draft snapshot without mutating the
+viewed collector. Ephemeral, ambiguous, unreadable, replaced and unpaginated
+mixed-history descendants are skipped so inherited parent activity is never
+double-counted. Context, cache hit %, output speed (`t/s`), model, effort, Fast
+mode, session age, rate limits and VCS remain on the viewed thread.
 
 [The collector](src/hosts/codex/collect.ts) takes cumulative uncached input
 plus output from token counts. For the cache percentage it divides
@@ -381,7 +395,9 @@ Tools count completed visible items and exclude user-shell controls. Agents
 count recorded starts. [Skill counting](src/hosts/codex/skills.ts) uses marked
 instruction injections or successful recognised reads of catalogued
 `SKILL.md` files, deduplicated by path and turn. Parent and child counts stay
-separate.
+separate by default; with `includeSubagents: true`, the viewed thread sums
+attributable descendants (Main shows the whole saved family; a child view shows
+its own subtree).
 
 ### Opt-in tmux row
 
@@ -731,9 +747,11 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
 
 - `npm run test:local` type-checks the Node graph and exercises shared rendering,
   import boundaries, installers and local fixtures. The Codex replay fixtures
-  check which counters belong to each thread. Display fixtures cover legacy
+  check which counters belong to each thread, attribution gating (`attributable`),
+  replaced-file error latching, `Views.descendants` subtree closure and
+  multi-level descendant folding. Display fixtures cover legacy
   counter settings, the shared `callCounts` switch, folded paths on a working
-  directory change and counts held while typing.
+  directory change, folded descendant counts and counts held while typing.
   The collector fixture distinguishes per-request cache reads from cumulative
   usage, an explicit miss and a context-only estimate.
   A separate Codex row test checks
@@ -750,7 +768,14 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   subsequent 0 ms fast burst, and cleared both suffixes when a response omitted
   usage. The standalone
   fixture observed `token:3.2k(94.3%)` in the tmux row. The native skill
-  test checks a child thread's token, tool, agent and skill totals. Model choice,
+  test checks a child thread's token, tool, agent and skill totals. The native
+  `views-engine` `includeSubagents` fixture (Linux, Codex 0.171.0, tmux 3.5a)
+  exercised a parent spawning both a paginated forked child (`fork_turns: "all"`)
+  and a mid child spawning a tool/skill-running grandchild, verifying subtree
+  folding on Main (`token:28.8k(94.3%)`, `🔧1 🤖3 ⚡1`), `/root/mid`
+  (`token:14.4k(0%)`, `🔧1 🤖1 ⚡1`), and `/root/forked` (`token:10.2k(0%)`),
+  plus reload back to `includeSubagents: false` (`token:4.2k(94.3%)` / `🤖2` on
+  Main and `token:8.2k(0%)` / `🤖1` on `/root/mid`). Model choice,
   billing and different provider timing need their own evidence.
 - `npm run test:claude` validates the plugin, type-checks against generated
   types, runs Claude engine fixtures and checks the documented reader and
