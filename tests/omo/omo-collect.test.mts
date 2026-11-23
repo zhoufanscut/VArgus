@@ -4,6 +4,7 @@ import { MAX_STALE_MS } from '../../src/core/limits.ts'
 import {
   collectOmo,
   collectOmoAgents,
+  collectOmoSubagentSkills,
   createOmoHistory,
   foldOmoEntry,
   omoHistoryReducer,
@@ -108,6 +109,7 @@ test('skill availability, SKILL.md reads and child load requests do not establis
     message('catalog', { role: 'custom', customType: 'skills.catalog', details: { skills: ['bun', 'browser'] } }),
   ])
   assert.equal(collectOmo(h.ctx, [], undefined, now).session.counts.skills, 0)
+  assert.equal(collectOmoSubagentSkills(h.ctx).size, 0)
 })
 
 test('agent counts use distinct task IDs from accepted spawns', () => {
@@ -306,4 +308,142 @@ test('agent counts exclude confirmed pre-launch refusals while keeping runtime e
     }),
   ])
   assert.deepEqual([...collectOmoAgents(reused.ctx)], ['st_00000002'])
+})
+
+test('explicitly resolved task skills attribute to accepted children, exclude missing/refusals, and deduplicate replays', () => {
+  // 1. Upstream OmO 5.1.61 single spawn receipt: 1 resolved + 1 missing -> 0 main skills, 1 child skill.
+  const single = host([
+    assistant('a1', [call('t1', 'task', { load_skills: ['audit', 'missing'] })]),
+    result('r1', 't1', 'task', {
+      mode: 'spawn',
+      task_id: 'st_00000001',
+      status: 'completed',
+      skills: {
+        requested: ['audit', 'missing'],
+        resolved: ['audit'],
+        missing: ['missing'],
+        rejected: [{ name: 'unsafe', reason: 'blocked' }],
+      },
+    }),
+    // Replaying the exact same receipt (same entry id or a second receipt for the same task_id) must not double-count.
+    result('r1', 't1', 'task', {
+      mode: 'spawn',
+      task_id: 'st_00000001',
+      status: 'completed',
+      skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+    }),
+    result('r1-again', 't1-again', 'task', {
+      mode: 'spawn',
+      task_id: 'st_00000001',
+      status: 'completed',
+      skills: { requested: ['audit'], resolved: ['audit', 'audit', '', '  ', 42], missing: [] },
+    }),
+    // Non-task or non-spawn receipts carrying skills must be ignored.
+    result('r-other-tool', 'o1', 'task_output', {
+      mode: 'spawn',
+      task_id: 'st_00000099',
+      skills: { requested: ['ignored'], resolved: ['ignored'], missing: [] },
+    }),
+    result('r-other-mode', 'o2', 'task', {
+      mode: 'status',
+      task_id: 'st_00000098',
+      skills: { requested: ['ignored'], resolved: ['ignored'], missing: [] },
+    }),
+  ])
+  assert.deepEqual(collectOmo(single.ctx, [], undefined, now).session.counts, {
+    tokens: 12, tools: 1, agents: 1, skills: 0,
+  })
+  const singleSkills = collectOmoSubagentSkills(single.ctx)
+  assert.deepEqual([...singleSkills.keys()], ['st_00000001'])
+  assert.deepEqual([...singleSkills.get('st_00000001')!], ['audit'])
+
+  // 2. Batch details.items[]: per-item attribution, same skill across two distinct children counts once per child,
+  //    older receipts without skills stay valid, and refused or empty-task_id items contribute zero skills.
+  const batch = host([
+    assistant('b1', [call('tb', 'task')]),
+    result('rb', 'tb', 'task', {
+      mode: 'spawn',
+      task_id: 'st_00000001',
+      status: 'running',
+      items: [
+        {
+          task_id: 'st_00000001',
+          status: 'completed',
+          skills: { requested: ['audit', 'audit', 'missing'], resolved: ['audit', 'audit'], missing: ['missing'] },
+        },
+        {
+          task_id: 'st_00000002',
+          status: 'completed',
+          skills: { requested: ['audit', 'review'], resolved: ['audit', ' review '], missing: [] },
+        },
+        {
+          task_id: 'st_00000003',
+          status: 'completed',
+          // Older receipt omitting `skills`.
+        },
+        {
+          // Confirmed pre-launch refusal still carries `skills` in OmO 5.1.61 start_failed -> must be excluded.
+          task_id: 'st_00000004',
+          status: 'error',
+          failure_kind: 'model_unavailable',
+          failure_reason: 'model_not_in_child_profile',
+          skills: { requested: ['blocked'], resolved: ['blocked'], missing: [] },
+        },
+        {
+          // Batch plan_unresolved/depth_denied emits task_id: '' with skills -> must be excluded.
+          task_id: '',
+          status: 'error',
+          error_message: 'depth denied',
+          skills: { requested: ['denied-skill'], resolved: ['denied-skill'], missing: [] },
+        },
+        {
+          // Post-launch runtime error (bare status:'error') stays accepted and keeps its resolved skills.
+          task_id: 'st_00000005',
+          status: 'error',
+          error_message: 'tool failed during run',
+          skills: { requested: ['debug'], resolved: ['debug'], missing: [] },
+        },
+        {
+          // Accepted item with only blank/non-string resolved entries must not leave an empty Set in subagentSkills.
+          task_id: 'st_00000006',
+          status: 'completed',
+          skills: { requested: ['missing'], resolved: ['', '   ', 42], missing: ['missing'] },
+        },
+      ],
+    }),
+  ])
+  assert.equal(collectOmo(batch.ctx, [], undefined, now).session.counts.skills, 0)
+  const batchSkills = collectOmoSubagentSkills(batch.ctx)
+  assert.deepEqual([...batchSkills.keys()].sort(), ['st_00000001', 'st_00000002', 'st_00000005'])
+  assert.equal(batchSkills.has('st_00000006'), false)
+  assert.deepEqual([...batchSkills.get('st_00000001')!], ['audit'])
+  assert.deepEqual([...batchSkills.get('st_00000002')!].sort(), ['audit', 'review'])
+  assert.deepEqual([...batchSkills.get('st_00000005')!], ['debug'])
+
+  // 3. Reused task_id across accepted and refused attempts keeps only accepted resolved skills (both orderings),
+  //    and id-less JSONL replay deduplicates by (task_id, skill_name).
+  const reusedState = createOmoHistory()
+  const acceptedEntry = {
+    type: 'message',
+    message: {
+      role: 'toolResult', toolCallId: 'c1', toolName: 'task',
+      details: { mode: 'spawn', task_id: 'st_00000007', status: 'completed', skills: { requested: ['audit'], resolved: ['audit'], missing: [] } },
+    },
+  }
+  const refusedEntry = {
+    type: 'message',
+    message: {
+      role: 'toolResult', toolCallId: 'c2', toolName: 'task',
+      details: {
+        mode: 'spawn', task_id: 'st_00000007', status: 'error', failure_kind: 'tools_unavailable',
+        skills: { requested: ['nope'], resolved: ['nope'], missing: [] },
+      },
+    },
+  }
+  foldOmoEntry(reusedState, refusedEntry, 'line:0')
+  foldOmoEntry(reusedState, acceptedEntry, 'line:1')
+  foldOmoEntry(reusedState, acceptedEntry, 'line:2')
+  foldOmoEntry(reusedState, refusedEntry, 'line:3')
+  assert.equal(reusedState.counts.skills, 0)
+  assert.deepEqual([...reusedState.subagentSkills.get('st_00000007')!], ['audit'])
 })

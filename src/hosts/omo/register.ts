@@ -1,5 +1,13 @@
 import { homedir, release } from 'node:os'
-import { collectOmo, collectOmoAgents, omoSettingsReducer, OMO_CONFIG_ENTRY, OMO_EDIT_ENTRY } from './collect.ts'
+import {
+  collectOmo,
+  collectOmoAgents,
+  collectOmoSubagentSkills,
+  omoSettingsReducer,
+  OMO_CONFIG_ENTRY,
+  OMO_EDIT_ENTRY,
+  type OmoSubagentSkillMap,
+} from './collect.ts'
 import { omoDisplay } from './display.ts'
 import type { AccountLimits, NativeContext, SessionEntry } from './contracts.ts'
 import { OmoSubagents } from './subagents.ts'
@@ -71,6 +79,27 @@ function unionSize(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
   return count
 }
 
+function unionSkillCount(a: OmoSubagentSkillMap, b: OmoSubagentSkillMap): number {
+  let count = 0
+  for (const names of a.values()) count += names.size
+  for (const [taskId, names] of b) {
+    const seen = a.get(taskId)
+    if (!seen) { count += names.size; continue }
+    for (const name of names) if (!seen.has(name)) count++
+  }
+  return count
+}
+
+function snapshotAgents(agents: ReadonlySet<string>): ReadonlySet<string> {
+  return new Set(agents)
+}
+
+function snapshotSkills(skills: OmoSubagentSkillMap): OmoSubagentSkillMap {
+  const copy = new Map<string, ReadonlySet<string>>()
+  for (const [taskId, names] of skills) copy.set(taskId, new Set(names))
+  return copy
+}
+
 export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> = readCheckoutOptions()): void {
   let active: {
     ctx: Context
@@ -107,7 +136,8 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     let tokensPerSecond: number | undefined
     let lastModelKey = modelKey(ctx.model)
     let values = collectOmo(ctx, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
-    let mainAgents: ReadonlySet<string> = collectOmoAgents(ctx)
+    let mainAgents: ReadonlySet<string> = subagents ? snapshotAgents(collectOmoAgents(ctx)) : new Set()
+    let mainSubagentSkills: OmoSubagentSkillMap = subagents ? snapshotSkills(collectOmoSubagentSkills(ctx)) : new Map()
     let checkedAt = Date.now()
     const instance = {
       ctx,
@@ -169,11 +199,13 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         let sessionId = ''
         try {
           const nextValues = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
-          const nextAgents = collectOmoAgents(current)
           const nextSessionId = subagents ? current.sessionManager.getSessionId() : ''
+          const nextAgents = subagents ? snapshotAgents(collectOmoAgents(current)) : mainAgents
+          const nextSubagentSkills = subagents ? snapshotSkills(collectOmoSubagentSkills(current)) : mainSubagentSkills
           nextValues.session.tokensPerSecond = tokensPerSecond
           values = nextValues
           mainAgents = nextAgents
+          mainSubagentSkills = nextSubagentSkills
           sessionId = nextSessionId
           checkedAt = Date.now()
         } catch {
@@ -218,14 +250,15 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
       const limits = options.rateLimits && instance.ctx.model?.provider === 'kimi-coding'
         ? kimi.readings(now, labels) : values.limits
       const sub = subagents?.snapshot
-      const effectiveSession = sub && (sub.tokens > 0 || sub.tools > 0 || sub.taskIds.size > 0)
+      const foldedSkills = sub ? unionSkillCount(mainSubagentSkills, sub.skills) : 0
+      const effectiveSession = sub && (sub.tokens > 0 || sub.tools > 0 || sub.taskIds.size > 0 || foldedSkills > 0)
         ? {
             ...values.session,
             counts: {
               tokens: values.session.counts.tokens + sub.tokens,
               tools: values.session.counts.tools + sub.tools,
               agents: unionSize(mainAgents, sub.taskIds),
-              skills: values.session.counts.skills,
+              skills: values.session.counts.skills + foldedSkills,
             },
           }
         : values.session

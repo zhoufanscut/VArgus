@@ -16,11 +16,14 @@ export type OmoSettings = {
 
 type AssistantUsage = { tokens: number; cacheHitPercent: number | undefined }
 
+export type OmoSubagentSkillMap = ReadonlyMap<string, ReadonlySet<string>>
+
 export type OmoHistory = {
   counts: Counts
   entries: Set<string>
   calls: Set<string>
   agents: Set<string>
+  subagentSkills: Map<string, Set<string>>
   usage: Map<string, AssistantUsage>
   latestUsage?: AssistantUsage
   edits: Set<string>
@@ -65,11 +68,28 @@ export function isPreLaunchTaskRefusal(value: unknown): boolean {
   return true
 }
 
+function addResolvedSkills(target: Map<string, Set<string>>, taskId: string, item: Record<string, unknown>): void {
+  const skills = record(item.skills)
+  if (!skills || !Array.isArray(skills.resolved)) return
+  let names = target.get(taskId)
+  for (const entry of skills.resolved) {
+    if (typeof entry !== 'string') continue
+    const name = entry.trim()
+    if (!name) continue
+    if (!names) {
+      names = new Set()
+      target.set(taskId, names)
+    }
+    names.add(name)
+  }
+}
+
 function agent(state: OmoHistory, value: unknown): void {
   const item = record(value)
   if (typeof item?.task_id !== 'string' || !item.task_id) return
   if (isPreLaunchTaskRefusal(item)) return
   state.agents.add(item.task_id)
+  addResolvedSkills(state.subagentSkills, item.task_id, item)
 }
 
 export const omoSettingsReducer: HistoryReducer<OmoSettings> = {
@@ -95,7 +115,7 @@ export type OmoEntryInput = {
 export function createOmoHistory(): OmoHistory {
   return {
     counts: initialCounts(), entries: new Set(), calls: new Set(),
-    agents: new Set(), usage: new Map(), edits: new Set(),
+    agents: new Set(), subagentSkills: new Map(), usage: new Map(), edits: new Set(),
   }
 }
 
@@ -161,8 +181,10 @@ export function foldOmoEntry(state: OmoHistory, entry: OmoEntryInput, fallbackId
     }
   }
   state.counts.agents = state.agents.size
-  // No canonical skill-load receipt is exposed by the established history
-  // contract. Reading a file named SKILL.md does not establish a skill load.
+  // Main-session skill loads lack a canonical receipt (reading SKILL.md does not
+  // establish one). Explicitly resolved child task skills (`skills.resolved` on
+  // accepted spawn receipts) are stored in `subagentSkills` and folded only when
+  // `includeSubagents` is enabled.
   return state
 }
 
@@ -175,6 +197,10 @@ export const omoHistoryReducer: HistoryReducer<OmoHistory> = {
 
 export function collectOmoAgents(ctx: NativeContext): ReadonlySet<string> {
   return ctx.sessionManager.reduceHistory(omoHistoryReducer).agents
+}
+
+export function collectOmoSubagentSkills(ctx: NativeContext): OmoSubagentSkillMap {
+  return ctx.sessionManager.reduceHistory(omoHistoryReducer).subagentSkills
 }
 
 export function collectOmo(

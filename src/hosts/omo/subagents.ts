@@ -3,7 +3,13 @@ import { realpathSync } from 'node:fs'
 import { lstat, open, readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { createOmoHistory, foldOmoEntry, isPreLaunchTaskRefusal, type OmoHistory } from './collect.ts'
+import {
+  createOmoHistory,
+  foldOmoEntry,
+  isPreLaunchTaskRefusal,
+  type OmoHistory,
+  type OmoSubagentSkillMap,
+} from './collect.ts'
 
 export type OmoEnv = Readonly<Record<string, string | undefined>>
 
@@ -16,9 +22,10 @@ export type SubagentSnapshot = {
   readonly tokens: number
   readonly tools: number
   readonly taskIds: ReadonlySet<string>
+  readonly skills: OmoSubagentSkillMap
 }
 
-const EMPTY_SNAPSHOT: SubagentSnapshot = { tokens: 0, tools: 0, taskIds: new Set() }
+const EMPTY_SNAPSHOT: SubagentSnapshot = { tokens: 0, tools: 0, taskIds: new Set(), skills: new Map() }
 
 const ACTIVE_POLL_MS = 1000
 const IDLE_POLL_MS = 5000
@@ -559,6 +566,7 @@ export class OmoSubagents {
       let tokens = 0
       let tools = 0
       const taskIds = new Set<string>()
+      const skills = new Map<string, Set<string>>()
       let hasActive = false
 
       for (const task of matched.values()) {
@@ -582,6 +590,14 @@ export class OmoSubagents {
           tokens += history.counts.tokens
           tools += history.counts.tools
           for (const agentId of history.agents) taskIds.add(agentId)
+          for (const [childTaskId, names] of history.subagentSkills) {
+            let dest = skills.get(childTaskId)
+            if (!dest) {
+              dest = new Set()
+              skills.set(childTaskId, dest)
+            }
+            for (const name of names) dest.add(name)
+          }
         }
         if (!task.refusedPreLaunch || taskHasWork) taskIds.add(task.taskId)
       }
@@ -594,7 +610,7 @@ export class OmoSubagents {
       const duration = Math.max(0, Date.now() - start)
       this.timing = { start: now, end: now + duration, duration }
       this.hasActive = hasActive
-      this.current = { tokens, tools, taskIds }
+      this.current = { tokens, tools, taskIds, skills }
     } catch {
       if (this.isStale(generation)) return
       const duration = Math.max(0, Date.now() - start)

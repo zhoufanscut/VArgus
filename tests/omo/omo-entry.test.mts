@@ -7,7 +7,7 @@ import { join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import vargus, { type OmoApi } from '../../src/hosts/omo/register.ts'
 import { main } from '../../src/cli.ts'
-import { collectOmoAgents } from '../../src/hosts/omo/collect.ts'
+import { collectOmoAgents, collectOmoSubagentSkills } from '../../src/hosts/omo/collect.ts'
 import { projectStateKey } from '../../src/hosts/omo/subagents.ts'
 import type { HistoryReducer, SessionEntry } from '../../src/hosts/omo/contracts.ts'
 import { makeTheme } from '../../src/theme/index.ts'
@@ -575,7 +575,7 @@ test('OmO includeSubagents defaults off, folds and deduplicates when toggled on,
     assert.equal(getSessionIdCalls, 0)
 
     // Toggle on via /vargus config: folds child (500 tok, 2 tools) + grandchild (300 tok, 1 tool) => 1.0k, 4 tools, 2 agents.
-    // Cache hit (88.9%), decode t/s, and ctx (25%) stay strictly main-only; skills remain omitted.
+    // Cache hit (88.9%), decode t/s, and ctx (25%) stay strictly main-only; skills remain omitted (no resolved task skills in this fixture).
     let now = 100_000
     t.mock.method(Date, 'now', () => now)
     let perf = 1000
@@ -827,6 +827,251 @@ test('OmO excludes pre-launch refused tasks across main-only and includeSubagent
     handlers.get('tool_execution_end')?.({}, ctx)
     const withRuntimeError = await waitForLine(/token:800\(0%\)/)
     assert.match(withRuntimeError, /🔧4 🤖2|T:4 A:2/)
+  } finally {
+    handlers.get('session_shutdown')?.({}, ctx)
+  }
+})
+
+test('OmO attributes explicitly resolved child task skills only under includeSubagents and deduplicates across sources', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-entry-skills-'))
+  const home = join(dir, 'home')
+  const agentDir = join(dir, 'agent')
+  const project = join(dir, 'project')
+  const savedHome = process.env.HOME
+  const savedAgentDir = process.env.OMO_CODING_AGENT_DIR
+  const savedNoColor = process.env.NO_COLOR
+  const hadHome = 'HOME' in process.env
+  const hadAgentDir = 'OMO_CODING_AGENT_DIR' in process.env
+  const hadNoColor = 'NO_COLOR' in process.env
+  t.after(async () => {
+    if (hadHome) process.env.HOME = savedHome
+    else delete process.env.HOME
+    if (hadAgentDir) process.env.OMO_CODING_AGENT_DIR = savedAgentDir
+    else delete process.env.OMO_CODING_AGENT_DIR
+    if (hadNoColor) process.env.NO_COLOR = savedNoColor
+    else delete process.env.NO_COLOR
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  await mkdir(home, { recursive: true })
+  await mkdir(project, { recursive: true })
+  process.env.HOME = home
+  process.env.OMO_CODING_AGENT_DIR = agentDir
+  process.env.NO_COLOR = '1'
+
+  const stateDir = join(agentDir, 'projects', projectStateKey(project), 'senpi-task')
+  const entries: SessionEntry[] = [
+    { id: 'settings', type: 'custom', timestamp: '', customType: 'vargus-settings',
+      data: { enabled: true, options: { repo: false, branch: false, status: false } } },
+    { id: 'm1', type: 'message', timestamp: '', message: {
+      role: 'assistant',
+      content: [
+        { type: 'toolCall', id: 'mt1', name: 'task', arguments: { load_skills: ['audit', 'missing'] } },
+        { type: 'toolCall', id: 'mt2', name: 'task', arguments: { load_skills: ['blocked'] } },
+      ],
+      usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 },
+    } },
+    // Upstream OmO 5.1.61 accepted spawn receipt with 1 resolved + 1 missing skill.
+    { id: 'r1', type: 'message', timestamp: '', message: {
+      role: 'toolResult', toolCallId: 'mt1', toolName: 'task',
+      details: {
+        mode: 'spawn', task_id: 'st_00000001', status: 'completed',
+        skills: { requested: ['audit', 'missing'], resolved: ['audit'], missing: ['missing'] },
+      },
+    } },
+    // Confirmed pre-launch refusal carrying skills must contribute 0 agents and 0 skills.
+    { id: 'r2', type: 'message', timestamp: '', message: {
+      role: 'toolResult', toolCallId: 'mt2', toolName: 'task',
+      details: {
+        mode: 'spawn', task_id: 'st_00000009', status: 'error',
+        failure_kind: 'model_unavailable', failure_reason: 'model_not_in_child_profile',
+        skills: { requested: ['blocked'], resolved: ['blocked'], missing: [] },
+      },
+    } },
+  ]
+  const memo = new Map<object, { state: unknown; through: number }>()
+  const handlers = new Map<string, (event: unknown, ctx: Context) => void>()
+  type Context = Parameters<Parameters<OmoApi['on']>[1]>[1]
+  let command: Parameters<OmoApi['registerCommand']>[1] | undefined
+  let row: { render(width: number): string[]; invalidate(): void } | undefined
+  let onRender: (() => void) | undefined
+  let getSessionIdCalls = 0
+  const ctx: Context = {
+    modelRegistry: { getProviderAuth: async () => undefined },
+    mode: 'tui', cwd: project, model: { id: 'gpt-6.1-sol', provider: 'test' }, thinkingLevel: 'high',
+    getContextUsage: () => ({ tokens: 100, contextWindow: 1000, percent: 10 }),
+    sessionManager: {
+      getSessionId: () => { getSessionIdCalls++; return 'sess-root' },
+      getEntry: id => entries.find(entry => entry.id === id),
+      getHeader: () => ({ timestamp: '2026-11-14T00:00:00Z' }),
+      reduceHistory<S>(reducer: HistoryReducer<S>): S {
+        const previous = memo.get(reducer)
+        let state = previous ? previous.state as S : reducer.initial()
+        for (let i = previous?.through ?? 0; i < entries.length; i++) {
+          state = reducer.add(state, entries[i]!)
+        }
+        memo.set(reducer, { state, through: entries.length })
+        return state
+      },
+    },
+    ui: {
+      setFooter() {},
+      setWidget(_key, factory) { row = factory?.({ requestRender() { onRender?.() } }) },
+      notify() {},
+    },
+  }
+  const api: OmoApi = {
+    on(name, handler) { handlers.set(name, handler); return () => handlers.delete(name) },
+    getSubscriptionLimits: () => [],
+    onSubscriptionLimits: () => () => {},
+    appendEntry(customType, data) {
+      entries.push({ id: String(entries.length), type: 'custom', timestamp: '', customType, data })
+    },
+    registerCommand(_name, value) { command = value },
+  }
+  const lineText = () => row?.render(200).join('') ?? ''
+  const waitForLine = (pattern: RegExp) => new Promise<string>((resolveWait, rejectWait) => {
+    const check = () => {
+      const current = lineText()
+      if (pattern.test(current)) {
+        clearTimeout(timeout)
+        onRender = undefined
+        resolveWait(current)
+      }
+    }
+    const timeout = setTimeout(() => {
+      onRender = undefined
+      rejectWait(new Error(`Timed out waiting for ${pattern}; got: ${lineText()}`))
+    }, 3000)
+    onRender = check
+    check()
+  })
+
+  vargus(api, {})
+  handlers.get('session_start')?.({}, ctx)
+  try {
+    // 1. Default off: 1 accepted agent, 0 skills (resolved child skill is not attributed to main).
+    const offLine = lineText()
+    assert.match(offLine, /🔧2 🤖1|T:2 A:1/)
+    assert.doesNotMatch(offLine, /⚡|S:/)
+    assert.equal(getSessionIdCalls, 0)
+
+    // 2. Toggle on even before any task store exists on disk: immediately renders 1 skill (`audit`).
+    let now = 300_000
+    t.mock.method(Date, 'now', () => now)
+    await command!.handler('config {"includeSubagents":true}', ctx)
+    const onImmediate = lineText()
+    assert.match(onImmediate, /🔧2 🤖1 ⚡1|T:2 A:1 S:1/)
+
+    // 3. Populate on-disk child JSONL that spawns grandchild st_00000002 with `review` AND under
+    //    already-seen st_00000001 duplicates `audit` while adding `lint` -> union must show 2 agents and 3 skills.
+    await mkdir(join(stateDir, 'tasks'), { recursive: true })
+    await mkdir(join(stateDir, 'children', 'st_00000001', 'sessions', 'st_00000001'), { recursive: true })
+    await writeFile(join(stateDir, 'tasks', 'st_00000001.json'), JSON.stringify({
+      task_id: 'st_00000001',
+      parent_session_id: 'sess-root',
+      root_session_id: 'sess-root',
+      child_session_id: 'sess-child-1',
+      status: 'completed',
+    }))
+    await writeFile(
+      join(stateDir, 'children', 'st_00000001', 'sessions', 'st_00000001', '001.jsonl'),
+      [
+        JSON.stringify({
+          id: 'c1-a1', type: 'message', timestamp: '',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'toolCall', id: 'tc1', name: 'task', arguments: {} }],
+            usage: { input: 200, output: 50, cacheRead: 0, cacheWrite: 0 },
+          },
+        }),
+        JSON.stringify({
+          id: 'c1-r1', type: 'message', timestamp: '',
+          message: {
+            role: 'toolResult', toolCallId: 'tc1', toolName: 'task',
+            details: {
+              mode: 'spawn',
+              items: [
+                { task_id: 'st_00000001', status: 'completed', skills: { requested: ['audit', 'lint'], resolved: ['audit', 'lint'], missing: [] } },
+                { task_id: 'st_00000002', status: 'completed', skills: { requested: ['review', 'missing'], resolved: ['review'], missing: ['missing'] } },
+              ],
+            },
+          },
+        }),
+      ].join('\n') + '\n',
+    )
+    now += 6000
+    handlers.get('tool_execution_end')?.({}, ctx)
+    const foldedLine = await waitForLine(/🔧3 🤖2 ⚡3|T:3 A:2 S:3/)
+    assert.match(foldedLine, /token:400\(0%\)/)
+    // Memoized main subagentSkills map (and its inner Set) must never be mutated by render-time union.
+    assert.deepEqual([...collectOmoSubagentSkills(ctx).keys()], ['st_00000001'])
+    assert.deepEqual([...collectOmoSubagentSkills(ctx).get('st_00000001')!], ['audit'])
+
+    // 4. Failed updates after appending new spawns — both a new task_id and a new skill on an already-seen
+    //    task_id (guarding inner-Set deep cloning) — must preserve committed tokens, tools, agents and skills
+    //    atomically across getContextUsage/getSessionId throws and stale ticks.
+    entries.push(
+      { id: 'm-new', type: 'message', timestamp: '', message: {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'mt-new', name: 'task', arguments: {} }],
+        usage: { input: 500, output: 100, cacheRead: 0, cacheWrite: 0 },
+      } },
+      { id: 'r-new', type: 'message', timestamp: '', message: {
+        role: 'toolResult', toolCallId: 'mt-new', toolName: 'task',
+        details: {
+          mode: 'spawn', task_id: 'st_00000003', status: 'completed',
+          skills: { requested: ['deploy'], resolved: ['deploy'], missing: [] },
+        },
+      } },
+      { id: 'r-same-task', type: 'message', timestamp: '', message: {
+        role: 'toolResult', toolCallId: 'mt-same', toolName: 'task',
+        details: {
+          mode: 'spawn', task_id: 'st_00000001', status: 'completed',
+          skills: { requested: ['extra'], resolved: ['extra'], missing: [] },
+        },
+      } },
+    )
+    const savedGetContextUsage = ctx.getContextUsage
+    ctx.getContextUsage = () => { throw new Error('context unavailable') }
+    handlers.get('thinking_level_select')?.({}, ctx)
+    assert.match(lineText(), /token:400\(0%\)/)
+    assert.match(lineText(), /🔧3 🤖2 ⚡3|T:3 A:2 S:3/)
+    ctx.getContextUsage = savedGetContextUsage
+
+    const savedGetSessionId = ctx.sessionManager.getSessionId
+    ctx.sessionManager.getSessionId = () => { throw new Error('session id unavailable') }
+    handlers.get('thinking_level_select')?.({}, ctx)
+    assert.match(lineText(), /token:400\(0%\)/)
+    assert.match(lineText(), /🔧3 🤖2 ⚡3|T:3 A:2 S:3/)
+    now += 6000
+    assert.match(lineText(), /token:400\(0%\).*?(?:🔧3 🤖2 ⚡3|T:3 A:2 S:3).*?(?:⌛stale|!:stale)/)
+    ctx.sessionManager.getSessionId = savedGetSessionId
+
+    // Recovery commits tokens, tools, agents and skills atomically together (+600 tok, +1 tool, +1 agent, +2 skills).
+    handlers.get('thinking_level_select')?.({}, ctx)
+    assert.match(lineText(), /token:1\.0k\(0%\)/)
+    assert.match(lineText(), /🔧4 🤖3 ⚡5|T:4 A:3 S:5/)
+
+    // 5. tokens: false with callCounts: true + includeSubagents: true still folds resolved skills;
+    //    tokens: true with callCounts: false still folds subagent tokens.
+    await command!.handler('config {"includeSubagents":true,"tokens":false,"callCounts":true}', ctx)
+    const callsOnly = await waitForLine(/🔧4 🤖3 ⚡5|T:4 A:3 S:5/)
+    assert.doesNotMatch(callsOnly, /token:/)
+    await command!.handler('config {"includeSubagents":true,"tokens":true,"callCounts":false}', ctx)
+    const tokensOnly = await waitForLine(/token:1\.0k\(0%\)/)
+    assert.doesNotMatch(tokensOnly, /🔧|🤖|⚡|T:|A:|S:/)
+
+    // 6. Toggling includeSubagents back off immediately drops skills back to 0.
+    await command!.handler('config {"includeSubagents":false,"tokens":true,"callCounts":true}', ctx)
+    const backOff = lineText()
+    assert.match(backOff, /🔧3 🤖2|T:3 A:2/)
+    assert.doesNotMatch(backOff, /⚡|S:/)
+
+    // 7. Both tokens and callCounts false skips disk scans cleanly.
+    const callsBefore = getSessionIdCalls
+    await command!.handler('config {"includeSubagents":true,"tokens":false,"callCounts":false}', ctx)
+    assert.equal(getSessionIdCalls, callsBefore)
   } finally {
     handlers.get('session_shutdown')?.({}, ctx)
   }

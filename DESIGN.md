@@ -491,7 +491,14 @@ pre-launch refusals (`status: "error"` with a pre-launch `failure_kind` such as
 `effective_model`, `host_session` or `pid`) while
 preserving tasks that ran and later failed (bare `status: "error"`,
 `child-unresponsive`, `model_chain_exhausted`, or an earlier accepted run under
-a reused task ID). Skills lack a canonical load receipt.
+a reused task ID). Main-session skills lack a canonical load receipt (`SKILL.md`
+reads and skill catalogs do not establish a skill load); accepted `task` spawn
+receipts carrying `skills.resolved` (single `details.skills.resolved` or
+per-item `details.items[].skills.resolved`) are attributed to the accepted child
+in `subagentSkills` (keyed by `(task_id, skill_name)` so replayed receipts or
+repeated names on the same child cannot increment twice, excluding
+`skills.missing`, `skills.rejected`, confirmed pre-launch refusals and older
+receipts without `skills`) and folded only when `includeSubagents` is enabled.
 For a native assistant edit that copies usage,
 registration writes a receipt naming the new entry. Older unobserved copies
 remain in the total, and equal usage amounts alone do not identify copies.
@@ -524,13 +531,17 @@ removed/expunged caches. Polling uses a 1-second floor when any matched task is
 non-terminal (`pending`, `running` or `paused`) or forced (`message_end`,
 `tool_execution_end`), a 5-second idle floor when all matched children are
 terminal, and a 10x slow-scan holdoff. At render time, registration folds
-subagent tokens and tools and computes agent count as the set union of main
-spawned `task_id`s and subagent `task_id`s without mutating main counts or
-`history.agents`. Cache-hit percentage, output speed (`t/s`), context, model,
-effort, session age, quotas and VCS stay on the main session. Skills remain
-omitted, expunged tasks' tokens and tools drop once removed from disk (while
-accepted spawn `task_id`s already recorded in surviving transcripts remain in
-agent counts), and background memory sidecars outside `senpi-task` are excluded.
+subagent tokens, tools and explicitly resolved child task skills (set union of
+`(task_id, skill_name)` pairs across main-session and child-JSONL accepted spawn
+receipts) and computes agent count as the set union of main spawned `task_id`s
+and subagent `task_id`s without mutating main counts, `history.agents` or
+`history.subagentSkills`. Cache-hit percentage, output speed (`t/s`), context,
+model, effort, session age, quotas and VCS stay on the main session. Other
+skill-loading paths outside `skills.resolved` on accepted spawn receipts remain
+uncounted, expunged tasks' tokens, tools and nested child-JSONL skill receipts
+drop once removed from disk (while accepted spawn `task_id`s and resolved task
+skills already recorded in surviving transcripts remain counted), and background
+memory sidecars outside `senpi-task` are excluded.
 
 Model, effective effort, default effort and context come from the current
 OmO context. Known [model aliases](src/hosts/omo/display.ts) preserve

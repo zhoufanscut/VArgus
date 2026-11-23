@@ -762,3 +762,87 @@ test('OmoSubagents excludes confirmed pre-launch refused task records while keep
   assert.equal(snap2.tokens, 120 + 250 + 40)
   assert.equal(snap2.tools, 2)
 })
+
+test('OmoSubagents folds and deduplicates explicitly resolved grandchild skills across child JSONLs and expunge', async t => {
+  const root = await makeTempRoot(t)
+  const home = join(root, 'home')
+  const agentDir = join(root, 'agent')
+  const project = join(root, 'proj')
+  await mkdir(home, { recursive: true })
+  await mkdir(project, { recursive: true })
+
+  const stateDir = join(agentDir, 'projects', projectStateKey(project), 'senpi-task')
+  const reader = new OmoSubagents({ env: { HOME: home, OMO_CODING_AGENT_DIR: agentDir }, accountHomeDir: home })
+
+  await writeTask(stateDir, 'st_00000001', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    child_session_id: 'child-1',
+    status: 'running',
+  })
+  await writeChildJsonl(stateDir, 'st_00000001', '001.jsonl', [
+    JSON.stringify({
+      id: 'gc-spawn-1',
+      type: 'message',
+      timestamp: '2026-11-23T00:00:01Z',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'call-1',
+        toolName: 'task',
+        details: {
+          mode: 'spawn',
+          items: [
+            {
+              task_id: 'st_00000002',
+              status: 'completed',
+              skills: { requested: ['review', 'audit', 'missing'], resolved: ['review', 'audit'], missing: ['missing'] },
+            },
+            {
+              task_id: 'st_00000003',
+              status: 'error',
+              failure_kind: 'model_unavailable',
+              skills: { requested: ['blocked'], resolved: ['blocked'], missing: [] },
+            },
+          ],
+        },
+      },
+    }) + '\n',
+  ].join(''))
+  // Revived run 002.jsonl replays ('st_00000002', 'review') and adds ('st_00000002', 'lint') without
+  // overwriting or aliasing 001.jsonl's cached ('st_00000002', 'audit').
+  const run2Path = await writeChildJsonl(stateDir, 'st_00000001', '002.jsonl', [
+    JSON.stringify({
+      id: 'gc-spawn-2',
+      type: 'message',
+      timestamp: '2026-11-23T00:00:02Z',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'call-2',
+        toolName: 'task',
+        details: {
+          mode: 'spawn',
+          task_id: 'st_00000002',
+          status: 'completed',
+          skills: { requested: ['review', 'lint'], resolved: ['review', 'lint'], missing: [] },
+        },
+      },
+    }) + '\n',
+  ].join(''))
+
+  const snap1 = await reader.refresh(project, 'root', 10_000)
+  assert.deepEqual([...snap1.taskIds].sort(), ['st_00000001', 'st_00000002'])
+  assert.deepEqual([...snap1.skills.keys()], ['st_00000002'])
+  assert.deepEqual([...snap1.skills.get('st_00000002')!].sort(), ['audit', 'lint', 'review'])
+
+  // Shrinking 002.jsonl drops 'lint' while preserving 001.jsonl's cached ['audit', 'review'].
+  await writeFile(run2Path, '')
+  const snapShrunk = await reader.refresh(project, 'root', 15_000, true)
+  assert.deepEqual([...snapShrunk.skills.keys()], ['st_00000002'])
+  assert.deepEqual([...snapShrunk.skills.get('st_00000002')!].sort(), ['audit', 'review'])
+
+  // Expunging child 1 drops its nested grandchild skill receipts cleanly.
+  await rm(join(stateDir, 'tasks', 'st_00000001.json'))
+  const snap2 = await reader.refresh(project, 'root', 20_000, true)
+  assert.equal(snap2.skills.size, 0)
+  assert.equal(snap2.taskIds.size, 0)
+})
