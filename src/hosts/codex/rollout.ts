@@ -9,6 +9,7 @@ import { SkillLoads } from './skills.ts'
 import type { Usage } from './protocol.ts'
 
 type RecordLine = { type: string; timestamp?: string; ordinal?: number; payload: any }
+const FOREIGN_THREAD_ERROR = 'The transcript belongs to another Codex thread.'
 const MODEL_ITEMS = new Set(['Reasoning', 'AgentMessage', 'Plan'])
 const CLIENT_TOOL_CALLS = new Set(['function_call', 'custom_tool_call', 'local_shell_call'])
 const CLIENT_TOOL_OUTPUTS = new Set(['function_call_output', 'custom_tool_call_output', 'local_shell_call_output'])
@@ -84,6 +85,28 @@ export class RolloutReader {
     return this.selected && this.countersAttributed && this.historyError === undefined
   }
 
+  private failHistory(message: string): never {
+    this.historyError = message
+    this.pending = ''
+    throw new Error(message)
+  }
+
+  private drainPending(): void {
+    let end: number
+    while ((end = this.pending.indexOf('\n')) >= 0) {
+      const line = this.pending.slice(0, end).trim()
+      this.pending = this.pending.slice(end + 1)
+      if (!line) continue
+      let record: unknown
+      try {
+        record = JSON.parse(line)
+      } catch {
+        this.failHistory('The Codex transcript contains invalid JSON.')
+      }
+      this.observe(record as RecordLine)
+    }
+  }
+
   private resetGenWindow(): void {
     this.genStartMs = undefined
     this.genEndMs = undefined
@@ -100,12 +123,26 @@ export class RolloutReader {
   }
 
   observe(record: RecordLine): void {
-    if (this.historyError) throw new Error(this.historyError)
+    if (this.historyError !== undefined) throw new Error(this.historyError)
+    if (!record || typeof record !== 'object' || Array.isArray(record)
+      || typeof record.type !== 'string' || record.type === '') {
+      this.failHistory('The Codex transcript contains an invalid record.')
+    }
+    try {
+      this.observeRecord(record)
+    } catch (error) {
+      if (this.historyError === undefined && !(error instanceof Error && error.message === FOREIGN_THREAD_ERROR)) {
+        this.failHistory('The Codex transcript contains an invalid record.')
+      }
+      throw error
+    }
+  }
+
+  private observeRecord(record: RecordLine): void {
     const p = record.payload
     if (this.selected && this.historyStart !== undefined) {
       if (!Number.isSafeInteger(record.ordinal) || record.ordinal! < 0) {
-        this.historyError = 'The paginated Codex transcript is missing a valid ordinal; turn VArgus off and on again.'
-        throw new Error(this.historyError)
+        this.failHistory('The paginated Codex transcript is missing a valid ordinal; turn VArgus off and on again.')
       }
       if (record.ordinal! < this.historyStart) {
         // Inherited catalogs remain useful for recognizing the child's later reads.
@@ -121,7 +158,7 @@ export class RolloutReader {
         this.countersAttributed = false
         const counts = this.collector.snapshot()?.session.counts
         if (counts) { counts.agents = 0; counts.skills = 0 }
-        throw new Error('The transcript belongs to another Codex thread.')
+        throw new Error(FOREIGN_THREAD_ERROR)
       }
       if (!this.selected && p.history_mode === 'paginated'
         && Number.isSafeInteger(p.subagent_history_start_ordinal) && p.subagent_history_start_ordinal > 0) {
@@ -263,14 +300,14 @@ export class RolloutReader {
   }
 
   async poll(resolveModelDefault = true): Promise<void> {
-    if (this.historyError) throw new Error(this.historyError)
+    if (this.historyError !== undefined) throw new Error(this.historyError)
     const file = await open(this.file, 'r')
     try {
       const { size } = await file.stat()
       if (size < this.offset) {
-        this.historyError = 'The Codex transcript was replaced; turn VArgus off and on again.'
-        throw new Error(this.historyError)
+        this.failHistory('The Codex transcript was replaced; turn VArgus off and on again.')
       }
+      this.drainPending()
       if (size > this.offset) {
         const buffer = Buffer.alloc(64 * 1024)
         for (;;) {
@@ -278,12 +315,7 @@ export class RolloutReader {
           if (!bytesRead) break
           this.offset += bytesRead
           this.pending += this.decoder.decode(buffer.subarray(0, bytesRead), { stream: true })
-          let end: number
-          while ((end = this.pending.indexOf('\n')) >= 0) {
-            const line = this.pending.slice(0, end)
-            this.pending = this.pending.slice(end + 1)
-            if (line) this.observe(JSON.parse(line))
-          }
+          this.drainPending()
         }
       }
     } finally { await file.close() }

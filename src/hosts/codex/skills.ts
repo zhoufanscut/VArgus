@@ -12,11 +12,18 @@ export class SkillLoads {
 
   start(turn: string): void { this.turn = turn }
 
+  private fromFileUrl(raw: string): string | undefined {
+    try { return fileURLToPath(raw) } catch { return undefined }
+  }
+
   private path(path: string, cwd?: string): string | undefined {
-    if (path.startsWith('file://')) return fileURLToPath(path)
+    if (path.startsWith('file://')) return this.fromFileUrl(path)
     if (path.includes('://')) return
     if (isAbsolute(path)) return resolve(path)
-    if (cwd) return resolve(cwd.startsWith('file://') ? fileURLToPath(cwd) : cwd, path)
+    if (cwd) {
+      const base = cwd.startsWith('file://') ? this.fromFileUrl(cwd) : cwd
+      if (base) return resolve(base, path)
+    }
   }
 
   private load(path: string, turn = this.turn): void {

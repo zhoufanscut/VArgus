@@ -296,10 +296,12 @@ UTF-8 and incomplete records between polls. It uses the saved
 `subagent_history_start_ordinal` in paginated child histories to skip inherited
 activity while retaining inherited skill catalogs for later reads. A
 paginated reader with a valid boundary stops if a later ordinal is invalid, and
-a replaced transcript (`size < offset`) latches its error so later file growth
-cannot resume reading mid-file bytes. Unsupported mixed histories can yield an
-identity error and lose attributed agent and skill counts. The row only replays
-data the engine saved.
+a replaced transcript (`size < offset`) or a corrupt or malformed complete
+JSONL record latches its error so later polls or file growth cannot resume past
+broken framing. Unsupported mixed histories can yield an identity error and lose
+attributed agent and skill counts; later polls still drain any complete buffered
+records even when file size has not changed. The row only replays data the
+engine saved.
 
 With `includeSubagents: false` (default), or when both `tokens` and `callCounts`
 are `false`, the worker polls only the displayed thread. With
@@ -308,10 +310,10 @@ polls saved descendant threads of the viewed thread (`Views.descendants`)
 without creating per-descendant VCS pollers or resolving descendant model
 defaults, folding each attributable descendant's tokens, tools, agents and
 skills into the rendered row and paused draft snapshot without mutating the
-viewed collector. Ephemeral, ambiguous, unreadable, replaced and unpaginated
-mixed-history descendants are skipped so inherited parent activity is never
-double-counted. Context, cache hit %, output speed (`t/s`), model, effort, Fast
-mode, session age, rate limits and VCS remain on the viewed thread.
+viewed collector. Ephemeral, ambiguous, unreadable, corrupt, replaced and
+unpaginated mixed-history descendants are skipped so inherited parent activity
+is never double-counted. Context, cache hit %, output speed (`t/s`), model,
+effort, Fast mode, session age, rate limits and VCS remain on the viewed thread.
 
 [The collector](src/hosts/codex/collect.ts) takes cumulative uncached input
 plus output from token counts. For the cache percentage it divides
@@ -811,7 +813,8 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
 - `npm run test:local` type-checks the Node graph and exercises shared rendering,
   import boundaries, installers and local fixtures. The Codex replay fixtures
   check which counters belong to each thread, attribution gating (`attributable`),
-  replaced-file error latching, `Views.descendants` subtree closure and
+  replaced-file and corrupt/malformed JSONL error latching, unchanged-size
+  buffered draining, `Views.descendants` subtree closure and
   multi-level descendant folding. Display fixtures cover legacy
   counter settings, the shared `callCounts` switch, folded paths on a working
   directory change, folded descendant counts and counts held while typing.

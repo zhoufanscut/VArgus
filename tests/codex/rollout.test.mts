@@ -253,7 +253,7 @@ test('mixed-thread history omits agent and skill counts across later polling ret
     await assert.rejects(r.poll(), /another Codex thread/)
     assert.equal(r.collector.snapshot()!.session.counts.skills, 0)
     assert.equal(r.collector.snapshot()!.session.counts.agents, 0)
-    // New bytes make the existing reader resume its buffered records.
+    // Later appends also keep agent and skill counts omitted once counters are unattributed.
     await appendFile(file, jsonl([start('later'), injection('later'), spawn('later')]))
     await r.poll(); await r.poll()
     assert.equal(r.collector.snapshot()!.session.counts.skills, 0)
@@ -568,5 +568,172 @@ test('RolloutReader.poll(false) skips modelDefault lookups and poll(true) resolv
     await reader.poll(true)
     assert.equal(lookups, 1)
     assert.equal(reader.collector.snapshot()!.session.defaultEffort, 'high')
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('corrupt or malformed JSONL records latch a permanent history error and drop attribution', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-rollout-corrupt-'))
+  const jsonl = (records: unknown[]) => records.map(r => JSON.stringify(r) + '\n').join('')
+  const nextCount = {
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: {
+        total_token_usage: { input_tokens: 50000, cached_input_tokens: 40000, output_tokens: 1000, total_tokens: 51000 },
+        last_token_usage: { input_tokens: 50000, cached_input_tokens: 40000, output_tokens: 1000, total_tokens: 51000 },
+        model_context_window: 190000,
+      },
+    },
+  }
+  try {
+    // 1. Mid-chunk corrupt JSON followed by trailing valid record stays latched across same-size and appended polls.
+    const brokenFile = join(dir, 'broken.jsonl')
+    await writeFile(brokenFile, jsonl([meta, count]) + '{broken\n' + jsonl([nextCount]))
+    const broken = new RolloutReader(brokenFile, 'thread-a', '/repo', dir)
+    await assert.rejects(broken.poll(false), /invalid JSON/)
+    assert.equal(broken.attributable, false)
+    await assert.rejects(broken.poll(false), /invalid JSON/, 'unchanged file size must stay latched')
+    assert.equal(broken.attributable, false)
+    await appendFile(brokenFile, jsonl([nextCount]))
+    await assert.rejects(broken.poll(false), /invalid JSON/, 'later appends must stay latched')
+    assert.throws(() => broken.observe(count), /invalid JSON/)
+
+    // 2. Non-object JSONL values and typeless JSON objects latch invalid record error.
+    for (const [name, badLine] of [
+      ['null', 'null\n'],
+      ['array', '[]\n'],
+      ['number', '42\n'],
+      ['string', '"oops"\n'],
+      ['boolean', 'true\n'],
+      ['empty-object', '{}\n'],
+      ['missing-type', '{"foo":1}\n'],
+      ['non-string-type', '{"type":123}\n'],
+      ['empty-type', '{"type":""}\n'],
+    ] as const) {
+      const file = join(dir, `${name}.jsonl`)
+      await writeFile(file, jsonl([meta, count]) + badLine + jsonl([nextCount]))
+      const reader = new RolloutReader(file, 'thread-a', '/repo', dir)
+      await assert.rejects(reader.poll(false), /invalid record/)
+      assert.equal(reader.attributable, false)
+      await assert.rejects(reader.poll(false), /invalid record/)
+      assert.equal(reader.attributable, false)
+    }
+
+    // 3. Structurally malformed record throwing inside observe() latches invalid record error
+    //    via both poll() and direct observe(), including after a prior foreign session_meta.
+    const malformedFile = join(dir, 'malformed.jsonl')
+    await writeFile(malformedFile, jsonl([meta, count, { type: 'event_msg' }, nextCount]))
+    const malformed = new RolloutReader(malformedFile, 'thread-a', '/repo', dir)
+    await assert.rejects(malformed.poll(false), /invalid record/)
+    assert.equal(malformed.attributable, false)
+    await assert.rejects(malformed.poll(false), /invalid record/)
+
+    const direct = new RolloutReader('/unused', 'thread-a', '/repo', dir)
+    direct.observe(meta)
+    assert.equal(direct.attributable, true)
+    assert.throws(() => direct.observe({ type: 'event_msg' } as any), /invalid record/)
+    assert.equal(direct.attributable, false)
+    assert.throws(() => direct.observe(count), /invalid record/)
+
+    const mixedThenMalformed = join(dir, 'mixed-malformed.jsonl')
+    await writeFile(mixedThenMalformed, jsonl([
+      meta,
+      { ...meta, payload: { ...meta.payload, id: 'parent' } },
+      { type: 'event_msg' },
+      nextCount,
+    ]))
+    const reader = new RolloutReader(mixedThenMalformed, 'thread-a', '/repo', dir)
+    await assert.rejects(reader.poll(false), /another Codex thread/)
+    assert.equal(reader.attributable, false)
+    // Next poll on unchanged size drains buffered records and hits the malformed record.
+    await assert.rejects(reader.poll(false), /invalid record/)
+    await assert.rejects(reader.poll(false), /invalid record/)
+
+    // 4. Valid Codex records with non-local or malformed file:// URLs in skill/read paths must not falsely latch.
+    const urlFile = join(dir, 'urls.jsonl')
+    await writeFile(urlFile, jsonl([
+      meta,
+      { type: 'event_msg', payload: { type: 'task_started', turn_id: 'u1' } },
+      { type: 'response_item', payload: {
+        type: 'message', role: 'developer',
+        content: [{ type: 'input_text', text: '- remote: Fixture. (file: file://example.com/SKILL.md)\n- bad: Fixture. (file: file://%ZZ/SKILL.md)' }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'u1', content_item_kinds: ['host_skills.instructions'] },
+      } },
+      { type: 'response_item', payload: {
+        type: 'message', role: 'user',
+        content: [{ type: 'input_text', text: '<skill>\n<name>remote</name>\n<path>file://example.com/SKILL.md</path>\nbody\n</skill>' }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'u1', content_item_kinds: ['skills.selected_skill_instructions'] },
+      } },
+      { type: 'event_msg', payload: {
+        type: 'item_completed', thread_id: 'thread-a', turn_id: 'u1',
+        item: {
+          id: 'cmd-url', type: 'CommandExecution', source: 'agent',
+          cwd: 'file://example.com/repo',
+          parsed_cmd: [
+            { type: 'read', path: 'file://example.com/foo' },
+            { type: 'read', path: 'file://%ZZ' },
+            { type: 'read', path: 'alpha/SKILL.md' },
+          ],
+          status: 'completed', exit_code: 0,
+        },
+      } },
+      count,
+    ]))
+    const urlReader = new RolloutReader(urlFile, 'thread-a', '/repo', dir)
+    await urlReader.poll(false)
+    assert.equal(urlReader.attributable, true)
+    assert.equal(urlReader.collector.snapshot()!.session.counts.tokens, 3201)
+    assert.equal(urlReader.collector.snapshot()!.session.counts.tools, 1)
+    assert.equal(urlReader.collector.snapshot()!.session.counts.skills, 0)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('buffered complete records after foreign session_meta drain on unchanged size and across 64 KiB UTF-8 splits', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-rollout-drain-'))
+  const jsonl = (records: unknown[]) => records.map(r => JSON.stringify(r) + '\n').join('')
+  try {
+    // 1. Same-chunk trailing record after foreign session_meta drains on poll 2 without file growth,
+    //    and blank CRLF lines are ignored cleanly.
+    const file = join(dir, 'same-size.jsonl')
+    await writeFile(file, jsonl([meta]) + '\r\n' + jsonl([{ ...meta, payload: { ...meta.payload, id: 'parent' } }, count]))
+    const reader = new RolloutReader(file, 'thread-a', '/repo', dir)
+    await assert.rejects(reader.poll(false), /another Codex thread/)
+    assert.equal(reader.attributable, false)
+    assert.equal(reader.collector.snapshot()!.session.counts.tokens, 0)
+    await reader.poll(false)
+    assert.equal(reader.attributable, false)
+    assert.equal(reader.collector.snapshot()!.session.counts.tokens, 3201)
+
+    // 2. Multi-chunk (>64 KiB) read with foreign session_meta in chunk 1 and a split UTF-8 record across 64 KiB.
+    const chunkedFile = join(dir, 'chunked.jsonl')
+    const prefix = jsonl([meta, { ...meta, payload: { ...meta.payload, id: 'parent' } }])
+    const tailRecord = JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-6.1-sol', cwd: '/repo/中文', effort: 'low' } }) + '\n'
+    const utf8ByteOffset = Buffer.from(tailRecord).indexOf(Buffer.from('中文')) + 1
+    const fillerBase = JSON.stringify({ type: 'note', payload: { pad: '' } }) + '\n'
+    const padNeeded = 65536 - Buffer.byteLength(prefix) - Buffer.byteLength(fillerBase) - utf8ByteOffset
+    assert.ok(padNeeded > 0)
+    const filler = JSON.stringify({ type: 'note', payload: { pad: 'x'.repeat(padNeeded) } }) + '\n'
+    await writeFile(chunkedFile, prefix + filler + tailRecord + jsonl([count]))
+    const chunked = new RolloutReader(chunkedFile, 'thread-a', '/repo', dir)
+    await assert.rejects(chunked.poll(false), /another Codex thread/)
+    assert.equal(chunked.attributable, false)
+    await chunked.poll(false)
+    assert.equal(chunked.attributable, false)
+    assert.equal(chunked.collector.snapshot()!.core.cwd, '/repo/中文')
+    assert.equal(chunked.collector.snapshot()!.session.counts.tokens, 3201)
+
+    // 3. File replacement (size < offset) while records are buffered in pending must latch /replaced/
+    //    without draining stale buffered records, and stay latched even after the file regrows.
+    const replacedBuffered = join(dir, 'replaced-buffered.jsonl')
+    await writeFile(replacedBuffered, jsonl([meta, { ...meta, payload: { ...meta.payload, id: 'parent' } }, count]))
+    const rb = new RolloutReader(replacedBuffered, 'thread-a', '/repo', dir)
+    await assert.rejects(rb.poll(false), /another Codex thread/)
+    assert.equal(rb.collector.snapshot()!.session.counts.tokens, 0)
+    await writeFile(replacedBuffered, '')
+    await assert.rejects(rb.poll(false), /replaced/)
+    assert.equal(rb.attributable, false)
+    assert.equal(rb.collector.snapshot()!.session.counts.tokens, 0, 'buffered records must not drain after replacement')
+    await writeFile(replacedBuffered, jsonl([meta, count, count, count]))
+    await assert.rejects(rb.poll(false), /replaced/, 'replaced error must remain latched after regrowth')
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

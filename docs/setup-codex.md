@@ -220,7 +220,7 @@ recorded readings and child totals are not aggregated. Setting
 `includeSubagents: true` folds saved, attributable descendant threads' tokens,
 tools, agents and skills into the displayed view (Main shows the whole saved
 family; a subagent view shows its own subtree; ephemeral, ambiguous, unreadable,
-replaced and unsupported mixed-history logs are skipped). Context, cache hit %,
+corrupt, replaced and unsupported mixed-history logs are skipped). Context, cache hit %,
 output speed (`t/s`), model, effort, Fast mode, session age, rate limits and
 repository readings always follow the displayed thread. VArgus matches Codex's
 contextual agent label to saved session metadata.

@@ -115,6 +115,16 @@ test('Codex descendant folding sums attributable multi-level subtrees, skips uns
       tokenCount(50000, 0, 0),
     ])
 
+    // Corrupt child: valid session_meta + tokens followed by mid-chunk corrupt JSON and trailing records;
+    // must be excluded on first poll, unchanged-size retries, and later appends.
+    const corruptFile = join(sessions, 'rollout-corrupt.jsonl')
+    await writeFile(
+      corruptFile,
+      jsonl([sessionMeta('corrupt', '/repo', 'root', '/root/corrupt'), tokenCount(700, 0, 0)])
+        + '{broken\n'
+        + jsonl([tokenCount(9999, 0, 0)]),
+    )
+
     // Replaced child: starts valid, later shrinks and regrows, must be excluded once replaced.
     const replacedFile = join(sessions, 'rollout-replaced.jsonl')
     await write('rollout-replaced.jsonl', [
@@ -170,11 +180,16 @@ test('Codex descendant folding sums attributable multi-level subtrees, skips uns
     assert.match(selfRoot, /token:2\.5k\(80%\)/)
     assert.match(selfRoot, /🔧1 🤖2 ⚡1/)
 
-    // Replace + regrow 'replaced' and append clean lines to 'mixed': neither may fold on next tick.
+    // Replace + regrow 'replaced' and append clean lines to 'mixed' and 'corrupt': none may fold on next ticks.
     await writeFile(replacedFile, '')
     await foldDescendantCounts(views.descendants('root'), getReader)
     await writeFile(replacedFile, jsonl([sessionMeta('replaced', '/repo', 'root', '/root/replaced'), tokenCount(9000, 0, 0), tokenCount(9000, 0, 0)]))
     await appendFile(join(sessions, 'rollout-mixed.jsonl'), jsonl([tokenCount(60000, 0, 0)]))
+    // First re-check before appending to corruptFile (unchanged file size): corrupt child must still be excluded.
+    const afterUnchangedCorrupt = await foldDescendantCounts(views.descendants('root'), getReader)
+    assert.deepEqual(afterUnchangedCorrupt, { tokens: 7500, tools: 4, agents: 1, skills: 2 })
+    // Appending valid records to corruptFile must still keep it excluded.
+    await appendFile(corruptFile, jsonl([tokenCount(12000, 0, 0)]))
     const afterFaults = await foldDescendantCounts(views.descendants('root'), getReader)
     // Now only childA + grandchild + childB = (7500, 4, 1, 2)
     assert.deepEqual(afterFaults, { tokens: 7500, tools: 4, agents: 1, skills: 2 })

@@ -35,7 +35,7 @@ export async function foldDescendantCounts(
         if (counts) extraCounts = extraCounts ? addCounts(extraCounts, counts) : { ...counts }
       }
     } catch {
-      // Skip unreadable, replaced, or mixed-history descendant logs without affecting the active view.
+      // Skip unreadable, corrupt, replaced, or mixed-history descendant logs without affecting the active view.
     }
   }
   return extraCounts
