@@ -4,7 +4,8 @@ import { cachePath, defaultCacheDir, readCache, writeCache } from '../hosts/anti
 import { collectAntigravityPayload, type AntigravityPayload } from '../hosts/antigravity/collect.ts'
 import { antigravityDisplay } from '../hosts/antigravity/display.ts'
 import { updateAntigravityRate } from '../hosts/antigravity/rate.ts'
-import { readTranscriptState, resolveTranscriptPath } from '../hosts/antigravity/transcript.ts'
+import { collectAntigravitySubagentCounts } from '../hosts/antigravity/subagents.ts'
+import { collectDeclaredSkillRoots, readTranscriptState, resolveConversationId, resolveTranscriptPath } from '../hosts/antigravity/transcript.ts'
 import { readCachedVcs } from '../hosts/antigravity/vcs.ts'
 import { resolveLabels } from '../i18n/index.ts'
 import { readCheckoutOptions, readOptionsFile } from '../node/options.ts'
@@ -34,8 +35,8 @@ export async function renderAntigravityStatusLine(
   payload: AntigravityPayload,
   runtime: StatuslineRuntime = {},
 ): Promise<string> {
-  const id = payload.conversation_id || payload.session_id
-  if (typeof id !== 'string' || !id.trim()) return collectLine(payload, runtime)
+  const id = resolveConversationId(payload)
+  if (!id) return collectLine(payload, runtime)
   const dir = runtime.cacheDir ?? defaultCacheDir()
   const isWsl = runtime.isWsl ?? detectWsl(process.env)
   const noColor = runtime.noColor ?? Boolean(process.env.NO_COLOR)
@@ -91,14 +92,30 @@ async function collectLine(payload: AntigravityPayload, runtime: StatuslineRunti
     const transcriptPath = await resolveTranscriptPath(payload, { home, appDataDir })
     if (transcriptPath) {
       sessionKey = transcriptPath
-      const transcript = await readTranscriptState(transcriptPath, cacheDir, {
+      const baseContext = {
         cwd: values.core.cwd,
         projectDir: payload.workspace?.project_dir,
         home,
         appDataDir,
-      })
+      }
+      let skillRootsPromise: Promise<readonly string[]> | undefined
+      const transcriptContext = {
+        ...baseContext,
+        resolveSkillRoots: () => (skillRootsPromise ??= collectDeclaredSkillRoots(baseContext)),
+      }
+      const transcript = await readTranscriptState(transcriptPath, cacheDir, transcriptContext)
       if (options.session) values.session.startedAt = transcript.startedAt
-      if (options.tokens || options.callCounts) values.session.counts = transcript.counts
+      if (options.tokens || options.callCounts) {
+        values.session.counts = options.includeSubagents && transcript.subagentIds.length > 0
+          ? await collectAntigravitySubagentCounts({
+            rootTranscriptPath: transcriptPath,
+            rootId: resolveConversationId(payload),
+            rootTranscript: transcript,
+            cacheDir,
+            context: transcriptContext,
+          })
+          : transcript.counts
+      }
       if (options.tokens && transcript.firstLineHash) {
         values.session.tokensPerSecond = await updateAntigravityRate(
           transcriptPath,

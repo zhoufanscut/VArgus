@@ -16,6 +16,14 @@ import {
   updateAntigravityRate,
 } from '../../src/hosts/antigravity/rate.ts'
 import {
+  collectAntigravitySubagentCounts,
+  MAX_SUBAGENT_DEPTH,
+  MAX_SUBAGENT_TRANSCRIPTS,
+  SUBAGENT_BUDGET_MS,
+} from '../../src/hosts/antigravity/subagents.ts'
+import {
+  collectDeclaredSkillRoots,
+  extractBrainDir,
   readTranscriptState,
   resolveContainedTranscriptCandidate,
   resolveTranscriptPath,
@@ -1003,6 +1011,7 @@ test('Antigravity rate clears on compaction, rewind and zero output, fails close
       compactionsSeen: 0,
       awaitingModel: true,
       unboundedTrailingStep: false,
+      subagentIds: [],
       ...overrides,
     })
 
@@ -1411,6 +1420,559 @@ test('Antigravity end-to-end transcript wiring fails closed on intervening/trail
     await hAbort.writeLines([u0, uTurn2, pTurn2], baseTime + 5000)
     const afterMissedAbort = await hAbort.run(baseTime + 5050, {}, 'idle')
     assert.doesNotMatch(afterMissedAbort, /t\/s/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('extractBrainDir normalizes posix and win32 paths and rejects escapes or non-standard layouts', () => {
+  const id = '589a8157-60c7-4597-99cd-58eacbb2e5d6'
+
+  assert.equal(
+    extractBrainDir(`/home/alice/.gemini/antigravity-cli/brain/${id}/.system_generated/logs/transcript.jsonl`, id, 'posix'),
+    '/home/alice/.gemini/antigravity-cli/brain',
+  )
+  assert.equal(
+    extractBrainDir(`/brain/${id}/.system_generated/logs/transcript.jsonl`, id, 'posix'),
+    '/brain',
+  )
+  assert.equal(
+    extractBrainDir(`/home/alice/x/../.gemini/antigravity-cli/brain/${id}/.system_generated/logs/transcript.jsonl`, id, 'posix'),
+    '/home/alice/.gemini/antigravity-cli/brain',
+  )
+  // POSIX rejections: relative, wrong parentId, unsafe ID, backslash segment, escape, wrong dir name, non-standard layout.
+  assert.equal(extractBrainDir(`brain/${id}/.system_generated/logs/transcript.jsonl`, id, 'posix'), null)
+  assert.equal(extractBrainDir(`/home/alice/brain/other/.system_generated/logs/transcript.jsonl`, id, 'posix'), null)
+  assert.equal(extractBrainDir(`/home/alice/brain/${id}/.system_generated/logs/transcript.jsonl`, '../other', 'posix'), null)
+  assert.equal(extractBrainDir(`/home/alice/x\\brain\\${id}\\.system_generated\\logs\\transcript.jsonl`, id, 'posix'), null)
+  assert.equal(extractBrainDir(`/home/alice/brain/${id}/.system_generated/logs/../../other/transcript.jsonl`, id, 'posix'), null)
+  assert.equal(extractBrainDir(`/home/alice/notbrain/${id}/.system_generated/logs/transcript.jsonl`, id, 'posix'), null)
+  assert.equal(extractBrainDir(`/home/alice/brain/${id}/transcript.jsonl`, id, 'posix'), null)
+
+  // Windows drive, forward-slash, root brain, and UNC paths.
+  assert.equal(
+    extractBrainDir(`C:\\Users\\alice\\.gemini\\antigravity-cli\\brain\\${id}\\.system_generated\\logs\\transcript.jsonl`, id, 'win32'),
+    'C:\\Users\\alice\\.gemini\\antigravity-cli\\brain',
+  )
+  assert.equal(
+    extractBrainDir(`C:/Users/alice/.gemini/antigravity-cli/brain/${id}/.system_generated/logs/transcript.jsonl`, id, 'win32'),
+    'C:\\Users\\alice\\.gemini\\antigravity-cli\\brain',
+  )
+  assert.equal(
+    extractBrainDir(`C:\\brain\\${id}\\.system_generated\\logs\\transcript.jsonl`, id, 'win32'),
+    'C:\\brain',
+  )
+  assert.equal(
+    extractBrainDir(`\\\\server\\share\\brain\\${id}\\.system_generated\\logs\\transcript.jsonl`, id, 'win32'),
+    '\\\\server\\share\\brain',
+  )
+  // Windows rejections: bogus UNC where `brain` is host, drive-relative, escape, non-brain parent.
+  assert.equal(extractBrainDir(`\\\\brain\\${id}\\.system_generated\\logs\\transcript.jsonl`, id, 'win32'), null)
+  assert.equal(extractBrainDir(`C:brain\\${id}\\.system_generated\\logs\\transcript.jsonl`, id, 'win32'), null)
+  assert.equal(extractBrainDir(`C:\\Users\\alice\\brain\\${id}\\..\\..\\secret.jsonl`, id, 'win32'), null)
+  assert.equal(extractBrainDir(`C:\\Users\\alice\\mybrain\\${id}\\.system_generated\\logs\\transcript.jsonl`, id, 'win32'), null)
+})
+
+test('Antigravity includeSubagents parses anchored GENERIC spawns, guards against false positives, upgrades v3 caches, and handles rewind', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vargus-agy-spawn-parse-'))
+  try {
+    const cacheDir = join(root, 'cache')
+    const home = join(root, 'home')
+    const id = 'parent-conv'
+    const transcript = join(home, '.gemini', 'antigravity-cli', 'brain', id, '.system_generated', 'logs', 'transcript.jsonl')
+    await mkdir(join(transcript, '..'), { recursive: true })
+
+    const child1 = '589a8157-60c7-4597-99cd-58eacbb2e5d6'
+    const child2 = 'child-two_02'
+    const realSpawnContent = [
+      'Created At: 2026-11-23T10:44:45+08:00',
+      'Completed At: 2026-11-23T10:44:48+08:00',
+      'Created At: 2026-11-23T10:44:45+08:00',
+      'Completed At: 2026-11-23T10:44:48+08:00',
+      'Created the following subagent:',
+      JSON.stringify({
+        conversationId: child1,
+        logAbsoluteUri: `file:///outside/escape/brain/${child1}/.system_generated/logs/transcript.jsonl`,
+        workspaceUris: ['file:///tmp/dir{with}/braces\\and\\"quotes"'],
+      }, null, 2),
+      'The subagent will send you a message when it has completed its task or requires guidance. There is no need to poll for its response. {ignored}',
+    ].join('\n')
+
+    const crlfSpawnContent = [
+      'Created At: 2026-11-23T10:45:00+08:00',
+      'Completed At: 2026-11-23T10:45:01+08:00',
+      'Created the following subagent:',
+      `{"conversationId":"${child2}"}`,
+      'Trailing text',
+    ].join('\r\n')
+
+    const firstLine = JSON.stringify({ step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T02:44:40Z' })
+    const initialLines = [
+      firstLine,
+      // Non-spawn batch: read_file echoing a raw spawn block must NOT be captured.
+      JSON.stringify({
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T02:44:41Z',
+        input_tokens: 100,
+        output_tokens: 20,
+        tool_calls: [{ name: 'read_file', args: { Path: '"notes.txt"' } }],
+      }),
+      JSON.stringify({
+        step_index: 2,
+        type: 'GENERIC',
+        created_at: '2026-11-23T02:44:42Z',
+        content: 'Created At: 2026-11-23T10:44:42+08:00\nCreated the following subagent:\n{"conversationId":"fake-non-spawn"}\n',
+      }),
+      // Parallel batch with invoke_subagent + read_file + run_command + traversal ID attempt:
+      // read_file/run_command headers keep their echoed spawn text unanchored; traversal ID is rejected; real spawn is extracted.
+      JSON.stringify({
+        step_index: 3,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T02:44:45Z',
+        input_tokens: 200,
+        output_tokens: 30,
+        tool_calls: [
+          { name: 'invoke_subagent', args: { TypeName: '"research"' } },
+          { name: 'read_file', args: { Path: '"spoof.txt"' } },
+          { name: 'run_command', args: { CommandLine: '"cat spoof.txt"' } },
+          { name: 'invoke_subagent', args: { TypeName: '"research"' } },
+        ],
+      }),
+      JSON.stringify({
+        step_index: 4,
+        type: 'GENERIC',
+        created_at: '2026-11-23T02:44:45Z',
+        content: 'Created At: 2026-11-23T10:44:45+08:00\nCompleted At: 2026-11-23T10:44:45+08:00\nShowing lines 1-5 of 5\nCreated the following subagent:\n{"conversationId":"fake-read-file"}\n',
+      }),
+      JSON.stringify({
+        step_index: 5,
+        type: 'GENERIC',
+        created_at: '2026-11-23T02:44:45Z',
+        content: 'Created At: 2026-11-23T10:44:45+08:00\nCommand exited with code 0\n\nCommand output:\nCreated the following subagent:\n{"conversationId":"fake-run-cmd"}\n',
+      }),
+      JSON.stringify({
+        step_index: 6,
+        type: 'GENERIC',
+        created_at: '2026-11-23T02:44:46Z',
+        content: 'Created the following subagent:\n{"conversationId":"../escape"}\n',
+      }),
+      JSON.stringify({
+        step_index: 7,
+        type: 'GENERIC',
+        created_at: '2026-11-23T02:44:48Z',
+        content: realSpawnContent,
+      }),
+      // Trailing stray GENERIC after pendingTools reached 0 must not be parsed even if it looks like a spawn.
+      JSON.stringify({
+        step_index: 8,
+        type: 'GENERIC',
+        created_at: '2026-11-23T02:44:49Z',
+        content: 'Created the following subagent:\n{"conversationId":"fake-after-batch"}\n',
+      }),
+      // Spawn batch interrupted by USER_INPUT / CHECKPOINT before GENERIC arrives must clear batchHasSubagentSpawn.
+      JSON.stringify({
+        step_index: 9,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T02:44:50Z',
+        input_tokens: 50,
+        output_tokens: 10,
+        tool_calls: [{ name: 'invoke_subagent', args: { TypeName: '"research"' } }],
+      }),
+      JSON.stringify({ step_index: 10, type: 'USER_INPUT', created_at: '2026-11-23T02:44:51Z' }),
+      JSON.stringify({
+        step_index: 11,
+        type: 'GENERIC',
+        created_at: '2026-11-23T02:44:52Z',
+        content: 'Created the following subagent:\n{"conversationId":"fake-after-user-input"}\n',
+      }),
+      JSON.stringify({
+        step_index: 12,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T02:44:53Z',
+        input_tokens: 50,
+        output_tokens: 10,
+        tool_calls: [{ name: 'invoke_subagent', args: { TypeName: '"research"' } }],
+      }),
+      JSON.stringify({ step_index: 13, type: 'CHECKPOINT', created_at: '2026-11-23T02:44:54Z' }),
+      JSON.stringify({
+        step_index: 14,
+        type: 'GENERIC',
+        created_at: '2026-11-23T02:44:55Z',
+        content: 'Created the following subagent:\n{"conversationId":"fake-after-checkpoint"}\n',
+      }),
+      // Pending spawn split across incremental reads (PLANNER_RESPONSE now, GENERIC appended next).
+      JSON.stringify({
+        step_index: 15,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T02:44:58Z',
+        input_tokens: 50,
+        output_tokens: 10,
+        tool_calls: [{ name: 'invoke_subagent', args: { TypeName: '"executor"' } }],
+      }),
+    ].join('\n') + '\n'
+    await writeFile(transcript, initialLines)
+
+    const s1 = await readTranscriptState(transcript, cacheDir)
+    assert.deepEqual(s1.subagentIds, [child1])
+
+    // Verify incremental resume preserves batchHasSubagentSpawn across reads and dedupes repeated IDs.
+    await appendFile(transcript, [
+      JSON.stringify({
+        step_index: 16,
+        type: 'GENERIC',
+        created_at: '2026-11-23T02:45:01Z',
+        content: crlfSpawnContent,
+      }),
+      JSON.stringify({
+        step_index: 17,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T02:45:02Z',
+        input_tokens: 10,
+        output_tokens: 5,
+        tool_calls: [{ name: 'invoke_subagent', args: { TypeName: '"research"' } }],
+      }),
+      JSON.stringify({
+        step_index: 18,
+        type: 'GENERIC',
+        created_at: '2026-11-23T02:45:03Z',
+        content: realSpawnContent,
+      }),
+    ].join('\n') + '\n')
+    const s2 = await readTranscriptState(transcript, cacheDir)
+    assert.deepEqual(s2.subagentIds, [child1, child2])
+
+    // Fast-path cache hit returns the same subagentIds.
+    const s2Cached = await readTranscriptState(transcript, cacheDir)
+    assert.deepEqual(s2Cached.subagentIds, [child1, child2])
+
+    // Legacy v3 cache (matching size & hashes, lacking batchHasSubagentSpawn/subagentIds) triggers full replay and upgrades to v4.
+    const cacheFile = cachePath(cacheDir, 'transcript', transcript)
+    const v4Cache = JSON.parse(await readFile(cacheFile, 'utf8')) as Record<string, unknown>
+    assert.equal(v4Cache.version, 4)
+    const v3Cache: Record<string, unknown> = { ...v4Cache, version: 3 }
+    delete v3Cache.batchHasSubagentSpawn
+    delete v3Cache.subagentIds
+    await writeFile(cacheFile, JSON.stringify(v3Cache))
+    const sUpgraded = await readTranscriptState(transcript, cacheDir)
+    assert.deepEqual(sUpgraded.subagentIds, [child1, child2])
+    assert.equal(JSON.parse(await readFile(cacheFile, 'utf8')).version, 4)
+
+    // Poisoned v4 cache with an unsafe subagent ID forces full replay instead of trusting cached IDs.
+    const poisonedV4 = { ...v4Cache, subagentIds: ['../escape'] }
+    await writeFile(cacheFile, JSON.stringify(poisonedV4))
+    const sRecovered = await readTranscriptState(transcript, cacheDir)
+    assert.deepEqual(sRecovered.subagentIds, [child1, child2])
+
+    // Mid-transcript `/rewind` (same line 1, larger total bytes, changed bytes before cached.size) drops rewound child IDs.
+    const rewound = [
+      firstLine,
+      JSON.stringify({
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T02:46:00Z',
+        input_tokens: 500,
+        output_tokens: 50,
+        padding: 'x'.repeat(initialLines.length + 1024),
+      }),
+    ].join('\n') + '\n'
+    await writeFile(transcript, rewound)
+    const sRewound = await readTranscriptState(transcript, cacheDir)
+    assert.deepEqual(sRewound.subagentIds, [])
+    assert.equal(sRewound.counts.tokens, 550)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Antigravity includeSubagents folds recursive trees while keeping root metrics isolated and handling cycles, corruption and caps', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vargus-agy-subagents-'))
+  try {
+    const cacheDir = join(root, 'cache')
+    const home = join(root, 'home')
+    const workspace = join(home, 'proj', 'demo')
+    const brainDir = join(home, '.gemini', 'antigravity-cli', 'brain')
+    await mkdir(join(workspace, '.agents'), { recursive: true })
+    await writeFile(join(workspace, '.agents', 'skills.json'), JSON.stringify({
+      entries: [{ path: 'custom-skills' }],
+    }))
+    const customSkill = join(workspace, 'custom-skills', 'audit', 'SKILL.md')
+    const builtinSkill = join(home, '.gemini', 'antigravity-cli', 'builtin', 'skills', 'guide', 'SKILL.md')
+
+    const writeConv = async (id: string, steps: Record<string, unknown>[], mtimeMs?: number) => {
+      const tr = join(brainDir, id, '.system_generated', 'logs', 'transcript.jsonl')
+      await mkdir(join(tr, '..'), { recursive: true })
+      await writeFile(tr, steps.map(s => JSON.stringify(s)).join('\n') + '\n')
+      if (mtimeMs !== undefined) {
+        const at = new Date(mtimeMs)
+        await utimes(tr, at, at)
+      }
+      return tr
+    }
+    const spawnGeneric = (stepIndex: number, childId: string, createdAt: string) => ({
+      step_index: stepIndex,
+      type: 'GENERIC',
+      created_at: createdAt,
+      content: `Created At: ${createdAt}\nCompleted At: ${createdAt}\nCreated the following subagent:\n{"conversationId":"${childId}","logAbsoluteUri":"file:///should/never/be/followed/${childId}.jsonl"}\nThe subagent will send you a message.`,
+    })
+
+    const baseTime = Date.parse('2026-11-23T03:00:00.000Z')
+    const rootId = 'root-conv'
+    const childA = 'child-a'
+    const childB = 'child-b'
+    const grandC = 'grand-c'
+
+    // Grandchild C also has a cycle back to root and childA, earlier timestamp (must NOT change root session age!),
+    // mutating write_file (must NOT change root mutatingToolsSeen!), and reads a custom manifest skill.
+    await writeConv(grandC, [
+      { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T01:00:00Z' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T01:00:05Z',
+        input_tokens: 1500,
+        cache_read_tokens: 99999,
+        output_tokens: 500,
+        tool_calls: [
+          { name: 'read_file', args: { Path: JSON.stringify(customSkill) } },
+          { name: 'write_file', args: { Path: JSON.stringify(join(workspace, 'out.txt')), Content: '"x"' } },
+          { name: 'invoke_subagent', args: { TypeName: '"research"' } },
+          { name: 'invoke_subagent', args: { TypeName: '"research"' } },
+        ],
+      },
+      spawnGeneric(2, rootId, '2026-11-23T01:00:06Z'),
+      spawnGeneric(3, childA, '2026-11-23T01:00:07Z'),
+    ])
+
+    // Child A spawns grandC (plus reads a builtin skill) and has a mutating tool.
+    const childATr = await writeConv(childA, [
+      { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T02:00:00Z' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T02:00:05Z',
+        input_tokens: 3000,
+        output_tokens: 1000,
+        tool_calls: [
+          { name: 'read_file', args: { Path: JSON.stringify(builtinSkill) } },
+          { name: 'invoke_subagent', args: { TypeName: '"executor"' } },
+          { name: 'run_command', args: { CommandLine: '"echo hi"' } },
+        ],
+      },
+      spawnGeneric(2, grandC, '2026-11-23T02:00:06Z'),
+    ])
+
+    // Child B also links to grandC (diamond DAG -> grandC must be counted ONCE, not twice).
+    const childBTr = await writeConv(childB, [
+      { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T02:30:00Z' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T02:30:05Z',
+        input_tokens: 2000,
+        output_tokens: 500,
+        tool_calls: [{ name: 'invoke_subagent', args: { TypeName: '"research"' } }],
+      },
+      spawnGeneric(2, grandC, '2026-11-23T02:30:06Z'),
+    ])
+
+    // Root starts at 03:00:00Z (10m before `now`), spawns childA and childB, has a measured 100t/s rate on its own step.
+    const rootU0 = { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T03:00:00Z' }
+    const rootP1 = {
+      step_index: 1,
+      type: 'PLANNER_RESPONSE',
+      created_at: '2026-11-23T03:00:05Z',
+      input_tokens: 5000,
+      output_tokens: 500,
+      tool_calls: [
+        { name: 'invoke_subagent', args: { TypeName: '"research"' } },
+        { name: 'invoke_subagent', args: { TypeName: '"research"' } },
+      ],
+    }
+    const rootTr = await writeConv(rootId, [rootU0], baseTime + 100)
+
+    const makePayload = (state = 'working'): AntigravityPayload => ({
+      cwd: workspace,
+      // Deliberate surrounding whitespace tests rootId trimming for cycle detection & brainDir extraction.
+      conversation_id: `  ${rootId}  `,
+      session_id: `  ${rootId}  `,
+      transcript_path: join(home, '.gemini', 'antigravity', 'brain', rootId, '.system_generated', 'logs', 'transcript.jsonl'),
+      agent_state: state,
+      model: { id: 'Gemini 4 Neon (High)', display_name: 'Gemini 4 Neon (High)', effort: 'high' },
+      workspace: { current_dir: workspace, project_dir: workspace },
+      context_window: {
+        total_input_tokens: 5000,
+        total_output_tokens: 500,
+        current_usage: { input_tokens: 1000, cache_read_input_tokens: 4000, cache_creation_input_tokens: 0, output_tokens: 500 },
+        context_window_size: 1048576,
+        used_percentage: 12,
+      },
+      terminal_width: 220,
+    })
+
+    const baseOpts = { repo: false, branch: false, status: false, rateLimits: false }
+    // Seed live root decode rate: streamStart at +2000, rootP1 flushed at +7000 -> 500 tok / 5s = 100t/s.
+    await renderAntigravityStatusLine(makePayload('working'), {
+      home, noColor: true, cacheDir, now: baseTime + 200, givenOptions: baseOpts,
+    })
+    await renderAntigravityStatusLine(makePayload('working'), {
+      home, noColor: true, cacheDir, now: baseTime + 2000, givenOptions: baseOpts,
+    })
+    await writeConv(rootId, [
+      rootU0,
+      rootP1,
+      spawnGeneric(2, childA, '2026-11-23T03:00:07Z'),
+      spawnGeneric(3, childB, '2026-11-23T03:00:07Z'),
+    ], baseTime + 7000)
+
+    const now = baseTime + 10 * 60_000
+    // 1. Default includeSubagents: false -> root only (tokens: 5500, tools: 2, agents: 2, skills: 0), zero child cache files written.
+    const defaultLine = await renderAntigravityStatusLine(makePayload('idle'), {
+      home, noColor: true, cacheDir, now, givenOptions: baseOpts,
+    })
+    assert.equal(
+      defaultLine,
+      '  ~/proj/demo | neon:high | ctx:12% | token:5.5k(80%, 100t/s) | session:10m | 🔧2 🤖2',
+    )
+    await assert.rejects(() => readFile(cachePath(cacheDir, 'transcript', childATr), 'utf8'))
+
+    // 2. includeSubagents: true with tokens:false & callCounts:false -> still skips all child transcript I/O.
+    const hiddenCountsLine = await renderAntigravityStatusLine(makePayload('idle'), {
+      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: true, tokens: false, callCounts: false },
+    })
+    assert.equal(hiddenCountsLine, '  ~/proj/demo | neon:high | ctx:12% | session:10m')
+    await assert.rejects(() => readFile(cachePath(cacheDir, 'transcript', childATr), 'utf8'))
+
+    // 3. includeSubagents: true -> folds root (5500,2,2,0) + childA (4000,3,1,1) + childB (2500,1,1,0) + grandC (2000,4,2,1)
+    //    = tokens: 14.0k, tools: 10, agents: 6, skills: 2.
+    //    ctx (12%), cache% (80%), t/s (100t/s), session age (10m) remain strictly root-only!
+    const foldedLine = await renderAntigravityStatusLine(makePayload('idle'), {
+      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: true },
+    })
+    assert.equal(
+      foldedLine,
+      '  ~/proj/demo | neon:high | ctx:12% | token:14.0k(80%, 100t/s) | session:10m | 🔧10 🤖6 ⚡2',
+    )
+    // Verify root mutatingToolsSeen stays 0 even though childA and grandC ran mutating tools.
+    assert.equal((await readTranscriptState(rootTr, cacheDir)).mutatingToolsSeen, 0)
+
+    // Asymmetric tokens / callCounts combinations with includeSubagents: true still fold the enabled counter.
+    const tokensOnlyFolded = await renderAntigravityStatusLine(makePayload('idle'), {
+      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: true, tokens: true, callCounts: false },
+    })
+    assert.equal(
+      tokensOnlyFolded,
+      '  ~/proj/demo | neon:high | ctx:12% | token:14.0k(80%, 100t/s) | session:10m',
+    )
+    const callsOnlyFolded = await renderAntigravityStatusLine(makePayload('idle'), {
+      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: true, tokens: false, callCounts: true },
+    })
+    assert.equal(
+      callsOnlyFolded,
+      '  ~/proj/demo | neon:high | ctx:12% | session:10m | 🔧10 🤖6 ⚡2',
+    )
+
+    // Flipping back to includeSubagents: false immediately returns root-only counts (distinct row cache key).
+    const backToDefault = await renderAntigravityStatusLine(makePayload('idle'), {
+      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: false },
+    })
+    assert.equal(backToDefault, defaultLine)
+
+    // 4. Corrupt child cache isolation: damage childA's cache + append a line so childA throws on read.
+    //    Parent row must still render cleanly WITHOUT `| ⌛stale`, folding healthy childB + grandC (via childB).
+    const childACache = cachePath(cacheDir, 'transcript', childATr)
+    const savedChildA = JSON.parse(await readFile(childACache, 'utf8')) as Record<string, unknown>
+    await writeFile(childACache, JSON.stringify({ ...savedChildA, seenSkillsInTurn: 42 }))
+    await appendFile(childATr, '{}\n')
+    const isolatedLine = await renderAntigravityStatusLine(makePayload('idle'), {
+      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: true },
+    })
+    assert.doesNotMatch(isolatedLine, /stale/)
+    // Root (5500,2,2,0) + childB (2500,1,1,0) + grandC (2000,4,2,1) = 10.0k, tools 7, agents 5, skills 1.
+    assert.equal(
+      isolatedLine,
+      '  ~/proj/demo | neon:high | ctx:12% | token:10.0k(80%, 100t/s) | session:10m | 🔧7 🤖5 ⚡1',
+    )
+
+    // Restore childA cache and test hard caps deterministically via collectAntigravitySubagentCounts.
+    await writeFile(childACache, JSON.stringify(savedChildA))
+    assert.equal(MAX_SUBAGENT_DEPTH, 8)
+    assert.equal(MAX_SUBAGENT_TRANSCRIPTS, 64)
+    assert.equal(SUBAGENT_BUDGET_MS, 400)
+
+    const rootState = await readTranscriptState(rootTr, cacheDir)
+    // Direct untrimmed rootId trims cleanly for extractBrainDir and cycle visited seeding.
+    const trimmedDirect = await collectAntigravitySubagentCounts({
+      rootTranscriptPath: rootTr,
+      rootId: `  ${rootId}  `,
+      rootTranscript: rootState,
+      cacheDir,
+      context: { cwd: workspace, projectDir: workspace, home },
+    })
+    assert.deepEqual(trimmedDirect, { tokens: 14000, tools: 10, agents: 6, skills: 2 })
+
+    // Depth cap = 1: reads childA + childB, stops before grandC (depth 2).
+    const depth1 = await collectAntigravitySubagentCounts({
+      rootTranscriptPath: rootTr,
+      rootId,
+      rootTranscript: rootState,
+      cacheDir,
+      context: { cwd: workspace, projectDir: workspace, home },
+      maxDepth: 1,
+    })
+    assert.deepEqual(depth1, { tokens: 5500 + 4000 + 2500, tools: 2 + 3 + 1, agents: 2 + 1 + 1, skills: 1 })
+
+    // Transcript cap = 1: reads only first child (childA), skips childB and grandC.
+    const cap1 = await collectAntigravitySubagentCounts({
+      rootTranscriptPath: rootTr,
+      rootId,
+      rootTranscript: rootState,
+      cacheDir,
+      context: { cwd: workspace, projectDir: workspace, home },
+      maxTranscripts: 1,
+    })
+    assert.deepEqual(cap1, { tokens: 5500 + 4000, tools: 2 + 3, agents: 2 + 1, skills: 1 })
+
+    // Budget cap: deterministic clock exceeds budget after reading 1 child (childA), returning partial counts safely.
+    const ticks = [0, 0, 100, 500]
+    let tickIndex = 0
+    const budgeted = await collectAntigravitySubagentCounts({
+      rootTranscriptPath: rootTr,
+      rootId,
+      rootTranscript: rootState,
+      cacheDir,
+      context: { cwd: workspace, projectDir: workspace, home },
+      budgetMs: 400,
+      nowMs: () => ticks[Math.min(tickIndex++, ticks.length - 1)]!,
+    })
+    assert.deepEqual(budgeted, { tokens: 5500 + 4000, tools: 2 + 3, agents: 2 + 1, skills: 1 })
+
+    // Lazy skill-root resolution: 0 calls when all children hit cache, 1 call across 3 cold children.
+    let resolveCalls = 0
+    const spyResolve = async () => {
+      resolveCalls += 1
+      return collectDeclaredSkillRoots({ cwd: workspace, projectDir: workspace, home })
+    }
+    await collectAntigravitySubagentCounts({
+      rootTranscriptPath: rootTr,
+      rootId,
+      rootTranscript: rootState,
+      cacheDir,
+      context: { cwd: workspace, projectDir: workspace, home, resolveSkillRoots: spyResolve },
+    })
+    assert.equal(resolveCalls, 0)
+
+    const coldCacheDir = join(root, 'cold-sub-cache')
+    const coldCounts = await collectAntigravitySubagentCounts({
+      rootTranscriptPath: rootTr,
+      rootId,
+      rootTranscript: rootState,
+      cacheDir: coldCacheDir,
+      context: { cwd: workspace, projectDir: workspace, home, resolveSkillRoots: spyResolve },
+    })
+    assert.equal(resolveCalls, 1)
+    assert.deepEqual(coldCounts, { tokens: 14000, tools: 10, agents: 6, skills: 2 })
+    assert.ok(childBTr.endsWith('transcript.jsonl'))
   } finally {
     await rm(root, { recursive: true, force: true })
   }

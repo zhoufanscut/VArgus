@@ -112,7 +112,7 @@ own display rules.
 and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
 The shared `callCounts` setting controls the tool, agent and skill counts together.
 The shared `includeSubagents` setting defaults to `false`, keeping token and call
-counts on the active conversation unless enabled (currently read by Claude Code, Codex CLI and OmO Native).
+counts on the active conversation unless enabled.
 Codex's [startup hook option](src/hosts/codex/options.ts) defaults on.
 Explicit activation or hook installation enables its tmux integration.
 
@@ -548,11 +548,40 @@ the displayed five-hour and weekly windows.
 
 [Transcript lookup](src/hosts/antigravity/transcript.ts) scopes supplied paths
 to a normalized `brain/<id>` segment and has a CLI-directory fallback for
-paths reported under the IDE directory. Replay tracks a byte offset. It
-restarts when the file shrinks or the first-line or trailing digest changes.
+paths reported under the IDE directory. Replay tracks a byte offset (cache
+version 4). It restarts when the file shrinks or the first-line or trailing
+digest changes, dropping any rewound subagent links alongside counts.
 Session age, uncached tokens and call counts come from the active log.
 Context's input tokens measure the live window. Skill counts require known
 skill roots and deduplicate within a turn.
+
+[transcript.ts](src/hosts/antigravity/transcript.ts) tracks `invoke_subagent`
+spawn batches and records validated `conversationId` values in cache v4 on root
+reads so toggling `includeSubagents` takes effect immediately on a cache hit: it
+inspects subsequent `GENERIC` tool results only after stripping leading
+`Created At:` / `Completed At:` wrapper lines, requiring an anchored
+`Created the following subagent:\n{` header (verified against `agy` 1.5.14 on
+2026-11-23), and scanning the leading balanced JSON object so trailing prose and
+parallel standard tool outputs (such as `read_file` and `run_command`, which
+emit their own headers) do not produce false positives.
+With `includeSubagents: false` (default), or when both `tokens` and `callCounts`
+are `false`, Antigravity performs no child transcript I/O. With
+`includeSubagents: true` (and `tokens` or `callCounts` enabled),
+[subagents.ts](src/hosts/antigravity/subagents.ts) extracts the normalized
+`brain` directory directly containing the parent's
+`<id>/.system_generated/logs/transcript.jsonl`, resolves declared skill roots
+lazily at most once across the root and child reads (skipping manifest reads on
+cache hits), and performs cycle-safe breadth-first traversal over sibling
+`<brainDir>/<childId>/.system_generated/logs/transcript.jsonl` files verified
+through `resolveContainedTranscriptCandidate` (never following raw `file://`
+URIs from tool text), isolating per-child read/cache errors so a damaged child
+cache cannot trigger `| ⌛stale` on the parent row. Traversal is capped at depth
+8, 64 child transcripts, and a 400 ms budget to stay within `agy`'s refresh and
+command-timeout limits. Tokens, tools, agents and skills fold recursively across
+`invoke_subagent` trees; context, cache hit %, output speed (`t/s`), session
+age, model, effort, quotas and VCS/mutating-tool triggers stay strictly on the
+root conversation. `swarm` and `run_workflow` child transcripts are excluded
+(their transcript link formats are not yet verified).
 
 The status-line payload supplies the cache reading in `context_window.current_usage`.
 A saved Linux 1.5.8 payload reported 2,669 uncached input tokens, 8,113 cache

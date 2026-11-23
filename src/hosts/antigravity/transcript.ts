@@ -6,13 +6,16 @@ import { initialCounts, type Counts } from '../../core/session.ts'
 import { cachePath, readCache, writeCache } from './cache.ts'
 import type { AntigravityPayload } from './collect.ts'
 
-const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
+export const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const CHUNK_BYTES = 256 * 1024
 const HEAD_BYTES = 4096
 const TAIL_BYTES = 256
 const MUTATING_TOOLS = new Set(['run_command', 'write_file', 'edit_file', 'multi_edit', 'delete_file'])
 const BUILTIN_OR_GLOBAL_SKILL = /\/\.gemini\/(?:antigravity(?:-cli)?\/builtin|config)(?:\/plugins\/[^/]+)?\/skills\/[^/]+\/SKILL\.md$/
 const WORKSPACE_DOT_SKILL = /\/(?:\.agents?|_agents?)(?:\/plugins\/[^/]+)?\/skills\/[^/]+\/SKILL\.md$/
+const TIMESTAMP_WRAPPER = /^(?:(?:Created At|Completed At): [^\r\n]*\r?\n)*/
+const SPAWN_PREFIX_LF = 'Created the following subagent:\n{'
+const SPAWN_PREFIX_CRLF = 'Created the following subagent:\r\n{'
 
 export type LastPlannerStep = {
   stepCount: number
@@ -20,7 +23,7 @@ export type LastPlannerStep = {
 }
 
 type TranscriptCache = {
-  version: 3
+  version: 4
   path: string
   epoch: string
   size: number
@@ -39,6 +42,8 @@ type TranscriptCache = {
   lastPlanner?: LastPlannerStep
   firstToolAfterPlannerCreatedAt?: number
   unboundedTrailingStep: boolean
+  batchHasSubagentSpawn: boolean
+  subagentIds: string[]
 }
 
 export type TranscriptState = {
@@ -56,6 +61,7 @@ export type TranscriptState = {
   lastPlanner?: LastPlannerStep
   firstToolAfterPlannerCreatedAt?: number
   unboundedTrailingStep: boolean
+  subagentIds: readonly string[]
 }
 
 export type TranscriptLookupOptions = {
@@ -68,6 +74,8 @@ export type TranscriptReadContext = {
   projectDir?: string
   home?: string
   appDataDir?: string
+  customSkillRoots?: readonly string[]
+  resolveSkillRoots?: () => Promise<readonly string[]>
 }
 
 async function isRegularFile(path: string): Promise<boolean> {
@@ -121,13 +129,41 @@ export function resolveContainedTranscriptCandidate(
   return resolved.includes(`/brain/${rawId}/`) ? resolved : null
 }
 
+export function resolveConversationId(payload: AntigravityPayload): string {
+  return (typeof payload.conversation_id === 'string' && payload.conversation_id.trim())
+    || (typeof payload.session_id === 'string' && payload.session_id.trim())
+    || ''
+}
+
+export function extractBrainDir(
+  transcriptPath: string,
+  parentId: string,
+  platform: 'posix' | 'win32' = process.platform === 'win32' ? 'win32' : 'posix',
+): string | null {
+  if (!SAFE_ID.test(parentId)) return null
+  if (platform === 'win32') {
+    if (!isWindowsAbs(transcriptPath)) return null
+    const resolved = win32.normalize(transcriptPath)
+    const { root } = win32.parse(resolved)
+    const afterRoot = root ? `\\${resolved.slice(root.length)}` : resolved
+    const expectedTail = `\\brain\\${parentId}\\.system_generated\\logs\\transcript.jsonl`
+    if (!afterRoot.endsWith(expectedTail)) return null
+    const suffix = `\\${parentId}\\.system_generated\\logs\\transcript.jsonl`
+    return resolved.slice(0, resolved.length - suffix.length)
+  }
+  if (!posix.isAbsolute(transcriptPath)) return null
+  const resolved = posix.resolve(transcriptPath)
+  const expectedTail = `/brain/${parentId}/.system_generated/logs/transcript.jsonl`
+  if (!resolved.endsWith(expectedTail)) return null
+  const suffix = `/${parentId}/.system_generated/logs/transcript.jsonl`
+  return resolved.slice(0, resolved.length - suffix.length)
+}
+
 export async function resolveTranscriptPath(
   payload: AntigravityPayload,
   options: TranscriptLookupOptions = {},
 ): Promise<string | null> {
-  const rawId = (typeof payload.conversation_id === 'string' && payload.conversation_id.trim())
-    || (typeof payload.session_id === 'string' && payload.session_id.trim())
-    || ''
+  const rawId = resolveConversationId(payload)
   if (!SAFE_ID.test(rawId)) return null
 
   const candidates: string[] = []
@@ -209,7 +245,7 @@ type SkillsManifest = {
   inherits?: { path?: unknown }[]
 }
 
-async function collectDeclaredSkillRoots(context: TranscriptReadContext): Promise<string[]> {
+export async function collectDeclaredSkillRoots(context: TranscriptReadContext): Promise<string[]> {
   const roots = new Set<string>()
   const visitedManifests = new Set<string>()
 
@@ -311,7 +347,61 @@ type TranscriptStep = {
   created_at?: unknown
   input_tokens?: unknown
   output_tokens?: unknown
+  content?: unknown
   tool_calls?: { name?: unknown; args?: Record<string, unknown> | null }[] | null
+}
+
+function extractLeadingJsonObject(text: string, start: number): string | null {
+  if (text[start] !== '{') return null
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (ch === '\\') {
+        escaped = true
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+    } else if (ch === '{') {
+      depth += 1
+    } else if (ch === '}') {
+      depth -= 1
+      if (depth === 0) return text.slice(start, i + 1)
+    }
+  }
+  return null
+}
+
+function extractSpawnedSubagentId(content: string): string | null {
+  const tsMatch = TIMESTAMP_WRAPPER.exec(content)
+  const offset = tsMatch ? tsMatch[0].length : 0
+  let jsonStart = -1
+  if (content.startsWith(SPAWN_PREFIX_LF, offset)) {
+    jsonStart = offset + SPAWN_PREFIX_LF.length - 1
+  } else if (content.startsWith(SPAWN_PREFIX_CRLF, offset)) {
+    jsonStart = offset + SPAWN_PREFIX_CRLF.length - 1
+  } else {
+    return null
+  }
+  const rawJson = extractLeadingJsonObject(content, jsonStart)
+  if (!rawJson) return null
+  try {
+    const parsed = JSON.parse(rawJson) as { conversationId?: unknown }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    if (typeof parsed.conversationId !== 'string') return null
+    const id = parsed.conversationId.trim()
+    return SAFE_ID.test(id) ? id : null
+  } catch {
+    return null
+  }
 }
 
 function applyStep(
@@ -330,6 +420,8 @@ function applyStep(
     lastPlanner: LastPlannerStep | undefined
     firstToolAfterPlannerCreatedAt: number | undefined
     unboundedTrailingStep: boolean
+    batchHasSubagentSpawn: boolean
+    subagentIds: Set<string>
   },
   context: TranscriptReadContext,
   customSkillRoots: readonly string[],
@@ -357,6 +449,7 @@ function applyStep(
   }
 
   let validToolCalls = 0
+  let hasSubagentSpawn = false
   if (Array.isArray(step.tool_calls)) {
     for (const call of step.tool_calls) {
       if (!call || typeof call !== 'object') continue
@@ -369,6 +462,7 @@ function applyStep(
       const args = call.args && typeof call.args === 'object' ? call.args : undefined
       if (name === 'invoke_subagent') {
         state.counts.agents += 1
+        hasSubagentSpawn = true
       } else if (name === 'swarm' && unwrapArg(args?.action) === 'add') {
         const tasks = unwrapArg(args?.tasks)
         const copies = unwrapArg(args?.n)
@@ -392,6 +486,7 @@ function applyStep(
     state.turnIndex += 1
     state.seenSkills.clear()
     state.pendingTools = 0
+    state.batchHasSubagentSpawn = false
     state.awaitingModel = true
     state.firstToolAfterPlannerCreatedAt = undefined
     if (state.lastPlanner) state.unboundedTrailingStep = true
@@ -399,12 +494,14 @@ function applyStep(
     state.plannerStepsSeen += 1
     state.lastPlanner = { stepCount: state.stepCount, outputTokens }
     state.pendingTools = validToolCalls
+    state.batchHasSubagentSpawn = hasSubagentSpawn
     state.awaitingModel = false
     state.firstToolAfterPlannerCreatedAt = undefined
     state.unboundedTrailingStep = false
   } else if (step.type === 'CHECKPOINT') {
     state.compactionsSeen += 1
     state.pendingTools = 0
+    state.batchHasSubagentSpawn = false
     state.awaitingModel = true
     state.firstToolAfterPlannerCreatedAt = undefined
     if (state.lastPlanner) state.unboundedTrailingStep = true
@@ -412,10 +509,17 @@ function applyStep(
     if (state.pendingTools === 0) state.awaitingModel = true
     if (state.lastPlanner) state.unboundedTrailingStep = true
   } else if (typeof step.type === 'string' && step.type !== '' && state.pendingTools > 0) {
+    if (state.batchHasSubagentSpawn && step.type === 'GENERIC' && typeof step.content === 'string') {
+      const childId = extractSpawnedSubagentId(step.content)
+      if (childId) state.subagentIds.add(childId)
+    }
     if (createdMs === undefined) state.unboundedTrailingStep = true
     else if (state.firstToolAfterPlannerCreatedAt === undefined) state.firstToolAfterPlannerCreatedAt = createdMs
     state.pendingTools -= 1
-    if (state.pendingTools === 0) state.awaitingModel = true
+    if (state.pendingTools === 0) {
+      state.awaitingModel = true
+      state.batchHasSubagentSpawn = false
+    }
   } else if (state.lastPlanner) {
     state.unboundedTrailingStep = true
   }
@@ -450,6 +554,7 @@ export async function readTranscriptState(
     compactionsSeen: 0,
     awaitingModel: false,
     unboundedTrailingStep: false,
+    subagentIds: [],
   })
   let handle
   try {
@@ -477,7 +582,7 @@ export async function readTranscriptState(
     const cached = await readCache<TranscriptCache>(file)
     let canResume = Boolean(
       cached
-      && cached.version === 3
+      && cached.version === 4
       && cached.path === transcriptPath
       && typeof cached.epoch === 'string'
       && cached.epoch !== ''
@@ -489,7 +594,10 @@ export async function readTranscriptState(
       && typeof cached.compactionsSeen === 'number'
       && typeof cached.pendingTools === 'number'
       && typeof cached.awaitingModel === 'boolean'
-      && typeof cached.unboundedTrailingStep === 'boolean',
+      && typeof cached.unboundedTrailingStep === 'boolean'
+      && typeof cached.batchHasSubagentSpawn === 'boolean'
+      && Array.isArray(cached.subagentIds)
+      && cached.subagentIds.every(id => typeof id === 'string' && SAFE_ID.test(id)),
     )
     if (canResume && cached && cached.size > 0) {
       const actualTail = await hashWindowAt(handle, cached.size)
@@ -512,11 +620,13 @@ export async function readTranscriptState(
         lastPlanner: cached.lastPlanner,
         firstToolAfterPlannerCreatedAt: cached.firstToolAfterPlannerCreatedAt,
         unboundedTrailingStep: cached.unboundedTrailingStep,
+        subagentIds: [...new Set(cached.subagentIds)],
       }
     }
 
     const epoch = canResume && cached ? cached.epoch : randomBytes(8).toString('hex')
-    const customSkillRoots = await collectDeclaredSkillRoots(context)
+    const customSkillRoots = context.customSkillRoots
+      ?? (context.resolveSkillRoots ? await context.resolveSkillRoots() : await collectDeclaredSkillRoots(context))
     const state = {
       startedAt: canResume && cached ? cached.startedAt : undefined,
       turnIndex: canResume && cached ? cached.turnIndex : 0,
@@ -531,6 +641,8 @@ export async function readTranscriptState(
       lastPlanner: canResume && cached ? cached.lastPlanner : undefined,
       firstToolAfterPlannerCreatedAt: canResume && cached ? cached.firstToolAfterPlannerCreatedAt : undefined,
       unboundedTrailingStep: canResume && cached ? cached.unboundedTrailingStep : false,
+      batchHasSubagentSpawn: canResume && cached ? cached.batchHasSubagentSpawn : false,
+      subagentIds: new Set<string>(canResume && cached ? cached.subagentIds : []),
     }
 
     let readOffset = canResume && cached ? cached.size : 0
@@ -566,8 +678,9 @@ export async function readTranscriptState(
     }
 
     const tailHash = await hashWindowAt(handle, committedOffset)
+    const subagentIds = [...state.subagentIds]
     const updated: TranscriptCache = {
-      version: 3,
+      version: 4,
       path: transcriptPath,
       epoch,
       size: committedOffset,
@@ -586,6 +699,8 @@ export async function readTranscriptState(
       lastPlanner: state.lastPlanner,
       firstToolAfterPlannerCreatedAt: state.firstToolAfterPlannerCreatedAt,
       unboundedTrailingStep: state.unboundedTrailingStep,
+      batchHasSubagentSpawn: state.batchHasSubagentSpawn,
+      subagentIds,
     }
     await writeCache(cacheDir, file, updated).catch(() => {})
 
@@ -604,6 +719,7 @@ export async function readTranscriptState(
       lastPlanner: state.lastPlanner,
       firstToolAfterPlannerCreatedAt: state.firstToolAfterPlannerCreatedAt,
       unboundedTrailingStep: state.unboundedTrailingStep,
+      subagentIds,
     }
   } finally {
     await handle.close().catch(() => {})
