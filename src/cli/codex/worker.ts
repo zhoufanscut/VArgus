@@ -3,7 +3,7 @@ import { homedir, release } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
 import { addCounts, type Counts } from '../../core/session.ts'
 import { restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, savedFooterSettings, FooterSettings } from '../../hosts/codex/footer.ts'
-import { cachedModelDefault } from '../../hosts/codex/model-defaults.ts'
+import { cachedModelDefault, type ModelDefault } from '../../hosts/codex/model-defaults.ts'
 import { resolveCodexOptions } from '../../hosts/codex/options.ts'
 import { RolloutReader } from '../../hosts/codex/rollout.ts'
 import { Views, readingHold, selectedView, type View, type ViewScreen } from '../../hosts/codex/views.ts'
@@ -20,6 +20,25 @@ import {
 } from './state.ts'
 
 type Request = { id: string; action: 'on' | 'off' }
+
+export class RolloutReaderCache {
+  private readers = new Map<string, RolloutReader>()
+  private home: string
+  private modelDefault: ModelDefault | undefined
+  private onReplace: ((thread: string) => void) | undefined
+  constructor(home: string, modelDefault?: ModelDefault, onReplace?: (thread: string) => void) {
+    this.home = home; this.modelDefault = modelDefault; this.onReplace = onReplace
+  }
+  get(view: View): RolloutReader {
+    let reader = this.readers.get(view.thread)
+    if (!reader || reader.file !== view.file) {
+      if (reader) this.onReplace?.(view.thread)
+      reader = new RolloutReader(view.file, view.thread, view.cwd, this.home, this.modelDefault)
+      this.readers.set(view.thread, reader)
+    }
+    return reader
+  }
+}
 
 export async function foldDescendantCounts(
   descendants: readonly View[],
@@ -51,16 +70,10 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const footerSettings = new FooterSettings(cwd => savedFooterSettings(cwd, spec.home))
   const modelDefault = options.model && options.effort
     ? cachedModelDefault(spec.home, cwd => footerSettings.modelCatalog(cwd)) : undefined
-  const readers = new Map<string, RolloutReader>()
+  const foldSubagents = options.includeSubagents && (options.tokens || options.callCounts)
   const lines = new Map<string, ReturnType<typeof codexLine>>()
-  const getReader = (targetView: View): RolloutReader => {
-    let reader = readers.get(targetView.thread)
-    if (!reader) {
-      reader = new RolloutReader(targetView.file, targetView.thread, targetView.cwd, homedir(), modelDefault)
-      readers.set(targetView.thread, reader)
-    }
-    return reader
-  }
+  const readers = new RolloutReaderCache(homedir(), modelDefault, threadId => { lines.delete(threadId) })
+  const getReader = (targetView: View): RolloutReader => readers.get(targetView)
   const suppressed = new Set<string>()
   let mode = spec.mode, selected: string | undefined, error: string | undefined
   let stopping = false, attached = false, refreshAt = 0, renderAt = 0
@@ -77,7 +90,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
     mode, selected, paused, pending: (await backups(target)).length, error })
   const step = async () => {
     if (Date.now() >= refreshAt) {
-      await views.refresh()
+      await views.refresh(mode === 'on' && foldSubagents)
       if (mode === 'on') await footerSettings.preload(views.family().map(view => view.cwd))
       refreshAt = Date.now() + 1000
     }
@@ -139,7 +152,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
             viewLine = codexLine(reader.collector, options, theme, isWsl)
             lines.set(view.thread, viewLine)
           }
-          const extraCounts = options.includeSubagents && (options.tokens || options.callCounts)
+          const extraCounts = foldSubagents
             ? await foldDescendantCounts(views.descendants(view.thread), getReader)
             : undefined
           width = await output.width()

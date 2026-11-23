@@ -16,15 +16,23 @@ const WORKSPACE_DOT_SKILL = /\/(?:\.agents?|_agents?)(?:\/plugins\/[^/]+)?\/skil
 const TIMESTAMP_WRAPPER = /^(?:(?:Created At|Completed At): [^\r\n]*\r?\n)*/
 const SPAWN_PREFIX_LF = 'Created the following subagent:\n{'
 const SPAWN_PREFIX_CRLF = 'Created the following subagent:\r\n{'
+const MAX_WORKSPACE_URIS = 16
+const STANDARD_APP_DATA_DIR = /\/\.gemini\/antigravity(?:-cli)?$/
 
 export type LastPlannerStep = {
   stepCount: number
   outputTokens: number
 }
 
+export type SpawnedSubagent = {
+  id: string
+  workspaceDirs?: readonly string[]
+}
+
 type TranscriptCache = {
-  version: 4
+  version: 5
   path: string
+  skillContextKey: string
   epoch: string
   size: number
   firstLineHash: string
@@ -43,7 +51,7 @@ type TranscriptCache = {
   firstToolAfterPlannerCreatedAt?: number
   unboundedTrailingStep: boolean
   batchHasSubagentSpawn: boolean
-  subagentIds: string[]
+  subagents: SpawnedSubagent[]
 }
 
 export type TranscriptState = {
@@ -62,6 +70,7 @@ export type TranscriptState = {
   firstToolAfterPlannerCreatedAt?: number
   unboundedTrailingStep: boolean
   subagentIds: readonly string[]
+  subagents: readonly SpawnedSubagent[]
 }
 
 export type TranscriptLookupOptions = {
@@ -72,6 +81,7 @@ export type TranscriptLookupOptions = {
 export type TranscriptReadContext = {
   cwd?: string
   projectDir?: string
+  workspaceDirs?: readonly string[]
   home?: string
   appDataDir?: string
   customSkillRoots?: readonly string[]
@@ -106,6 +116,29 @@ function toSlashKey(path: string): string {
       : normalized
   }
   return posix.resolve(path)
+}
+
+export function normalizePathKey(path: string): string {
+  const slash = toSlashKey(path)
+  if (slash === '/' || /^[A-Za-z]:\/$/.test(slash)) return slash
+  return slash.replace(/\/+$/, '')
+}
+
+export function transcriptSkillContextKey(context: TranscriptReadContext): string {
+  const cwd = context.cwd ? normalizePathKey(context.cwd) : ''
+  const projectDir = context.projectDir ? normalizePathKey(context.projectDir) : ''
+  const workspaceDirs = context.workspaceDirs?.length
+    ? [...new Set(context.workspaceDirs.map(normalizePathKey))].filter(dir => dir !== '' && dir !== cwd && dir !== projectDir).sort()
+    : []
+  const home = context.home ? normalizePathKey(context.home) : ''
+  // Standard `.gemini/antigravity(-cli)` builtin skill paths are already matched by
+  // BUILTIN_OR_GLOBAL_SKILL regardless of whether `appDataDir` is supplied.
+  const rawAppData = context.appDataDir ? normalizePathKey(context.appDataDir) : ''
+  const customAppData = rawAppData && !STANDARD_APP_DATA_DIR.test(rawAppData) ? rawAppData : ''
+  const customRoots = context.customSkillRoots !== undefined
+    ? [...new Set(context.customSkillRoots.map(normalizePathKey))].sort()
+    : null
+  return JSON.stringify([cwd, projectDir, workspaceDirs, home, customAppData, customRoots])
 }
 
 // Normalizes with the target OS's own path semantics before checking `/brain/<id>/`
@@ -248,6 +281,7 @@ type SkillsManifest = {
 export async function collectDeclaredSkillRoots(context: TranscriptReadContext): Promise<string[]> {
   const roots = new Set<string>()
   const visitedManifests = new Set<string>()
+  let loadedManifests = 0
 
   // Per agy-customizations `docs/json_configs.md`, relative paths in `.agents/skills.json`
   // resolve against the directory containing the dot-dir first, falling back to the
@@ -258,7 +292,7 @@ export async function collectDeclaredSkillRoots(context: TranscriptReadContext):
     workspaceRoot: string | undefined,
   ): Promise<void> => {
     const key = toSlashKey(manifestPath)
-    if (visitedManifests.has(key) || visitedManifests.size >= 16) return
+    if (visitedManifests.has(key) || loadedManifests >= 16) return
     visitedManifests.add(key)
     let parsed: SkillsManifest
     try {
@@ -266,6 +300,7 @@ export async function collectDeclaredSkillRoots(context: TranscriptReadContext):
     } catch {
       return
     }
+    loadedManifests += 1
     const resolveEntry = async (entryPath: string, checkFile: boolean): Promise<string | null> => {
       if (entryPath === '~' || entryPath.startsWith('~/') || entryPath.startsWith('~\\')) {
         return context.home ? expandHome(context.home, entryPath) : null
@@ -312,6 +347,13 @@ export async function collectDeclaredSkillRoots(context: TranscriptReadContext):
       const parent = isWindowsAbs(dir) ? win32.dirname(dir) : dirname(dir)
       if (parent === dir) break
       dir = parent
+    }
+  }
+  for (const wsDir of context.workspaceDirs ?? []) {
+    if (!wsDir) continue
+    const dir = isWindowsAbs(wsDir) ? win32.normalize(wsDir) : resolve(wsDir)
+    for (const dot of ['.agents', '.agent', '_agents', '_agent']) {
+      await loadManifest(join(dir, dot, 'skills.json'), dir, dir)
     }
   }
   if (context.home) {
@@ -380,7 +422,23 @@ function extractLeadingJsonObject(text: string, start: number): string | null {
   return null
 }
 
-function extractSpawnedSubagentId(content: string): string | null {
+function parseWorkspaceUri(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (!trimmed.startsWith('file://')) return null
+  try {
+    const url = new URL(trimmed)
+    // Reject remote UNC/network hosts (`file://server/share`) on all platforms.
+    if (url.protocol !== 'file:' || (url.hostname !== '' && url.hostname.toLowerCase() !== 'localhost')) return null
+    const filePath = fileURLToPath(url)
+    if (!filePath || filePath.includes('\0')) return null
+    return isWindowsAbs(filePath) ? win32.normalize(filePath) : resolve(filePath)
+  } catch {
+    return null
+  }
+}
+
+function extractSpawnedSubagent(content: string): SpawnedSubagent | null {
   const tsMatch = TIMESTAMP_WRAPPER.exec(content)
   const offset = tsMatch ? tsMatch[0].length : 0
   let jsonStart = -1
@@ -394,14 +452,62 @@ function extractSpawnedSubagentId(content: string): string | null {
   const rawJson = extractLeadingJsonObject(content, jsonStart)
   if (!rawJson) return null
   try {
-    const parsed = JSON.parse(rawJson) as { conversationId?: unknown }
+    const parsed = JSON.parse(rawJson) as { conversationId?: unknown; workspaceUris?: unknown }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
     if (typeof parsed.conversationId !== 'string') return null
     const id = parsed.conversationId.trim()
-    return SAFE_ID.test(id) ? id : null
+    if (!SAFE_ID.test(id)) return null
+    const workspaceDirs: string[] = []
+    const seenKeys = new Set<string>()
+    if (Array.isArray(parsed.workspaceUris)) {
+      for (const entry of parsed.workspaceUris) {
+        if (workspaceDirs.length >= MAX_WORKSPACE_URIS) break
+        const dir = parseWorkspaceUri(entry)
+        if (!dir) continue
+        const key = normalizePathKey(dir)
+        if (seenKeys.has(key)) continue
+        seenKeys.add(key)
+        workspaceDirs.push(dir)
+      }
+    }
+    return workspaceDirs.length > 0 ? { id, workspaceDirs } : { id }
   } catch {
     return null
   }
+}
+
+function isValidCachedSubagent(value: unknown): value is SpawnedSubagent {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const entry = value as Record<string, unknown>
+  if (typeof entry.id !== 'string' || !SAFE_ID.test(entry.id)) return false
+  if (entry.workspaceDirs !== undefined) {
+    if (!Array.isArray(entry.workspaceDirs) || entry.workspaceDirs.length === 0 || entry.workspaceDirs.length > MAX_WORKSPACE_URIS) {
+      return false
+    }
+    for (const dir of entry.workspaceDirs) {
+      if (typeof dir !== 'string' || dir === '' || dir.includes('\0')) return false
+      if (!isWindowsAbs(dir) && !posix.isAbsolute(dir)) return false
+    }
+  }
+  return true
+}
+
+function mergeSpawnedSubagent(
+  subagents: Map<string, readonly string[] | undefined>,
+  spawn: SpawnedSubagent,
+): void {
+  const existing = subagents.get(spawn.id)
+  if (!subagents.has(spawn.id) || (!existing?.length && spawn.workspaceDirs?.length)) {
+    subagents.set(spawn.id, spawn.workspaceDirs)
+  }
+}
+
+function serializeSubagents(subagents: Map<string, readonly string[] | undefined>): SpawnedSubagent[] {
+  const out: SpawnedSubagent[] = []
+  for (const [id, workspaceDirs] of subagents) {
+    out.push(workspaceDirs?.length ? { id, workspaceDirs: [...workspaceDirs] } : { id })
+  }
+  return out
 }
 
 function applyStep(
@@ -421,7 +527,7 @@ function applyStep(
     firstToolAfterPlannerCreatedAt: number | undefined
     unboundedTrailingStep: boolean
     batchHasSubagentSpawn: boolean
-    subagentIds: Set<string>
+    subagents: Map<string, readonly string[] | undefined>
   },
   context: TranscriptReadContext,
   customSkillRoots: readonly string[],
@@ -510,8 +616,8 @@ function applyStep(
     if (state.lastPlanner) state.unboundedTrailingStep = true
   } else if (typeof step.type === 'string' && step.type !== '' && state.pendingTools > 0) {
     if (state.batchHasSubagentSpawn && step.type === 'GENERIC' && typeof step.content === 'string') {
-      const childId = extractSpawnedSubagentId(step.content)
-      if (childId) state.subagentIds.add(childId)
+      const spawn = extractSpawnedSubagent(step.content)
+      if (spawn) mergeSpawnedSubagent(state.subagents, spawn)
     }
     if (createdMs === undefined) state.unboundedTrailingStep = true
     else if (state.firstToolAfterPlannerCreatedAt === undefined) state.firstToolAfterPlannerCreatedAt = createdMs
@@ -555,6 +661,7 @@ export async function readTranscriptState(
     awaitingModel: false,
     unboundedTrailingStep: false,
     subagentIds: [],
+    subagents: [],
   })
   let handle
   try {
@@ -578,17 +685,28 @@ export async function readTranscriptState(
     const firstLineBytes = firstNewline >= 0 ? headSlice.subarray(0, firstNewline) : headSlice
     const firstLineHash = createHash('sha256').update(firstLineBytes).digest('hex')
 
+    const skillContextKey = transcriptSkillContextKey(context)
     const file = cachePath(cacheDir, 'transcript', transcriptPath)
     const cached = await readCache<TranscriptCache>(file)
-    let canResume = Boolean(
+    const hasValidHeader = Boolean(
       cached
-      && cached.version === 4
       && cached.path === transcriptPath
       && typeof cached.epoch === 'string'
       && cached.epoch !== ''
       && cached.firstLineHash === firstLineHash
       && cached.size >= 0
-      && cached.size <= info.size
+      && cached.size <= info.size,
+    )
+    let sameBytes = hasValidHeader
+    if (sameBytes && cached && cached.size > 0) {
+      const actualTail = await hashWindowAt(handle, cached.size)
+      if (actualTail !== cached.tailHash) sameBytes = false
+    }
+    const canResume = Boolean(
+      sameBytes
+      && cached
+      && cached.version === 5
+      && cached.skillContextKey === skillContextKey
       && typeof cached.stepCount === 'number'
       && typeof cached.plannerStepsSeen === 'number'
       && typeof cached.compactionsSeen === 'number'
@@ -596,15 +714,14 @@ export async function readTranscriptState(
       && typeof cached.awaitingModel === 'boolean'
       && typeof cached.unboundedTrailingStep === 'boolean'
       && typeof cached.batchHasSubagentSpawn === 'boolean'
-      && Array.isArray(cached.subagentIds)
-      && cached.subagentIds.every(id => typeof id === 'string' && SAFE_ID.test(id)),
+      && Array.isArray(cached.subagents)
+      && cached.subagents.every(isValidCachedSubagent),
     )
-    if (canResume && cached && cached.size > 0) {
-      const actualTail = await hashWindowAt(handle, cached.size)
-      if (actualTail !== cached.tailHash) canResume = false
-    }
 
     if (canResume && cached && cached.size === info.size) {
+      const subagentMap = new Map<string, readonly string[] | undefined>()
+      for (const spawn of cached.subagents) mergeSpawnedSubagent(subagentMap, spawn)
+      const subagents = serializeSubagents(subagentMap)
       return {
         startedAt: cached.startedAt,
         counts: initialCounts(cached.counts),
@@ -620,13 +737,20 @@ export async function readTranscriptState(
         lastPlanner: cached.lastPlanner,
         firstToolAfterPlannerCreatedAt: cached.firstToolAfterPlannerCreatedAt,
         unboundedTrailingStep: cached.unboundedTrailingStep,
-        subagentIds: [...new Set(cached.subagentIds)],
+        subagentIds: subagents.map(s => s.id),
+        subagents,
       }
     }
 
-    const epoch = canResume && cached ? cached.epoch : randomBytes(8).toString('hex')
+    // Preserve epoch across context-only or cache-version replays when the underlying
+    // transcript bytes have not rewound so rate tracking stays intact.
+    const epoch = sameBytes && cached ? cached.epoch : randomBytes(8).toString('hex')
     const customSkillRoots = context.customSkillRoots
       ?? (context.resolveSkillRoots ? await context.resolveSkillRoots() : await collectDeclaredSkillRoots(context))
+    const initialSubagents = new Map<string, readonly string[] | undefined>()
+    if (canResume && cached) {
+      for (const spawn of cached.subagents) mergeSpawnedSubagent(initialSubagents, spawn)
+    }
     const state = {
       startedAt: canResume && cached ? cached.startedAt : undefined,
       turnIndex: canResume && cached ? cached.turnIndex : 0,
@@ -642,7 +766,7 @@ export async function readTranscriptState(
       firstToolAfterPlannerCreatedAt: canResume && cached ? cached.firstToolAfterPlannerCreatedAt : undefined,
       unboundedTrailingStep: canResume && cached ? cached.unboundedTrailingStep : false,
       batchHasSubagentSpawn: canResume && cached ? cached.batchHasSubagentSpawn : false,
-      subagentIds: new Set<string>(canResume && cached ? cached.subagentIds : []),
+      subagents: initialSubagents,
     }
 
     let readOffset = canResume && cached ? cached.size : 0
@@ -678,10 +802,12 @@ export async function readTranscriptState(
     }
 
     const tailHash = await hashWindowAt(handle, committedOffset)
-    const subagentIds = [...state.subagentIds]
+    const subagents = serializeSubagents(state.subagents)
+    const subagentIds = subagents.map(s => s.id)
     const updated: TranscriptCache = {
-      version: 4,
+      version: 5,
       path: transcriptPath,
+      skillContextKey,
       epoch,
       size: committedOffset,
       firstLineHash,
@@ -700,7 +826,7 @@ export async function readTranscriptState(
       firstToolAfterPlannerCreatedAt: state.firstToolAfterPlannerCreatedAt,
       unboundedTrailingStep: state.unboundedTrailingStep,
       batchHasSubagentSpawn: state.batchHasSubagentSpawn,
-      subagentIds,
+      subagents,
     }
     await writeCache(cacheDir, file, updated).catch(() => {})
 
@@ -720,6 +846,7 @@ export async function readTranscriptState(
       firstToolAfterPlannerCreatedAt: state.firstToolAfterPlannerCreatedAt,
       unboundedTrailingStep: state.unboundedTrailingStep,
       subagentIds,
+      subagents,
     }
   } finally {
     await handle.close().catch(() => {})

@@ -4,9 +4,12 @@ import { addCounts, initialCounts, type Counts } from '../../core/session.ts'
 import {
   collectDeclaredSkillRoots,
   extractBrainDir,
+  normalizePathKey,
   readTranscriptState,
   resolveContainedTranscriptCandidate,
   SAFE_ID,
+  transcriptSkillContextKey,
+  type SpawnedSubagent,
   type TranscriptReadContext,
   type TranscriptState,
 } from './transcript.ts'
@@ -27,11 +30,26 @@ export type SubagentCollectInput = {
   nowMs?: () => number
 }
 
+function sameWorkspace(context: TranscriptReadContext, workspaceDirs: readonly string[]): boolean {
+  if (workspaceDirs.length !== 1 || !context.cwd) return false
+  const childKey = normalizePathKey(workspaceDirs[0]!)
+  if (context.workspaceDirs?.some(dir => normalizePathKey(dir) !== childKey)) return false
+  if (normalizePathKey(context.cwd) !== childKey) return false
+  if (context.projectDir && normalizePathKey(context.projectDir) !== childKey) return false
+  return true
+}
+
+function listSpawns(state: TranscriptState): readonly SpawnedSubagent[] {
+  if (state.subagents.length > 0) return state.subagents
+  return state.subagentIds.map(id => ({ id }))
+}
+
 export async function collectAntigravitySubagentCounts(input: SubagentCollectInput): Promise<Counts> {
   let total = initialCounts(input.rootTranscript.counts)
   const rootId = input.rootId.trim()
   if (!SAFE_ID.test(rootId)) return total
-  if (input.rootTranscript.subagentIds.length === 0) return total
+  const rootSpawns = listSpawns(input.rootTranscript)
+  if (rootSpawns.length === 0) return total
 
   const brainDir = extractBrainDir(input.rootTranscriptPath, rootId)
   if (!brainDir) return total
@@ -45,51 +63,80 @@ export async function collectAntigravitySubagentCounts(input: SubagentCollectInp
   if (maxDepth <= 0 || maxTranscripts <= 0 || nowMs() - startMs >= budgetMs) return total
 
   const baseContext = input.context ?? {}
-  let skillRootsPromise: Promise<readonly string[]> | undefined
-  const childContext: TranscriptReadContext = baseContext.customSkillRoots
-    ? baseContext
-    : {
-      ...baseContext,
+  const skillRootsCache = new Map<string, Promise<readonly string[]>>()
+  const withCachedSkillRoots = (context: TranscriptReadContext, inheritResolver: boolean): TranscriptReadContext => {
+    if (inheritResolver && context.customSkillRoots) return context
+    const key = transcriptSkillContextKey(context)
+    return {
+      ...context,
       resolveSkillRoots: () => {
-        skillRootsPromise ??= baseContext.resolveSkillRoots
-          ? baseContext.resolveSkillRoots()
-          : collectDeclaredSkillRoots(baseContext)
-        return skillRootsPromise
+        let pending = skillRootsCache.get(key)
+        if (!pending) {
+          pending = inheritResolver && context.resolveSkillRoots
+            ? context.resolveSkillRoots()
+            : collectDeclaredSkillRoots(context)
+          skillRootsCache.set(key, pending)
+        }
+        return pending
       },
     }
+  }
+  const rootChildContext = withCachedSkillRoots(baseContext, true)
+
+  const contextForChild = (
+    parentContext: TranscriptReadContext,
+    workspaceDirs: readonly string[] | undefined,
+  ): TranscriptReadContext => {
+    if (!workspaceDirs || workspaceDirs.length === 0 || sameWorkspace(parentContext, workspaceDirs)) {
+      return parentContext
+    }
+    const primary = workspaceDirs[0]!
+    const derived: TranscriptReadContext = {
+      cwd: primary,
+      projectDir: primary,
+      ...(workspaceDirs.length > 1 ? { workspaceDirs } : {}),
+      home: baseContext.home,
+      appDataDir: baseContext.appDataDir,
+    }
+    if (transcriptSkillContextKey(derived) === transcriptSkillContextKey(rootChildContext)) {
+      return rootChildContext
+    }
+    return withCachedSkillRoots(derived, false)
+  }
 
   const visited = new Set<string>([rootId])
-  const queue: { id: string; depth: number }[] = []
-  const enqueue = (ids: readonly string[], depth: number) => {
+  const queue: { id: string; depth: number; context: TranscriptReadContext }[] = []
+  const enqueue = (spawns: readonly SpawnedSubagent[], depth: number, parentContext: TranscriptReadContext) => {
     if (depth > maxDepth) return
-    for (const raw of ids) {
-      const id = raw.trim()
+    for (const spawn of spawns) {
+      const id = spawn.id.trim()
       if (!SAFE_ID.test(id) || visited.has(id)) continue
       visited.add(id)
-      queue.push({ id, depth })
+      queue.push({ id, depth, context: contextForChild(parentContext, spawn.workspaceDirs) })
     }
   }
 
-  enqueue(input.rootTranscript.subagentIds, 1)
+  enqueue(rootSpawns, 1, rootChildContext)
 
   let readCount = 0
   for (let head = 0; head < queue.length; head++) {
     if (readCount >= maxTranscripts) break
     if (nowMs() - startMs >= budgetMs) break
-    const { id, depth } = queue[head]!
+    const { id, depth, context } = queue[head]!
     const candidate = join(brainDir, id, '.system_generated', 'logs', 'transcript.jsonl')
     const childPath = resolveContainedTranscriptCandidate(candidate, id)
     if (!childPath) continue
     readCount += 1
     let child: TranscriptState
     try {
-      child = await readTranscriptState(childPath, input.cacheDir, childContext)
+      child = await readTranscriptState(childPath, input.cacheDir, context)
     } catch {
       continue
     }
     total = addCounts(total, child.counts)
-    if (child.subagentIds.length > 0 && depth < maxDepth) {
-      enqueue(child.subagentIds, depth + 1)
+    const nested = listSpawns(child)
+    if (nested.length > 0 && depth < maxDepth) {
+      enqueue(nested, depth + 1, context)
     }
   }
 

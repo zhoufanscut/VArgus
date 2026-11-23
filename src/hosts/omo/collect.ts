@@ -38,9 +38,38 @@ function nonnegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
+// Failure kinds raised strictly before a child session runs in OmO 5.1.61
+// (`packages/senpi-task/src/state/start-failure.ts` enum; emitted by
+// `src/manager/start-failure.ts` and `src/manager/manager.ts`).
+// Excludes post-launch error kinds (`child-unresponsive`, `model_chain_exhausted`,
+// `suspended_unresumable`, `child-turn-failed`, `child-prompt-failed`) and bare `status: "error"`.
+const PRE_LAUNCH_REFUSAL_KINDS = new Set([
+  'model_unavailable',
+  'tools_unavailable',
+  'depth-exceeded',
+  'session-create-failed',
+  'host_unavailable',
+  'session_unavailable',
+  'isolation_unavailable',
+])
+
+export function isPreLaunchTaskRefusal(value: unknown): boolean {
+  const item = record(value)
+  if (!item || item.status !== 'error') return false
+  if (typeof item.failure_kind !== 'string' || !PRE_LAUNCH_REFUSAL_KINDS.has(item.failure_kind)) return false
+  // A task carrying launch/runtime facts already ran before failing (e.g. paused resume failure).
+  if (typeof item.child_session_id === 'string' && item.child_session_id !== '') return false
+  if (typeof item.effective_model === 'string' && item.effective_model !== '') return false
+  if (isRecord(item.run_stats) || isRecord(item.effective_model) || isRecord(item.host_session)) return false
+  if (typeof item.pid === 'number' && Number.isFinite(item.pid)) return false
+  return true
+}
+
 function agent(state: OmoHistory, value: unknown): void {
   const item = record(value)
-  if (typeof item?.task_id === 'string' && item.task_id) state.agents.add(item.task_id)
+  if (typeof item?.task_id !== 'string' || !item.task_id) return
+  if (isPreLaunchTaskRefusal(item)) return
+  state.agents.add(item.task_id)
 }
 
 export const omoSettingsReducer: HistoryReducer<OmoSettings> = {

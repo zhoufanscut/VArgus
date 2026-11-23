@@ -648,3 +648,186 @@ test('OmO includeSubagents defaults off, folds and deduplicates when toggled on,
     handlers.get('session_shutdown')?.({}, ctx)
   }
 })
+
+test('OmO excludes pre-launch refused tasks across main-only and includeSubagents union while keeping runtime-errored children', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-entry-refusal-'))
+  const home = join(dir, 'home')
+  const agentDir = join(dir, 'agent')
+  const project = join(dir, 'project')
+  const savedHome = process.env.HOME
+  const savedAgentDir = process.env.OMO_CODING_AGENT_DIR
+  const savedNoColor = process.env.NO_COLOR
+  const hadHome = 'HOME' in process.env
+  const hadAgentDir = 'OMO_CODING_AGENT_DIR' in process.env
+  const hadNoColor = 'NO_COLOR' in process.env
+  t.after(async () => {
+    if (hadHome) process.env.HOME = savedHome
+    else delete process.env.HOME
+    if (hadAgentDir) process.env.OMO_CODING_AGENT_DIR = savedAgentDir
+    else delete process.env.OMO_CODING_AGENT_DIR
+    if (hadNoColor) process.env.NO_COLOR = savedNoColor
+    else delete process.env.NO_COLOR
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  await mkdir(home, { recursive: true })
+  await mkdir(project, { recursive: true })
+  process.env.HOME = home
+  process.env.OMO_CODING_AGENT_DIR = agentDir
+  process.env.NO_COLOR = '1'
+
+  const stateDir = join(agentDir, 'projects', projectStateKey(project), 'senpi-task')
+  await mkdir(join(stateDir, 'tasks'), { recursive: true })
+  await mkdir(join(stateDir, 'children', 'st_00000002', 'sessions', 'st_00000002'), { recursive: true })
+  await writeFile(join(stateDir, 'tasks', 'st_00000001.json'), JSON.stringify({
+    task_id: 'st_00000001',
+    parent_session_id: 'sess-root',
+    root_session_id: 'sess-root',
+    status: 'error',
+    failure_kind: 'model_unavailable',
+    failure_reason: 'model_not_in_child_profile',
+  }))
+  await writeFile(join(stateDir, 'tasks', 'st_00000002.json'), JSON.stringify({
+    task_id: 'st_00000002',
+    parent_session_id: 'sess-root',
+    root_session_id: 'sess-root',
+    child_session_id: 'sess-child-2',
+    status: 'completed',
+  }))
+  await writeFile(
+    join(stateDir, 'children', 'st_00000002', 'sessions', 'st_00000002', '001.jsonl'),
+    JSON.stringify({
+      id: 'c2', type: 'message', timestamp: '',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'tc1', name: 'read', arguments: {} }],
+        usage: { input: 300, output: 100, cacheRead: 0, cacheWrite: 0 },
+      },
+    }) + '\n',
+  )
+
+  const entries: SessionEntry[] = [
+    { id: 'settings', type: 'custom', timestamp: '', customType: 'vargus-settings',
+      data: { enabled: true, options: { repo: false, branch: false, status: false } } },
+    { id: 'm1', type: 'message', timestamp: '', message: {
+      role: 'assistant',
+      content: [
+        { type: 'toolCall', id: 'mt1', name: 'task', arguments: {} },
+        { type: 'toolCall', id: 'mt2', name: 'task', arguments: {} },
+      ],
+      usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 },
+    } },
+    { id: 'r1', type: 'message', timestamp: '', message: {
+      role: 'toolResult', toolCallId: 'mt1', toolName: 'task',
+      details: { mode: 'spawn', task_id: 'st_00000001', status: 'error', failure_kind: 'model_unavailable', failure_reason: 'model_not_in_child_profile' },
+    } },
+    { id: 'r2', type: 'message', timestamp: '', message: {
+      role: 'toolResult', toolCallId: 'mt2', toolName: 'task',
+      details: { mode: 'spawn', task_id: 'st_00000002', status: 'completed' },
+    } },
+  ]
+  const memo = new Map<object, { state: unknown; through: number }>()
+  const handlers = new Map<string, (event: unknown, ctx: Context) => void>()
+  type Context = Parameters<Parameters<OmoApi['on']>[1]>[1]
+  let command: Parameters<OmoApi['registerCommand']>[1] | undefined
+  let row: { render(width: number): string[]; invalidate(): void } | undefined
+  let onRender: (() => void) | undefined
+  const ctx: Context = {
+    modelRegistry: { getProviderAuth: async () => undefined },
+    mode: 'tui', cwd: project, model: { id: 'gpt-6.1-sol', provider: 'test' }, thinkingLevel: 'high',
+    getContextUsage: () => ({ tokens: 100, contextWindow: 1000, percent: 10 }),
+    sessionManager: {
+      getSessionId: () => 'sess-root',
+      getEntry: id => entries.find(entry => entry.id === id),
+      getHeader: () => ({ timestamp: '2026-11-14T00:00:00Z' }),
+      reduceHistory<S>(reducer: HistoryReducer<S>): S {
+        const previous = memo.get(reducer)
+        let state = previous ? previous.state as S : reducer.initial()
+        for (let i = previous?.through ?? 0; i < entries.length; i++) {
+          state = reducer.add(state, entries[i]!)
+        }
+        memo.set(reducer, { state, through: entries.length })
+        return state
+      },
+    },
+    ui: {
+      setFooter() {},
+      setWidget(_key, factory) { row = factory?.({ requestRender() { onRender?.() } }) },
+      notify() {},
+    },
+  }
+  const api: OmoApi = {
+    on(name, handler) { handlers.set(name, handler); return () => handlers.delete(name) },
+    getSubscriptionLimits: () => [],
+    onSubscriptionLimits: () => () => {},
+    appendEntry(customType, data) {
+      entries.push({ id: String(entries.length), type: 'custom', timestamp: '', customType, data })
+    },
+    registerCommand(_name, value) { command = value },
+  }
+  const lineText = () => row?.render(200).join('') ?? ''
+  const waitForLine = (pattern: RegExp) => new Promise<string>((resolveWait, rejectWait) => {
+    const check = () => {
+      const current = lineText()
+      if (pattern.test(current)) {
+        clearTimeout(timeout)
+        onRender = undefined
+        resolveWait(current)
+      }
+    }
+    const timeout = setTimeout(() => {
+      onRender = undefined
+      rejectWait(new Error(`Timed out waiting for ${pattern}; got: ${lineText()}`))
+    }, 3000)
+    onRender = check
+    check()
+  })
+
+  vargus(api, {})
+  handlers.get('session_start')?.({}, ctx)
+  try {
+    // Default off: only st_00000002 counts -> 1 agent, 150 tokens, 2 outer tool calls.
+    const offLine = lineText()
+    assert.match(offLine, /token:150\(0%\)/)
+    assert.match(offLine, /🔧2 🤖1|T:2 A:1/)
+
+    // Toggle includeSubagents on: union of main and store still reports 1 agent, plus st_00000002's 400 tokens & 1 tool.
+    let now = 200_000
+    t.mock.method(Date, 'now', () => now)
+    await command!.handler('config {"includeSubagents":true}', ctx)
+    const onLine = await waitForLine(/token:550\(0%\)/)
+    assert.match(onLine, /🔧3 🤖1|T:3 A:1/)
+
+    // Add a control child that actually ran and later errored: counts as 2nd agent and adds its 250 tokens & 1 tool.
+    await mkdir(join(stateDir, 'children', 'st_00000003', 'sessions', 'st_00000003'), { recursive: true })
+    await writeFile(join(stateDir, 'tasks', 'st_00000003.json'), JSON.stringify({
+      task_id: 'st_00000003',
+      parent_session_id: 'sess-root',
+      root_session_id: 'sess-root',
+      child_session_id: 'sess-child-3',
+      status: 'error',
+      error_message: 'tool execution failed',
+    }))
+    await writeFile(
+      join(stateDir, 'children', 'st_00000003', 'sessions', 'st_00000003', '001.jsonl'),
+      JSON.stringify({
+        id: 'c3', type: 'message', timestamp: '',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'tc3', name: 'bash', arguments: {} }],
+          usage: { input: 200, output: 50, cacheRead: 0, cacheWrite: 0 },
+        },
+      }) + '\n',
+    )
+    entries.push({
+      id: 'r3', type: 'message', timestamp: '',
+      message: { role: 'toolResult', toolCallId: 'mt3', toolName: 'task', details: { mode: 'spawn', task_id: 'st_00000003', status: 'error' } },
+    })
+    now += 2000
+    handlers.get('tool_execution_end')?.({}, ctx)
+    const withRuntimeError = await waitForLine(/token:800\(0%\)/)
+    assert.match(withRuntimeError, /🔧4 🤖2|T:4 A:2/)
+  } finally {
+    handlers.get('session_shutdown')?.({}, ctx)
+  }
+})

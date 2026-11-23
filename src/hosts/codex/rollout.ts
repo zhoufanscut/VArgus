@@ -2,11 +2,169 @@
 // Hooks document this format as unstable; keep fixtures and live checks current.
 import { open, readdir, realpath } from 'node:fs/promises'
 import { join, relative, isAbsolute, sep } from 'node:path'
+import { Readable } from 'node:stream'
+import { createZstdDecompress } from 'node:zlib'
 import { codexRead } from './read.ts'
 import { CodexCollector } from './collect.ts'
 import type { ModelDefault } from './model-defaults.ts'
 import { SkillLoads } from './skills.ts'
 import type { Usage } from './protocol.ts'
+
+export const isCompressedRollout = (path: string): boolean => path.endsWith('.jsonl.zst')
+export const isRolloutFile = (path: string): boolean => path.endsWith('.jsonl') || isCompressedRollout(path)
+export const rolloutStem = (path: string): string => isCompressedRollout(path) ? path.slice(0, -4) : path
+
+type ZstdFrameSpan = { kind: 'data' | 'skip'; start: number; end: number }
+
+// Node 24's `node:zlib` zstd stream returns cleanly without error on premature EOF
+// mid-frame or trailing non-zstd bytes, and stops after the first frame (dropping
+// concatenated frames and failing on leading skippable frames). Parse RFC 8878
+// frame/block/checksum spans directly on the open descriptor and stream each data
+// frame span individually.
+async function readZstdFrameSpan(
+  handle: Awaited<ReturnType<typeof open>>,
+  start: number,
+  fileSize: number,
+): Promise<ZstdFrameSpan | null> {
+  let pos = start
+  const hdr = Buffer.allocUnsafe(8)
+  const readExact = async (len: number): Promise<boolean> => {
+    if (pos + len > fileSize) return false
+    const { bytesRead } = await handle.read(hdr, 0, len, pos)
+    if (bytesRead !== len) return false
+    pos += len
+    return true
+  }
+  if (!(await readExact(4))) return null
+  const magic = hdr.readUInt32LE(0)
+  if (magic === 0xFD2FB528) {
+    if (!(await readExact(1))) return null
+    const fhd = hdr[0]!
+    // RFC 8878 §3.1.1.1.1: bit 3 (0x08) is Reserved_bit (MUST fail); bit 4 (0x10) is Unused_bit.
+    if ((fhd & 0x08) !== 0) return null
+    const fcsFlag = (fhd >> 6) & 3
+    const singleSegment = (fhd >> 5) & 1
+    const checksumFlag = (fhd >> 2) & 1
+    const dictFlag = fhd & 3
+    const extraHeader = (singleSegment ? 0 : 1)
+      + ([0, 1, 2, 4][dictFlag] ?? 0)
+      + (fcsFlag === 0 ? (singleSegment ? 1 : 0) : ([0, 2, 4, 8][fcsFlag] ?? 0))
+    if (pos + extraHeader > fileSize) return null
+    pos += extraHeader
+    let sawLast = false
+    while (!sawLast) {
+      if (!(await readExact(3))) return null
+      const bh = hdr[0]! | (hdr[1]! << 8) | (hdr[2]! << 16)
+      const last = (bh & 1) === 1
+      const type = (bh >> 1) & 3
+      const size = bh >>> 3
+      if (type === 3) return null
+      const payloadLen = type === 1 ? 1 : size
+      if (pos + payloadLen > fileSize) return null
+      pos += payloadLen
+      sawLast = last
+    }
+    if (checksumFlag) {
+      if (pos + 4 > fileSize) return null
+      pos += 4
+    }
+    return { kind: 'data', start, end: pos }
+  }
+  if (((magic & 0xFFFFFFF0) >>> 0) === 0x184D2A50) {
+    if (!(await readExact(4))) return null
+    const skipSize = hdr.readUInt32LE(0)
+    if (pos + skipSize > fileSize) return null
+    pos += skipSize
+    return { kind: 'skip', start, end: pos }
+  }
+  return null
+}
+
+async function validateZstdFrames(
+  handle: Awaited<ReturnType<typeof open>>,
+  fileSize: number,
+): Promise<Array<{ start: number; end: number }> | null> {
+  if (fileSize === 0) return []
+  let pos = 0
+  const dataFrames: Array<{ start: number; end: number }> = []
+  while (pos < fileSize) {
+    const frame = await readZstdFrameSpan(handle, pos, fileSize)
+    if (!frame) return null
+    if (frame.kind === 'data') dataFrames.push({ start: frame.start, end: frame.end })
+    pos = frame.end
+  }
+  return dataFrames.length > 0 && pos === fileSize ? dataFrames : null
+}
+
+async function* readHandleSpan(
+  handle: Awaited<ReturnType<typeof open>>,
+  start: number,
+  end: number,
+): AsyncGenerator<Buffer> {
+  let pos = start
+  while (pos < end) {
+    const toRead = Math.min(64 * 1024, end - pos)
+    const buf = Buffer.allocUnsafe(toRead)
+    const { bytesRead } = await handle.read(buf, 0, toRead, pos)
+    if (bytesRead <= 0) throw new Error('The compressed Codex transcript could not be decompressed.')
+    pos += bytesRead
+    yield bytesRead === toRead ? buf : buf.subarray(0, bytesRead)
+  }
+}
+
+export async function readFirstRolloutLine(path: string): Promise<string | undefined> {
+  const handle = await open(path, 'r')
+  try {
+    if (!isCompressedRollout(path)) {
+      const decoder = new TextDecoder()
+      let text = '', offset = 0
+      const buffer = Buffer.allocUnsafe(65536)
+      for (;;) {
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset)
+        if (!bytesRead) break
+        offset += bytesRead
+        text += decoder.decode(buffer.subarray(0, bytesRead), { stream: true })
+        const nl = text.indexOf('\n')
+        if (nl >= 0) return text.slice(0, nl).replace(/\r$/, '')
+      }
+      text += decoder.decode()
+      const trimmed = text.replace(/\r$/, '')
+      return trimmed || undefined
+    }
+    const { size } = await handle.stat()
+    if (size === 0) return undefined
+    const decoder = new TextDecoder()
+    let text = '', pos = 0, sawDataFrame = false
+    while (pos < size) {
+      const frame = await readZstdFrameSpan(handle, pos, size)
+      if (!frame) throw new Error('The compressed Codex transcript could not be decompressed.')
+      pos = frame.end
+      if (frame.kind === 'skip') continue
+      sawDataFrame = true
+      const source = Readable.from(readHandleSpan(handle, frame.start, frame.end))
+      const zstd = createZstdDecompress()
+      source.on('error', error => zstd.destroy(error))
+      source.pipe(zstd)
+      try {
+        for await (const chunk of zstd) {
+          text += decoder.decode(chunk as Buffer, { stream: true })
+          const nl = text.indexOf('\n')
+          if (nl >= 0) return text.slice(0, nl).replace(/\r$/, '')
+        }
+      } finally {
+        source.on('error', () => {})
+        zstd.on('error', () => {})
+        source.unpipe(zstd)
+        source.destroy()
+        zstd.destroy()
+      }
+    }
+    if (!sawDataFrame) throw new Error('The compressed Codex transcript could not be decompressed.')
+    text += decoder.decode()
+    const trimmed = text.replace(/\r$/, '')
+    return trimmed || undefined
+  } finally { await handle.close() }
+}
 
 type RecordLine = { type: string; timestamp?: string; ordinal?: number; payload: any }
 const FOREIGN_THREAD_ERROR = 'The transcript belongs to another Codex thread.'
@@ -22,18 +180,10 @@ export async function savedTranscript(home: string, thread: string, file: string
   const directory = await realpath(join(home, 'sessions')), path = await realpath(file)
   const inside = relative(directory, path)
   if (isAbsolute(inside) || inside === '..' || inside.startsWith('..' + sep)) throw new Error("Codex transcript is outside this home's saved sessions.")
-  const handle = await open(path)
-  try {
-    let text = '', offset = 0
-    for (;;) {
-      const buffer = Buffer.alloc(65536), { bytesRead } = await handle.read(buffer, 0, buffer.length, offset)
-      text += buffer.subarray(0, bytesRead).toString('utf8'); offset += bytesRead
-      if (text.includes('\n') || !bytesRead) break
-    }
-    const meta = JSON.parse(text.split('\n')[0]!)
-    if (meta.type !== 'session_meta' || meta.payload?.id !== thread) throw new Error('The saved transcript belongs to another Codex thread.')
-    return path
-  } finally { await handle.close() }
+  const first = await readFirstRolloutLine(path)
+  const meta = JSON.parse(first ?? '')
+  if (meta.type !== 'session_meta' || meta.payload?.id !== thread) throw new Error('The saved transcript belongs to another Codex thread.')
+  return path
 }
 
 export async function findRollout(home: string, thread: string, reported?: string): Promise<string> {
@@ -45,15 +195,27 @@ export async function findRollout(home: string, thread: string, reported?: strin
   catch (error) {
     const directory = join(home, 'sessions'), files = await readdir(directory, { recursive: true })
     const escaped = thread.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const pattern = new RegExp('-' + escaped + '(?:_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})?\\.jsonl$')
-    const found = files.filter(file => pattern.test(file))
+    const pattern = new RegExp('-' + escaped + '(?:_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})?\\.jsonl(?:\\.zst)?$')
+    const stems = new Map<string, string>()
+    for (const file of files) {
+      if (!pattern.test(file)) continue
+      const stem = rolloutStem(file)
+      if (!stems.has(stem) || !isCompressedRollout(file)) stems.set(stem, file)
+    }
+    const found = [...stems.values()]
     if (found.length !== 1) throw error
     return savedTranscript(home, thread, join(directory, found[0]!))
   }
   if (result?.thread?.id !== thread || result.thread.ephemeral || typeof result.thread.path !== 'string') {
     throw new Error(`Cannot resolve a current saved Codex transcript for thread ${thread}. Ephemeral chats are not supported.`)
   }
-  return savedTranscript(home, thread, result.thread.path)
+  try { return await savedTranscript(home, thread, result.thread.path) }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && result.thread.path.endsWith('.jsonl')) {
+      return savedTranscript(home, thread, result.thread.path + '.zst')
+    }
+    throw error
+  }
 }
 
 export class RolloutReader {
@@ -71,7 +233,8 @@ export class RolloutReader {
   private countersAttributed = true
   private historyStart: number | undefined
   private historyError: string | undefined
-  private file: string
+  private zstReplay: { ino: number; mtimeMs: number; size: number } | undefined
+  readonly file: string
   private thread: string
   private modelProvider: string | undefined
   private modelDefault: ModelDefault | undefined
@@ -299,26 +462,95 @@ export class RolloutReader {
     }
   }
 
-  async poll(resolveModelDefault = true): Promise<void> {
-    if (this.historyError !== undefined) throw new Error(this.historyError)
+  private async pollCompressed(): Promise<void> {
     const file = await open(this.file, 'r')
     try {
-      const { size } = await file.stat()
-      if (size < this.offset) {
+      const info = await file.stat()
+      if (this.zstReplay) {
+        if (this.zstReplay.ino === info.ino && this.zstReplay.mtimeMs === info.mtimeMs && this.zstReplay.size === info.size) {
+          return
+        }
         this.failHistory('The Codex transcript was replaced; turn VArgus off and on again.')
       }
-      this.drainPending()
-      if (size > this.offset) {
-        const buffer = Buffer.alloc(64 * 1024)
-        for (;;) {
-          const { bytesRead } = await file.read(buffer, 0, buffer.length, this.offset)
-          if (!bytesRead) break
-          this.offset += bytesRead
-          this.pending += this.decoder.decode(buffer.subarray(0, bytesRead), { stream: true })
+      if (info.size === 0) return
+      const frames = await validateZstdFrames(file, info.size)
+      if (!frames) {
+        this.failHistory('The compressed Codex transcript could not be decompressed.')
+      }
+      let decompressedBytes = 0
+      try {
+        for (const frame of frames) {
+          const source = Readable.from(readHandleSpan(file, frame.start, frame.end))
+          const zstd = createZstdDecompress()
+          source.on('error', error => zstd.destroy(error))
+          source.pipe(zstd)
+          try {
+            for await (const chunk of zstd) {
+              const buf = chunk as Buffer
+              decompressedBytes += buf.length
+              this.pending += this.decoder.decode(buf, { stream: true })
+              this.drainPending()
+            }
+          } finally {
+            source.on('error', () => {})
+            zstd.on('error', () => {})
+            source.unpipe(zstd)
+            source.destroy()
+            zstd.destroy()
+          }
+        }
+        this.pending += this.decoder.decode()
+        this.drainPending()
+        if (this.pending.trim()) {
+          this.pending += '\n'
           this.drainPending()
         }
+        if (decompressedBytes === 0) {
+          this.failHistory('The compressed Codex transcript could not be decompressed.')
+        }
+        this.zstReplay = { ino: info.ino, mtimeMs: info.mtimeMs, size: info.size }
+      } catch (error) {
+        if (error instanceof Error && error.message === FOREIGN_THREAD_ERROR) {
+          this.pending = ''
+          this.zstReplay = { ino: info.ino, mtimeMs: info.mtimeMs, size: info.size }
+          throw error
+        }
+        if (this.historyError !== undefined) throw error
+        const code = String((error as NodeJS.ErrnoException | undefined)?.code ?? '')
+        if (code.startsWith('ZSTD_') || decompressedBytes > 0) {
+          this.failHistory('The compressed Codex transcript could not be decompressed.')
+        }
+        this.pending = ''
+        this.decoder = new TextDecoder()
+        throw error
       }
     } finally { await file.close() }
+  }
+
+  async poll(resolveModelDefault = true): Promise<void> {
+    if (this.historyError !== undefined) throw new Error(this.historyError)
+    if (isCompressedRollout(this.file)) {
+      await this.pollCompressed()
+    } else {
+      const file = await open(this.file, 'r')
+      try {
+        const { size } = await file.stat()
+        if (size < this.offset) {
+          this.failHistory('The Codex transcript was replaced; turn VArgus off and on again.')
+        }
+        this.drainPending()
+        if (size > this.offset) {
+          const buffer = Buffer.alloc(64 * 1024)
+          for (;;) {
+            const { bytesRead } = await file.read(buffer, 0, buffer.length, this.offset)
+            if (!bytesRead) break
+            this.offset += bytesRead
+            this.pending += this.decoder.decode(buffer.subarray(0, bytesRead), { stream: true })
+            this.drainPending()
+          }
+        }
+      } finally { await file.close() }
+    }
     if (resolveModelDefault) {
       const v = this.collector.snapshot()
       if (v) {

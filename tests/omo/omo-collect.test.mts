@@ -244,3 +244,66 @@ test('foldOmoEntry counts id-less JSONL entries separately and collectOmoAgents 
   ])
   assert.deepEqual([...collectOmoAgents(h.ctx)].sort(), ['st_00000001', 'st_00000002'])
 })
+
+test('agent counts exclude confirmed pre-launch refusals while keeping runtime errors and earlier accepted runs', () => {
+  // 1. Single spawn receipts: refused model_unavailable vs completed.
+  const single = host([
+    assistant('a1', [call('t1', 'task'), call('t2', 'task')]),
+    result('r1', 't1', 'task', {
+      mode: 'spawn',
+      task_id: 'st_00000001',
+      status: 'error',
+      failure_kind: 'model_unavailable',
+      failure_reason: 'model_not_in_child_profile',
+    }),
+    result('r2', 't2', 'task', { mode: 'spawn', task_id: 'st_00000002', status: 'completed' }),
+  ])
+  assert.deepEqual([...collectOmoAgents(single.ctx)], ['st_00000002'])
+  assert.equal(collectOmo(single.ctx, [], undefined, now).session.counts.agents, 1)
+
+  // 2. Batch details.items[]: pre-launch refusals (with or without failure_reason) are excluded individually,
+  //    while bare status:'error', post-launch failure kinds, and tasks with run_stats still count.
+  const batch = host([
+    assistant('b1', [call('tb', 'task')]),
+    result('rb', 'tb', 'task', {
+      mode: 'spawn',
+      status: 'error',
+      items: [
+        { task_id: 'st_00000001', status: 'error', failure_kind: 'model_unavailable', failure_reason: 'model_not_in_child_profile' },
+        { task_id: 'st_0000000a', status: 'error', failure_kind: 'model_unavailable' },
+        { task_id: 'st_0000000b', status: 'error', failure_kind: 'tools_unavailable' },
+        { task_id: 'st_0000000c', status: 'error', failure_kind: 'isolation_unavailable' },
+        { task_id: 'st_0000000d', status: 'error', failure_kind: 'depth-exceeded' },
+        { task_id: 'st_0000000e', status: 'error', failure_kind: 'session-create-failed' },
+        { task_id: 'st_0000000f', status: 'error', failure_kind: 'host_unavailable' },
+        { task_id: 'st_00000010', status: 'error', failure_kind: 'session_unavailable' },
+        { task_id: 'st_00000002', status: 'completed' },
+        { task_id: 'st_00000003', status: 'error', error_message: 'tool failed during run' },
+        { task_id: 'st_00000004', status: 'error', failure_kind: 'child-unresponsive' },
+        { task_id: 'st_00000005', status: 'error', failure_kind: 'model_chain_exhausted' },
+        { task_id: 'st_00000006', status: 'error', failure_kind: 'session_unavailable', run_stats: { tool_calls: 1 } },
+        { task_id: 'st_00000007', status: 'error', failure_kind: 'host_unavailable', effective_model: { model_id: 'gpt-6.1-sol' } },
+        { task_id: 'st_00000008', status: 'error', failure_kind: 'host_unavailable', effective_model: 'openai/gpt-6.1-sol' },
+        { task_id: 'st_00000009', status: 'error', failure_kind: 'session_unavailable', host_session: { id: 'hs-1' } },
+        { task_id: 'st_00000011', status: 'error', failure_kind: 'host_unavailable', pid: 4321 },
+      ],
+    }),
+  ])
+  assert.deepEqual(
+    [...collectOmoAgents(batch.ctx)].sort(),
+    ['st_00000002', 'st_00000003', 'st_00000004', 'st_00000005', 'st_00000006', 'st_00000007', 'st_00000008', 'st_00000009', 'st_00000011'],
+  )
+
+  // 3. Reused task_id: an earlier accepted run is never dropped by a later pre-launch refusal.
+  const reused = host([
+    result('u1', 'tu1', 'task', { mode: 'spawn', task_id: 'st_00000002', status: 'completed' }),
+    result('u2', 'tu2', 'task', {
+      mode: 'spawn',
+      task_id: 'st_00000002',
+      status: 'error',
+      failure_kind: 'model_unavailable',
+      failure_reason: 'model_not_in_child_profile',
+    }),
+  ])
+  assert.deepEqual([...collectOmoAgents(reused.ctx)], ['st_00000002'])
+})

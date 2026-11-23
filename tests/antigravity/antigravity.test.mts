@@ -5,6 +5,7 @@ import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } fr
 import { fixtureCheckout } from '../checkout.mts'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { renderAntigravityStatusLine } from '../../src/cli/antigravity.ts'
 import { collectAntigravityPayload, type AntigravityPayload } from '../../src/hosts/antigravity/collect.ts'
@@ -24,9 +25,11 @@ import {
 import {
   collectDeclaredSkillRoots,
   extractBrainDir,
+  normalizePathKey,
   readTranscriptState,
   resolveContainedTranscriptCandidate,
   resolveTranscriptPath,
+  transcriptSkillContextKey,
   type TranscriptState,
 } from '../../src/hosts/antigravity/transcript.ts'
 import { POLL_MS, readCachedVcs } from '../../src/hosts/antigravity/vcs.ts'
@@ -1012,6 +1015,7 @@ test('Antigravity rate clears on compaction, rewind and zero output, fails close
       awaitingModel: true,
       unboundedTrailingStep: false,
       subagentIds: [],
+      subagents: [],
       ...overrides,
     })
 
@@ -1646,23 +1650,37 @@ test('Antigravity includeSubagents parses anchored GENERIC spawns, guards agains
     const s2Cached = await readTranscriptState(transcript, cacheDir)
     assert.deepEqual(s2Cached.subagentIds, [child1, child2])
 
-    // Legacy v3 cache (matching size & hashes, lacking batchHasSubagentSpawn/subagentIds) triggers full replay and upgrades to v4.
+    // Legacy v3 and v4 caches (matching size & hashes, lacking v5 subagent workspaces/skillContextKey) trigger full replay and upgrade to v5.
     const cacheFile = cachePath(cacheDir, 'transcript', transcript)
-    const v4Cache = JSON.parse(await readFile(cacheFile, 'utf8')) as Record<string, unknown>
-    assert.equal(v4Cache.version, 4)
-    const v3Cache: Record<string, unknown> = { ...v4Cache, version: 3 }
+    const v5Cache = JSON.parse(await readFile(cacheFile, 'utf8')) as Record<string, unknown>
+    assert.equal(v5Cache.version, 5)
+    const v3Cache: Record<string, unknown> = { ...v5Cache, version: 3 }
     delete v3Cache.batchHasSubagentSpawn
-    delete v3Cache.subagentIds
+    delete v3Cache.subagents
+    delete v3Cache.skillContextKey
     await writeFile(cacheFile, JSON.stringify(v3Cache))
-    const sUpgraded = await readTranscriptState(transcript, cacheDir)
-    assert.deepEqual(sUpgraded.subagentIds, [child1, child2])
-    assert.equal(JSON.parse(await readFile(cacheFile, 'utf8')).version, 4)
+    const sUpgradedV3 = await readTranscriptState(transcript, cacheDir)
+    assert.deepEqual(sUpgradedV3.subagentIds, [child1, child2])
+    assert.equal(JSON.parse(await readFile(cacheFile, 'utf8')).version, 5)
 
-    // Poisoned v4 cache with an unsafe subagent ID forces full replay instead of trusting cached IDs.
-    const poisonedV4 = { ...v4Cache, subagentIds: ['../escape'] }
-    await writeFile(cacheFile, JSON.stringify(poisonedV4))
-    const sRecovered = await readTranscriptState(transcript, cacheDir)
-    assert.deepEqual(sRecovered.subagentIds, [child1, child2])
+    const v4Cache: Record<string, unknown> = { ...v5Cache, version: 4, subagentIds: [child1] }
+    delete v4Cache.subagents
+    delete v4Cache.skillContextKey
+    await writeFile(cacheFile, JSON.stringify(v4Cache))
+    const sUpgradedV4 = await readTranscriptState(transcript, cacheDir)
+    assert.deepEqual(sUpgradedV4.subagentIds, [child1, child2])
+    assert.equal(JSON.parse(await readFile(cacheFile, 'utf8')).version, 5)
+
+    // Poisoned v5 caches with an unsafe subagent ID or non-absolute workspaceDir force full replay instead of trusting cached entries.
+    for (const poisonedSubagents of [
+      [{ id: '../escape' }],
+      [{ id: child1, workspaceDirs: ['relative/escape'] }],
+      [{ id: child1, workspaceDirs: [] }],
+    ]) {
+      await writeFile(cacheFile, JSON.stringify({ ...v5Cache, subagents: poisonedSubagents }))
+      const sRecovered = await readTranscriptState(transcript, cacheDir)
+      assert.deepEqual(sRecovered.subagentIds, [child1, child2])
+    }
 
     // Mid-transcript `/rewind` (same line 1, larger total bytes, changed bytes before cached.size) drops rewound child IDs.
     const rewound = [
@@ -1973,6 +1991,333 @@ test('Antigravity includeSubagents folds recursive trees while keeping root metr
     assert.equal(resolveCalls, 1)
     assert.deepEqual(coldCounts, { tokens: 14000, tools: 10, agents: 6, skills: 2 })
     assert.ok(childBTr.endsWith('transcript.jsonl'))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Antigravity includeSubagents resolves isolated worktree and multi-root child custom skills without cache poisoning', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vargus-agy-worktree-skills-'))
+  try {
+    const home = join(root, 'home')
+    const appDataDir = join(home, '.gemini', 'antigravity-cli')
+    const brainDir = join(appDataDir, 'brain')
+    const parentWs = join(root, 'parent-checkout')
+    const childWs = join(root, 'child-worktree')
+    const extraWs = join(root, 'extra-workspace')
+
+    for (const ws of [parentWs, childWs]) {
+      await mkdir(join(ws, '.agents'), { recursive: true })
+      await writeFile(join(ws, '.agents', 'skills.json'), JSON.stringify({ entries: [{ path: 'custom-skills' }] }))
+      await mkdir(join(ws, 'custom-skills', 'audit'), { recursive: true })
+      await writeFile(join(ws, 'custom-skills', 'audit', 'SKILL.md'), '---\nname: audit\n---\n')
+    }
+    await mkdir(join(extraWs, '.agents'), { recursive: true })
+    await writeFile(join(extraWs, '.agents', 'skills.json'), JSON.stringify({ entries: [{ path: 'extra-skills' }] }))
+    await mkdir(join(extraWs, 'extra-skills', 'review'), { recursive: true })
+    await writeFile(join(extraWs, 'extra-skills', 'review', 'SKILL.md'), '---\nname: review\n---\n')
+
+    const writeConv = async (id: string, steps: Record<string, unknown>[]) => {
+      const tr = join(brainDir, id, '.system_generated', 'logs', 'transcript.jsonl')
+      await mkdir(join(tr, '..'), { recursive: true })
+      await writeFile(tr, steps.map(s => JSON.stringify(s)).join('\n') + '\n')
+      return tr
+    }
+    const baseOpts = {
+      repo: false, branch: false, status: false, rateLimits: false,
+      session: false, folder: false, model: false, context: false,
+    }
+
+    // 1. Compare shared checkout vs isolated worktree: both yield 130 tokens, 2 tools, 1 agent, 1 skill on parent
+    //    and 1 skill on child across both warmed and fresh caches.
+    for (const [label, targetWs] of [['shared', parentWs], ['worktree', childWs]] as const) {
+      const cacheDir = join(root, `cache-${label}`)
+      const freshCacheDir = join(root, `fresh-${label}`)
+      const parentId = `parent-${label}`
+      const childId = `child-${label}`
+      const childSkill = join(targetWs, 'custom-skills', 'audit', 'SKILL.md')
+
+      const parentTr = await writeConv(parentId, [
+        { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T03:00:00Z' },
+        {
+          step_index: 1,
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-11-23T03:00:02Z',
+          input_tokens: 80,
+          output_tokens: 20,
+          tool_calls: [{ name: 'invoke_subagent', args: { TypeName: '"research"' } }],
+        },
+        {
+          step_index: 2,
+          type: 'GENERIC',
+          created_at: '2026-11-23T03:00:03Z',
+          content: `Created the following subagent:\n${JSON.stringify({
+            conversationId: childId,
+            workspaceUris: [pathToFileURL(targetWs).href],
+          })}`,
+        },
+      ])
+      const childTr = await writeConv(childId, [
+        { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T03:00:04Z' },
+        {
+          step_index: 1,
+          type: 'PLANNER_RESPONSE',
+          created_at: '2026-11-23T03:00:05Z',
+          input_tokens: 25,
+          output_tokens: 5,
+          tool_calls: [{ name: 'read_file', args: { Path: JSON.stringify(childSkill) } }],
+        },
+      ])
+
+      const parentPayload: AntigravityPayload = {
+        conversation_id: parentId,
+        transcript_path: parentTr,
+        cwd: parentWs,
+        workspace: { current_dir: parentWs, project_dir: parentWs },
+      }
+      const childPayload: AntigravityPayload = {
+        conversation_id: childId,
+        transcript_path: childTr,
+        cwd: targetWs,
+        workspace: { current_dir: targetWs, project_dir: targetWs },
+      }
+
+      // Folding off keeps parent at its own 100 tokens and 1 spawn without reading the child.
+      const offLine = await renderAntigravityStatusLine(parentPayload, {
+        home, appDataDir, cacheDir, noColor: true, givenOptions: { ...baseOpts, includeSubagents: false },
+      })
+      assert.equal(offLine, '  token:100 | 🔧1 🤖1', `${label} folding off`)
+      await assert.rejects(() => readFile(cachePath(cacheDir, 'transcript', childTr), 'utf8'))
+
+      // Folding on resolves the child skill in targetWs.
+      const foldedParent = await renderAntigravityStatusLine(parentPayload, {
+        home, appDataDir, cacheDir, noColor: true, givenOptions: { ...baseOpts, includeSubagents: true },
+      })
+      assert.equal(foldedParent, '  token:130 | 🔧2 🤖1 ⚡1', `${label} folded parent`)
+
+      // Direct child render with the warmed cache hits cache and shows 1 skill.
+      const warmChild = await renderAntigravityStatusLine(childPayload, {
+        home, appDataDir, cacheDir, noColor: true, givenOptions: { ...baseOpts, includeSubagents: true },
+      })
+      assert.equal(warmChild, '  token:30 | 🔧1 ⚡1', `${label} warm child`)
+
+      // Direct child render with a fresh cache agrees.
+      const freshChild = await renderAntigravityStatusLine(childPayload, {
+        home, appDataDir, cacheDir: freshCacheDir, noColor: true, givenOptions: { ...baseOpts, includeSubagents: true },
+      })
+      assert.equal(freshChild, '  token:30 | 🔧1 ⚡1', `${label} fresh child`)
+    }
+
+    // 2. Stale v4 caches (parent lacking workspaceUris, child holding poisoned skills:0) upgrade to v5 and recover skills:1.
+    const upgradeCacheDir = join(root, 'cache-upgrade')
+    const upParentId = 'parent-worktree'
+    const upChildId = 'child-worktree'
+    const upParentTr = join(brainDir, upParentId, '.system_generated', 'logs', 'transcript.jsonl')
+    const upChildTr = join(brainDir, upChildId, '.system_generated', 'logs', 'transcript.jsonl')
+    // Seed valid v5 caches first, then downgrade both on disk to poisoned v4 entries.
+    const upParentState = await readTranscriptState(upParentTr, upgradeCacheDir, { cwd: parentWs, projectDir: parentWs, home, appDataDir })
+    assert.deepEqual(upParentState.subagents, [{ id: upChildId, workspaceDirs: [childWs] }])
+    await readTranscriptState(upChildTr, upgradeCacheDir, { cwd: childWs, projectDir: childWs, home, appDataDir })
+    const pCacheFile = cachePath(upgradeCacheDir, 'transcript', upParentTr)
+    const cCacheFile = cachePath(upgradeCacheDir, 'transcript', upChildTr)
+    const pRaw = JSON.parse(await readFile(pCacheFile, 'utf8')) as Record<string, unknown>
+    const cRaw = JSON.parse(await readFile(cCacheFile, 'utf8')) as Record<string, unknown>
+    await writeFile(pCacheFile, JSON.stringify({ ...pRaw, version: 4, subagentIds: [upChildId] }))
+    await writeFile(cCacheFile, JSON.stringify({ ...cRaw, version: 4, subagentIds: [], counts: { tokens: 30, tools: 1, agents: 0, skills: 0 } }))
+    const upgradedParent = await renderAntigravityStatusLine({
+      conversation_id: upParentId, transcript_path: upParentTr, cwd: parentWs, workspace: { current_dir: parentWs, project_dir: parentWs },
+    }, { home, appDataDir, cacheDir: upgradeCacheDir, noColor: true, givenOptions: { ...baseOpts, includeSubagents: true } })
+    assert.equal(upgradedParent, '  token:130 | 🔧2 🤖1 ⚡1')
+    assert.equal(JSON.parse(await readFile(cCacheFile, 'utf8')).version, 5)
+
+    // 3. Cross-workspace cache isolation: a child first read under parentWs (skills:0) replays under childWs (skills:1)
+    //    while preserving transcript epoch when underlying bytes have not changed.
+    const isoCacheDir = join(root, 'cache-iso')
+    const wrongCtxState = await readTranscriptState(upChildTr, isoCacheDir, { cwd: parentWs, projectDir: parentWs, home, appDataDir })
+    assert.equal(wrongCtxState.counts.skills, 0)
+    const rightCtxState = await readTranscriptState(upChildTr, isoCacheDir, { cwd: childWs, projectDir: childWs, home, appDataDir })
+    assert.equal(rightCtxState.counts.skills, 1)
+    assert.equal(rightCtxState.epoch, wrongCtxState.epoch)
+
+    // 4. Multi-root workspaceUris + grandchild inheriting worktree workspace + same-workspace fast path.
+    const multiCacheDir = join(root, 'cache-multi')
+    const multiParentId = 'multi-parent'
+    const multiChildId = 'multi-child'
+    const multiGrandId = 'multi-grand'
+    const multiParentTr = await writeConv(multiParentId, [
+      { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T03:00:00Z' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T03:00:01Z',
+        input_tokens: 50,
+        output_tokens: 10,
+        tool_calls: [{ name: 'invoke_subagent', args: { TypeName: '"research"' } }],
+      },
+      {
+        step_index: 2,
+        type: 'GENERIC',
+        created_at: '2026-11-23T03:00:02Z',
+        content: `Created the following subagent:\n${JSON.stringify({
+          conversationId: multiChildId,
+          workspaceUris: [
+            'https://ignored.example/not-file',
+            pathToFileURL(childWs).href,
+            pathToFileURL(extraWs).href,
+          ],
+        })}`,
+      },
+    ])
+    await writeConv(multiChildId, [
+      { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T03:00:03Z' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T03:00:04Z',
+        input_tokens: 20,
+        output_tokens: 5,
+        tool_calls: [
+          { name: 'read_file', args: { Path: JSON.stringify(join(extraWs, 'extra-skills', 'review', 'SKILL.md')) } },
+          { name: 'invoke_subagent', args: { TypeName: '"research"' } },
+        ],
+      },
+      // Grandchild omits workspaceUris and should inherit multiChild's workspace context (childWs + extraWs).
+      {
+        step_index: 2,
+        type: 'GENERIC',
+        created_at: '2026-11-23T03:00:05Z',
+        content: `Created the following subagent:\n${JSON.stringify({ conversationId: multiGrandId })}`,
+      },
+    ])
+    await writeConv(multiGrandId, [
+      { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T03:00:06Z' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        created_at: '2026-11-23T03:00:07Z',
+        input_tokens: 15,
+        output_tokens: 5,
+        tool_calls: [{ name: 'read_file', args: { Path: JSON.stringify(join(childWs, 'custom-skills', 'audit', 'SKILL.md')) } }],
+      },
+    ])
+    const multiLine = await renderAntigravityStatusLine({
+      conversation_id: multiParentId,
+      transcript_path: multiParentTr,
+      cwd: parentWs,
+      workspace: { current_dir: parentWs, project_dir: parentWs },
+    }, { home, appDataDir, cacheDir: multiCacheDir, noColor: true, givenOptions: { ...baseOpts, includeSubagents: true } })
+    // parent (60,1,1,0) + child (25,2,1,1) + grand (20,1,0,1) = 105 tokens, 4 tools, 2 agents, 2 skills.
+    assert.equal(multiLine, '  token:105 | 🔧4 🤖2 ⚡2')
+
+    // Same-workspace child with matching workspaceUris reuses the parent's lazy resolveSkillRoots promise.
+    const sharedParentTr = join(brainDir, 'parent-shared', '.system_generated', 'logs', 'transcript.jsonl')
+    const sharedFastCache = join(root, 'cache-fast-shared')
+    let parentRootCalls = 0
+    let sharedRootsPromise: Promise<readonly string[]> | undefined
+    const parentCtx = {
+      cwd: parentWs,
+      projectDir: parentWs,
+      home,
+      appDataDir,
+      resolveSkillRoots: () => (sharedRootsPromise ??= (parentRootCalls += 1, collectDeclaredSkillRoots({ cwd: parentWs, projectDir: parentWs, home, appDataDir }))),
+    }
+    const sharedRootState = await readTranscriptState(sharedParentTr, sharedFastCache, parentCtx)
+    const fastCounts = await collectAntigravitySubagentCounts({
+      rootTranscriptPath: sharedParentTr,
+      rootId: 'parent-shared',
+      rootTranscript: sharedRootState,
+      cacheDir: sharedFastCache,
+      context: parentCtx,
+    })
+    assert.equal(parentRootCalls, 1)
+    assert.deepEqual(fastCounts, { tokens: 130, tools: 2, agents: 1, skills: 1 })
+    // Repeat call with warmed cache performs 0 manifest lookups even with a fresh unmemoized spy.
+    let warmSpyCalls = 0
+    await collectAntigravitySubagentCounts({
+      rootTranscriptPath: sharedParentTr,
+      rootId: 'parent-shared',
+      rootTranscript: sharedRootState,
+      cacheDir: sharedFastCache,
+      context: {
+        cwd: parentWs,
+        projectDir: parentWs,
+        home,
+        appDataDir,
+        resolveSkillRoots: async () => {
+          warmSpyCalls += 1
+          return collectDeclaredSkillRoots({ cwd: parentWs, projectDir: parentWs, home, appDataDir })
+        },
+      },
+    })
+    assert.equal(warmSpyCalls, 0)
+
+    // 5. Missing dot-dir probes across 5+ workspaces or deep subdirectories must not exhaust the loaded-manifest cap,
+    //    remote UNC file:// hosts are rejected, normalizePathKey preserves '/', and sameWorkspace does not leak workspaceDirs.
+    const emptyWorkspaces = await Promise.all(
+      Array.from({ length: 4 }, async (_, i) => {
+        const ws = join(root, `empty-ws-${i}`)
+        await mkdir(ws, { recursive: true })
+        return ws
+      }),
+    )
+    const globalConfigDir = join(home, '.gemini', 'config')
+    await mkdir(globalConfigDir, { recursive: true })
+    await writeFile(join(globalConfigDir, 'skills.json'), JSON.stringify({ entries: [{ path: join(root, 'global-custom-skills') }] }))
+    const manyRoots = await collectDeclaredSkillRoots({
+      cwd: emptyWorkspaces[0],
+      projectDir: emptyWorkspaces[0],
+      workspaceDirs: [...emptyWorkspaces, extraWs],
+      home,
+    })
+    assert.ok(manyRoots.includes(normalizePathKey(join(extraWs, 'extra-skills'))), '5th workspace manifest must be loaded')
+    assert.ok(manyRoots.includes(normalizePathKey(join(root, 'global-custom-skills'))), 'global skills.json must not be starved')
+
+    const deepSubdir = join(parentWs, 'a', 'b', 'c', 'd', 'e')
+    await mkdir(deepSubdir, { recursive: true })
+    const deepRoots = await collectDeclaredSkillRoots({ cwd: deepSubdir, projectDir: parentWs, home })
+    assert.ok(deepRoots.includes(normalizePathKey(join(parentWs, 'custom-skills'))), 'deep walk must reach project root manifest')
+    assert.ok(deepRoots.includes(normalizePathKey(join(root, 'global-custom-skills'))), 'deep walk must reach global manifest')
+
+    assert.equal(normalizePathKey('/'), '/')
+    assert.notEqual(transcriptSkillContextKey({ cwd: '/' }), transcriptSkillContextKey({}))
+
+    // Remote UNC file:// URI is rejected without dropping conversationId.
+    const uncParentId = 'unc-parent'
+    const uncParentTr = await writeConv(uncParentId, [
+      { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T03:00:00Z' },
+      { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-23T03:00:01Z', input_tokens: 10, output_tokens: 5,
+        tool_calls: [{ name: 'invoke_subagent', args: { TypeName: '"research"' } }] },
+      { step_index: 2, type: 'GENERIC', created_at: '2026-11-23T03:00:02Z',
+        content: `Created the following subagent:\n${JSON.stringify({ conversationId: 'unc-child', workspaceUris: ['file://evil.example/share'] })}` },
+    ])
+    const uncState = await readTranscriptState(uncParentTr, join(root, 'cache-unc'))
+    assert.deepEqual(uncState.subagents, [{ id: 'unc-child' }])
+
+    // Direct caller with single-element workspaceDirs differing from cwd must not leak extraWs into a child scoped to parentWs.
+    const leakChildId = 'leak-child'
+    const leakParentId = 'leak-parent'
+    const leakParentTr = await writeConv(leakParentId, [
+      { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T03:00:00Z' },
+      { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-23T03:00:01Z', input_tokens: 10, output_tokens: 5,
+        tool_calls: [{ name: 'invoke_subagent', args: { TypeName: '"research"' } }] },
+      { step_index: 2, type: 'GENERIC', created_at: '2026-11-23T03:00:02Z',
+        content: `Created the following subagent:\n${JSON.stringify({ conversationId: leakChildId, workspaceUris: [pathToFileURL(parentWs).href] })}` },
+    ])
+    await writeConv(leakChildId, [
+      { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-23T03:00:03Z' },
+      { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-23T03:00:04Z', input_tokens: 10, output_tokens: 5,
+        tool_calls: [{ name: 'read_file', args: { Path: JSON.stringify(join(extraWs, 'extra-skills', 'review', 'SKILL.md')) } }] },
+    ])
+    const leakCacheDir = join(root, 'cache-leak')
+    const leakRoot = await readTranscriptState(leakParentTr, leakCacheDir, { cwd: parentWs, projectDir: parentWs, workspaceDirs: [extraWs], home })
+    const leakCounts = await collectAntigravitySubagentCounts({
+      rootTranscriptPath: leakParentTr,
+      rootId: leakParentId,
+      rootTranscript: leakRoot,
+      cacheDir: leakCacheDir,
+      context: { cwd: parentWs, projectDir: parentWs, workspaceDirs: [extraWs], home },
+    })
+    assert.equal(leakCounts.skills, 0)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

@@ -305,13 +305,28 @@ records even when file size has not changed. The row only replays data the
 engine saved.
 
 With `includeSubagents: false` (default), or when both `tokens` and `callCounts`
-are `false`, the worker polls only the displayed thread. With
+are `false`, the worker polls only the displayed thread and skips `.jsonl.zst`
+discovery so background compressed children are not decompressed. With
 `includeSubagents: true` (and `tokens` or `callCounts` enabled), the worker also
-polls saved descendant threads of the viewed thread (`Views.descendants`)
-without creating per-descendant VCS pollers or resolving descendant model
-defaults, folding each attributable descendant's tokens, tools, agents and
-skills into the rendered row and paused draft snapshot without mutating the
-viewed collector. Ephemeral, ambiguous, unreadable, corrupt, replaced and
+discovers and polls saved descendant threads of the viewed thread
+(`Views.descendants`), including zstd-compressed `.jsonl.zst` rollouts produced
+by Codex compression, without creating per-descendant VCS pollers or resolving
+descendant model defaults. `Views.refresh` treats `<stem>.jsonl` and
+`<stem>.jsonl.zst` as one logical history (preferring `.jsonl` while both
+coexist and switching to `.jsonl.zst` once the plain file disappears, without
+marking it ambiguous) while still rejecting genuinely distinct stems for the
+same thread ID. `RolloutReader` validates RFC 8878 frame, block and checksum spans on the
+open descriptor and streams each validated data frame through
+`zlib.createZstdDecompress` into the existing JSONL and paginated ordinal parser
+(covering multi-frame and skippable-frame files and catching premature EOF and
+trailing non-zstd bytes that Node 24's single-frame `node:zlib` zstd stream
+otherwise stops on or ignores), caches completed replay by `(ino, mtimeMs, size)` so
+unchanged cold children are not re-decompressed on later polls, and latches
+replacement or decompression/JSONL errors. The worker's `RolloutReaderCache` replaces a cached
+reader (and its view line closure) when `view.file` changes across a
+storage-format transition. Each attributable descendant's tokens, tools, agents
+and skills fold into the rendered row and paused draft snapshot without mutating
+the viewed collector. Ephemeral, ambiguous, unreadable, corrupt, replaced and
 unpaginated mixed-history descendants are skipped so inherited parent activity
 is never double-counted. Context, cache hit %, output speed (`t/s`), model,
 effort, Fast mode, session age, rate limits and VCS remain on the viewed thread.
@@ -468,7 +483,15 @@ TTFT on `openai-responses`, that both `anthropic-messages` and
 live-only and starts omitted after `/reload` or `/resume` until the next
 streamed reply. Observed assistant edits keep the prior rate; model switches,
 compaction and non-edit tree navigation clear it. Tool counts use outer calls, and
-agent counts use distinct task IDs from accepted spawns. Skills lack a canonical load receipt.
+agent counts use distinct task IDs from accepted spawns, excluding confirmed
+pre-launch refusals (`status: "error"` with a pre-launch `failure_kind` such as
+`model_unavailable`, `tools_unavailable`, `depth-exceeded`,
+`session-create-failed`, `host_unavailable`, `session_unavailable` or
+`isolation_unavailable` and no `child_session_id`, `run_stats`,
+`effective_model`, `host_session` or `pid`) while
+preserving tasks that ran and later failed (bare `status: "error"`,
+`child-unresponsive`, `model_chain_exhausted`, or an earlier accepted run under
+a reused task ID). Skills lack a canonical load receipt.
 For a native assistant edit that copies usage,
 registration writes a receipt naming the new entry. Older unobserved copies
 remain in the total, and equal usage amounts alone do not identify copies.
@@ -492,7 +515,9 @@ writing `.in-project`, or falls back to
 Task records are cached by `(ino, mtimeMs, size)`, skipping `*.json.expunging`
 tombstones and invalid `task_id` values; fixed-point session-tree closure admits
 direct children, nested descendants, DAG nodes, team members and workpool tasks
-matching `parent_session_id` or `root_session_id`. Child JSONLs are read
+matching `parent_session_id` or `root_session_id`, excluding confirmed
+pre-launch refused task records from `taskIds` unless recorded child work
+exists (matching the same narrow predicate used for spawn receipts). Child JSONLs are read
 incrementally with raw-`Buffer` line carry so multi-byte UTF-8 and partial lines
 are never split, resetting from offset 0 on inode change or shrink and pruning
 removed/expunged caches. Polling uses a 1-second floor when any matched task is
@@ -552,39 +577,51 @@ the displayed five-hour and weekly windows.
 [Transcript lookup](src/hosts/antigravity/transcript.ts) scopes supplied paths
 to a normalized `brain/<id>` segment and has a CLI-directory fallback for
 paths reported under the IDE directory. Replay tracks a byte offset (cache
-version 4). It restarts when the file shrinks or the first-line or trailing
-digest changes, dropping any rewound subagent links alongside counts.
+version 5) together with a normalized workspace/skill-context fingerprint
+(`skillContextKey`), upgrading older v3/v4 caches on read and replaying when
+evaluated under a different workspace so a child transcript cached under one
+workspace cannot poison another while preserving `epoch` when underlying bytes
+have not changed. It restarts from byte 0 with a new `epoch` when the file
+shrinks or the first-line or trailing digest changes, dropping any rewound
+subagent links alongside counts.
 Session age, uncached tokens and call counts come from the active log.
 Context's input tokens measure the live window. Skill counts require known
 skill roots and deduplicate within a turn.
 
 [transcript.ts](src/hosts/antigravity/transcript.ts) tracks `invoke_subagent`
-spawn batches and records validated `conversationId` values in cache v4 on root
-reads so toggling `includeSubagents` takes effect immediately on a cache hit: it
-inspects subsequent `GENERIC` tool results only after stripping leading
-`Created At:` / `Completed At:` wrapper lines, requiring an anchored
+spawn batches and records validated `{ id, workspaceDirs? }` entries in cache
+v5 on root reads so toggling `includeSubagents` takes effect immediately on a
+cache hit: it inspects subsequent `GENERIC` tool results only after stripping
+leading `Created At:` / `Completed At:` wrapper lines, requiring an anchored
 `Created the following subagent:\n{` header (verified against `agy` 1.5.14 on
-2026-11-23), and scanning the leading balanced JSON object so trailing prose and
-parallel standard tool outputs (such as `read_file` and `run_command`, which
-emit their own headers) do not produce false positives.
+2026-11-23, with isolated-worktree `workspaceUris` receipts checked on `agy`
+1.5.15 on 2026-11-23), and scanning
+the leading balanced JSON object so trailing prose and parallel standard tool
+outputs (such as `read_file` and `run_command`, which emit their own headers)
+do not produce false positives. Local `file://` `workspaceUris` entries are
+converted via `fileURLToPath` (capped at 16 unique local directories; non-file
+or malformed URIs are ignored without dropping `conversationId`).
 With `includeSubagents: false` (default), or when both `tokens` and `callCounts`
 are `false`, Antigravity performs no child transcript I/O. With
 `includeSubagents: true` (and `tokens` or `callCounts` enabled),
 [subagents.ts](src/hosts/antigravity/subagents.ts) extracts the normalized
 `brain` directory directly containing the parent's
 `<id>/.system_generated/logs/transcript.jsonl`, resolves declared skill roots
-lazily at most once across the root and child reads (skipping manifest reads on
-cache hits), and performs cycle-safe breadth-first traversal over sibling
+lazily at most once per unique workspace context (sharing the parent promise for
+same-workspace children and skipping manifest reads on cache hits), carries each
+child's verified `workspaceDirs` (or inherits its spawning parent's workspace
+when `workspaceUris` is absent) into child skill resolution and cache reuse, and
+performs cycle-safe breadth-first traversal over sibling
 `<brainDir>/<childId>/.system_generated/logs/transcript.jsonl` files verified
 through `resolveContainedTranscriptCandidate` (never following raw `file://`
-URIs from tool text), isolating per-child read/cache errors so a damaged child
-cache cannot trigger `| ⌛stale` on the parent row. Traversal is capped at depth
-8, 64 child transcripts, and a 400 ms budget to stay within `agy`'s refresh and
-command-timeout limits. Tokens, tools, agents and skills fold recursively across
-`invoke_subagent` trees; context, cache hit %, output speed (`t/s`), session
-age, model, effort, quotas and VCS/mutating-tool triggers stay strictly on the
-root conversation. `swarm` and `run_workflow` child transcripts are excluded
-(their transcript link formats are not yet verified).
+log URIs from tool text), isolating per-child read/cache errors so a damaged
+child cache cannot trigger `| ⌛stale` on the parent row. Traversal is capped at
+depth 8, 64 child transcripts, and a 400 ms budget to stay within `agy`'s
+refresh and command-timeout limits. Tokens, tools, agents and skills fold
+recursively across `invoke_subagent` trees; context, cache hit %, output speed
+(`t/s`), session age, model, effort, quotas and VCS/mutating-tool triggers stay
+strictly on the root conversation. `swarm` and `run_workflow` child transcripts
+are excluded (their transcript link formats are not yet verified).
 
 The status-line payload supplies the cache reading in `context_window.current_usage`.
 A saved Linux 1.5.8 payload reported 2,669 uncached input tokens, 8,113 cache
@@ -815,7 +852,8 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   import boundaries, installers and local fixtures. The Codex replay fixtures
   check which counters belong to each thread, attribution gating (`attributable`),
   replaced-file and corrupt/malformed JSONL error latching, unchanged-size
-  buffered draining, `Views.descendants` subtree closure and
+  buffered draining, `Views.descendants` subtree closure, `.jsonl.zst`
+  compressed rollout discovery/replay/stat-caching/transition handling and
   multi-level descendant folding. Display fixtures cover legacy
   counter settings, the shared `callCounts` switch, folded paths on a working
   directory change, folded descendant counts and counts held while typing.
@@ -845,7 +883,11 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   folding on Main (`token:28.8k(94.3%)`, `🔧1 🤖3 ⚡1`), `/root/mid`
   (`token:14.4k(0%)`, `🔧1 🤖1 ⚡1`), and `/root/forked` (`token:10.2k(0%)`),
   plus reload back to `includeSubagents: false` (`token:4.2k(94.3%)` / `🤖2` on
-  Main and `token:8.2k(0%)` / `🤖1` on `/root/mid`). Model choice,
+  Main and `token:8.2k(0%)` / `🤖1` on `/root/mid`), and a separate stdio
+  `rollout/compress` fixture (Linux, Codex 0.171.0) verified that a 15-day-old
+  child compressed to `.jsonl.zst` preserves the 9,000-token total across both
+  live reader transition and fresh discovery while keeping folding-off at 2,000
+  without decompressing compressed children. Model choice,
   billing and different provider timing need their own evidence.
 - `npm run test:claude` validates the plugin, type-checks against generated
   types, runs Claude engine fixtures and checks the documented reader and

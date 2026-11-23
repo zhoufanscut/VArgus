@@ -3,7 +3,7 @@ import { realpathSync } from 'node:fs'
 import { lstat, open, readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { createOmoHistory, foldOmoEntry, type OmoHistory } from './collect.ts'
+import { createOmoHistory, foldOmoEntry, isPreLaunchTaskRefusal, type OmoHistory } from './collect.ts'
 
 export type OmoEnv = Readonly<Record<string, string | undefined>>
 
@@ -390,6 +390,7 @@ type ParsedTask = {
   readonly rootSessionId: string
   readonly childSessionId: string | undefined
   readonly active: boolean
+  readonly refusedPreLaunch: boolean
 }
 
 type CachedTask = {
@@ -416,7 +417,8 @@ function parseTaskRecord(raw: unknown): ParsedTask | null {
   const childSessionId = typeof raw.child_session_id === 'string' && raw.child_session_id !== ''
     ? raw.child_session_id : undefined
   const active = typeof raw.status === 'string' && NON_TERMINAL_STATUSES.has(raw.status)
-  return { taskId: raw.task_id, parentSessionId, rootSessionId, childSessionId, active }
+  const refusedPreLaunch = isPreLaunchTaskRefusal(raw)
+  return { taskId: raw.task_id, parentSessionId, rootSessionId, childSessionId, active, refusedPreLaunch }
 }
 
 function consumeJsonlLine(file: JsonlFileState, lineBuf: Buffer): void {
@@ -560,7 +562,6 @@ export class OmoSubagents {
       let hasActive = false
 
       for (const task of matched.values()) {
-        taskIds.add(task.taskId)
         if (task.active) hasActive = true
         const sessionsDir = join(stateDir, 'children', task.taskId, 'sessions', task.taskId)
         let jsonlNames: string[]
@@ -570,16 +571,19 @@ export class OmoSubagents {
           jsonlNames = []
         }
         if (this.isStale(generation)) return
+        let taskHasWork = false
         for (const jsonlName of jsonlNames) {
           const jsonlPath = join(sessionsDir, jsonlName)
           seenJsonlPaths.add(jsonlPath)
           const history = await this.readJsonlIncremental(generation, jsonlPath)
           if (this.isStale(generation)) return
           if (!history) continue
+          if (history.counts.tokens > 0 || history.counts.tools > 0 || history.agents.size > 0) taskHasWork = true
           tokens += history.counts.tokens
           tools += history.counts.tools
           for (const agentId of history.agents) taskIds.add(agentId)
         }
+        if (!task.refusedPreLaunch || taskHasWork) taskIds.add(task.taskId)
       }
 
       for (const cachedPath of this.fileCache.keys()) {

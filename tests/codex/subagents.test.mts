@@ -1,12 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, appendFile, rm } from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import zlib from 'node:zlib'
 import { Views, type View } from '../../src/hosts/codex/views.ts'
 import { RolloutReader } from '../../src/hosts/codex/rollout.ts'
 import { codexLine } from '../../src/cli/codex/line.ts'
-import { foldDescendantCounts } from '../../src/cli/codex/worker.ts'
+import { foldDescendantCounts, RolloutReaderCache } from '../../src/cli/codex/worker.ts'
 import { resolveCodexOptions } from '../../src/hosts/codex/options.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 
@@ -223,4 +225,108 @@ test('Codex descendant folding sums attributable multi-level subtrees, skips uns
     assert.match(renderedGrand, /⚡1/)
     assert.doesNotMatch(renderedGrand, /🤖/)
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('Codex descendant folding survives .jsonl.zst compression on fresh discovery, live transition, paginated children and folding-off', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-codex-zst-subagents-'))
+  const sessions = join(dir, 'sessions')
+  await mkdir(sessions)
+  const origZstd = zlib.createZstdDecompress
+  let decompressCalls = 0
+  const spy = t.mock.method(zlib, 'createZstdDecompress', (...args: Parameters<typeof origZstd>) => {
+    decompressCalls++
+    return Reflect.apply(origZstd, zlib, args)
+  })
+  syncBuiltinESMExports()
+  try {
+    const parentFile = join(sessions, 'rollout-parent.jsonl')
+    const childPlain = join(sessions, 'rollout-child.jsonl')
+    const childZst = join(sessions, 'rollout-child.jsonl.zst')
+    const parentBytes = Buffer.from(jsonl([
+      sessionMeta('parent', '/repo'),
+      settings('parent', 'gpt-6.1-sol', 'high', '/repo'),
+      tokenCount(2000, 0, 0),
+    ]))
+    const childBytes = Buffer.from(jsonl([
+      sessionMeta('child', '/repo', 'parent', '/root/child'),
+      tokenCount(7000, 0, 0),
+    ]))
+    await writeFile(parentFile, parentBytes)
+    await writeFile(childPlain, childBytes)
+
+    // 1. Live worker starts with plain child -> 9,000 tokens.
+    const views = new Views(dir, 'parent', parentFile)
+    const replacedThreads: string[] = []
+    const readers = new RolloutReaderCache(dir, undefined, id => replacedThreads.push(id))
+    const getReader = (v: View) => readers.get(v)
+    await views.refresh(true)
+    const rootReader = getReader(views.known.get('parent')!)
+    await rootReader.poll(false)
+    let extra = await foldDescendantCounts(views.descendants('parent'), getReader)
+    assert.equal(rootReader.collector.snapshot()!.session.counts.tokens + (extra?.tokens ?? 0), 9000)
+
+    // 2. Transient overlap (both .jsonl and .jsonl.zst exist): counts logical child once -> still 9,000.
+    await writeFile(childZst, zlib.zstdCompressSync(childBytes))
+    await views.refresh(true)
+    extra = await foldDescendantCounts(views.descendants('parent'), getReader)
+    assert.equal(views.descendants('parent').length, 1)
+    assert.equal(rootReader.collector.snapshot()!.session.counts.tokens + (extra?.tokens ?? 0), 9000)
+    assert.deepEqual(replacedThreads, [])
+
+    // 3. Plain child removed -> live worker transitions reader to .jsonl.zst -> still 9,000, cached on next tick.
+    await rm(childPlain)
+    await views.refresh(true)
+    const callsBeforeLiveFold = decompressCalls
+    extra = await foldDescendantCounts(views.descendants('parent'), getReader)
+    assert.deepEqual(replacedThreads, ['child'])
+    assert.equal(views.descendants('parent').length, 1)
+    assert.equal(rootReader.collector.snapshot()!.session.counts.tokens + (extra?.tokens ?? 0), 9000)
+    assert.equal(decompressCalls, callsBeforeLiveFold + 1)
+
+    // Next tick on unchanged compressed child does zero decompression.
+    await views.refresh(true)
+    extra = await foldDescendantCounts(views.descendants('parent'), getReader)
+    assert.equal(rootReader.collector.snapshot()!.session.counts.tokens + (extra?.tokens ?? 0), 9000)
+    assert.equal(decompressCalls, callsBeforeLiveFold + 1)
+
+    // 4. Fresh discovery with compressed child + paginated compressed child + ambiguous/corrupt compressed children.
+    const paginatedZst = join(sessions, 'rollout-paginated.jsonl.zst')
+    await writeFile(paginatedZst, zlib.zstdCompressSync(Buffer.from(jsonl([
+      { ...sessionMeta('paginated', '/repo', 'parent', '/root/paginated', { history_mode: 'paginated', subagent_history_start_ordinal: 3 }), ordinal: 0 },
+      { ...sessionMeta('parent', '/repo'), ordinal: 1 },
+      { ...tokenCount(50000, 0, 0), ordinal: 2 },
+      { ...tokenCount(1000, 0, 0), ordinal: 3 },
+    ]))))
+    await writeFile(join(sessions, 'rollout-corrupt.jsonl.zst'), Buffer.from('not zstd\n'))
+    await writeFile(join(sessions, 'rollout-amb-a.jsonl.zst'), zlib.zstdCompressSync(Buffer.from(jsonl([
+      sessionMeta('amb', '/repo', 'parent', '/root/amb'), tokenCount(3333, 0, 0),
+    ]))))
+    await writeFile(join(sessions, 'rollout-amb-b.jsonl.zst'), zlib.zstdCompressSync(Buffer.from(jsonl([
+      sessionMeta('amb', '/repo', 'parent', '/root/amb'), tokenCount(4444, 0, 0),
+    ]))))
+
+    const freshViews = new Views(dir, 'parent', parentFile)
+    const freshReaders = new RolloutReaderCache(dir)
+    await freshViews.refresh(true)
+    const freshRoot = freshReaders.get(freshViews.known.get('parent')!)
+    await freshRoot.poll(false)
+    const freshExtra = await foldDescendantCounts(freshViews.descendants('parent'), v => freshReaders.get(v))
+    // parent (2000) + child (7000) + paginated (1000) = 10000; corrupt and ambiguous skipped.
+    assert.equal(freshRoot.collector.snapshot()!.session.counts.tokens + (freshExtra?.tokens ?? 0), 10000)
+
+    // 5. With folding off (refresh(false), no foldDescendantCounts): parent stays 2,000 with zero decompressions.
+    const callsBeforeOff = decompressCalls
+    const offViews = new Views(dir, 'parent', parentFile)
+    const offReaders = new RolloutReaderCache(dir)
+    await offViews.refresh(false)
+    const offRoot = offReaders.get(offViews.known.get('parent')!)
+    await offRoot.poll(false)
+    assert.equal(offRoot.collector.snapshot()!.session.counts.tokens, 2000)
+    assert.equal(offViews.descendants('parent').length, 0)
+    assert.equal(decompressCalls, callsBeforeOff, 'folding off must not decompress background children')
+  } finally {
+    spy.mock.restore()
+    syncBuiltinESMExports()
+    await rm(dir, { recursive: true, force: true })
+  }
 })

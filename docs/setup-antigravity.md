@@ -184,7 +184,8 @@ for session age, uncached input plus output tokens, and tool, subagent (`invoke_
 tokens and call counts cover the active conversation only with no child transcript I/O.
 Setting `includeSubagents: true` (in `vargus.jsonc` or your `--config` file) recursively
 folds `invoke_subagent` child and nested descendant transcripts' tokens, tools, agents
-and skills (bounded at depth 8, 64 child transcripts and 400 ms per refresh); `swarm`
+and skills (resolving isolated-worktree children's custom skills against their own
+recorded workspaces, bounded at depth 8, 64 child transcripts and 400 ms per refresh); `swarm`
 and `run_workflow` child transcripts are excluded. Context, cache-hit percentage, output
 decode speed (`t/s`), session age, model, effort, quotas and VCS always remain on the
 active conversation.

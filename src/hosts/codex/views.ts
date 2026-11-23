@@ -1,10 +1,9 @@
 import { codexComposer } from './footer.ts'
+import { isCompressedRollout, isRolloutFile, readFirstRolloutLine, rolloutStem } from './rollout.ts'
 // Codex 0.167.0's contextual footer exposes the selected agent path even when
 // configurable items are cleared. This is a versioned UI observation, not an API.
-import { createReadStream } from 'node:fs'
-import { readdir, realpath } from 'node:fs/promises'
-import { createInterface } from 'node:readline'
-import { join } from 'node:path'
+import { readdir, realpath, stat } from 'node:fs/promises'
+import { basename, join, resolve } from 'node:path'
 
 export type View = { thread: string; file: string; parent?: string; path?: string; cwd: string }
 export type ViewScreen = { lines: string[]; x: number; y: number; visible: boolean; command: string }
@@ -13,6 +12,7 @@ export const plain = (line: string) => line.replace(/\x1b\[[0-9;]*m/g, '')
 export class Views {
   readonly known = new Map<string, View>()
   private seen = new Set<string>()
+  private failedCompressed = new Map<string, { ino: number; size: number; mtimeMs: number }>()
   private ambiguous = new Set<string>()
   private home: string
   readonly root: string
@@ -20,33 +20,87 @@ export class Views {
   constructor(home: string, root: string, rootFile?: string) {
     this.home = home; this.root = root; this.rootFile = rootFile
   }
-  async refresh(): Promise<void> {
+  async refresh(includeCompressed = true): Promise<void> {
     const directory = join(this.home, 'sessions')
-    for (const name of await readdir(directory, { recursive: true })) {
-      if (!name.endsWith('.jsonl') || this.seen.has(name)) continue
-      const stream = createReadStream(join(directory, name))
-      const lines = createInterface({ input: stream, crlfDelay: Infinity })
+    const entries = await readdir(directory, { recursive: true })
+    const present = new Set(entries)
+    for (const name of this.seen) if (!present.has(name)) this.seen.delete(name)
+    for (const name of this.failedCompressed.keys()) if (!present.has(name)) this.failedCompressed.delete(name)
+    let rootRealStem: string | undefined
+    if (this.rootFile) {
+      const altRoot = isCompressedRollout(this.rootFile) ? rolloutStem(this.rootFile) : this.rootFile + '.zst'
+      try { rootRealStem = rolloutStem(await realpath(this.rootFile)) }
+      catch {
+        try { rootRealStem = rolloutStem(await realpath(altRoot)) }
+        catch { rootRealStem = rolloutStem(resolve(this.rootFile)) }
+      }
+    }
+    const realDir = await realpath(directory).catch(() => resolve(directory))
+    const rootBase = rootRealStem ? basename(rootRealStem) : undefined
+    for (const name of entries) {
+      if (!isRolloutFile(name) || this.seen.has(name)) continue
+      const compressed = isCompressedRollout(name)
+      const file = join(directory, name)
+      if (compressed) {
+        if (!includeCompressed) {
+          const isRoot = rootRealStem !== undefined && (
+            rolloutStem(join(realDir, name)) === rootRealStem
+            || (basename(rolloutStem(name)) === rootBase && rolloutStem(await realpath(file).catch(() => resolve(file))) === rootRealStem)
+          )
+          if (!isRoot) continue
+        }
+        // Prefer the plain file while both `<stem>.jsonl` and `<stem>.jsonl.zst` coexist;
+        // leave the compressed sibling unseen so it is picked up once the plain file disappears.
+        if (present.has(rolloutStem(name))) continue
+      }
+      let compressedStat: { ino: number; size: number; mtimeMs: number } | undefined
+      if (compressed) {
+        try {
+          const info = await stat(file)
+          compressedStat = { ino: info.ino, size: info.size, mtimeMs: info.mtimeMs }
+        } catch {
+          continue
+        }
+        const failed = this.failedCompressed.get(name)
+        if (failed && failed.ino === compressedStat.ino && failed.size === compressedStat.size && failed.mtimeMs === compressedStat.mtimeMs) continue
+      }
       try {
-        for await (const line of lines) {
-          const meta = JSON.parse(line)
-          if (meta.type === 'session_meta') {
-            const p = meta.payload, spawn = p.source?.subagent?.thread_spawn
-            const file = join(directory, name)
-            if (p.id === this.root && this.rootFile && await realpath(file) !== await realpath(this.rootFile)) { this.seen.add(name); break }
-            const prior = this.known.get(p.id)
-            if (this.ambiguous.has(p.id) || (prior && prior.file !== file && p.id !== this.root)) {
-              this.ambiguous.add(p.id); this.known.delete(p.id); this.seen.add(name); break
-            }
-            this.known.set(p.id, { thread: p.id, file: join(directory, name), cwd: p.cwd,
-              parent: spawn?.parent_thread_id, path: spawn?.agent_path })
-            this.seen.add(name)
+        const line = await readFirstRolloutLine(file)
+        if (!line) {
+          if (compressed && compressedStat) this.failedCompressed.set(name, compressedStat)
+          continue
+        }
+        const meta = JSON.parse(line)
+        if (meta && typeof meta === 'object' && meta.type === 'session_meta'
+          && meta.payload && typeof meta.payload === 'object' && typeof meta.payload.id === 'string') {
+          const p = meta.payload, spawn = p.source?.subagent?.thread_spawn
+          if (p.id === this.root && rootRealStem !== undefined && rolloutStem(await realpath(file)) !== rootRealStem) {
+            this.seen.add(name); continue
           }
-          break
+          const prior = this.known.get(p.id)
+          if (this.ambiguous.has(p.id) || (prior && rolloutStem(prior.file) !== rolloutStem(file) && p.id !== this.root)) {
+            this.ambiguous.add(p.id); this.known.delete(p.id); this.seen.add(name); continue
+          }
+          this.known.set(p.id, { thread: p.id, file, cwd: p.cwd,
+            parent: spawn?.parent_thread_id, path: spawn?.agent_path })
+          this.seen.add(name)
+          // Clear any previously seen compressed sibling so a later removal of the plain file re-adopts `.jsonl.zst`.
+          if (!compressed) this.seen.delete(name + '.zst')
+          this.failedCompressed.delete(name)
+        } else {
+          this.seen.add(name)
+          this.failedCompressed.delete(name)
         }
       } catch (error) {
+        if (compressed) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && compressedStat) {
+            this.failedCompressed.set(name, compressedStat)
+          }
+          continue
+        }
         // A new log can be observed before its first JSON record is complete.
         if (!(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      } finally { lines.close(); stream.destroy() }
+      }
     }
   }
   private reachable(threadId: string): Set<string> {

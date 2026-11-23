@@ -4,14 +4,19 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rename } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rename, utimes } from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir, release } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
+import { createInterface } from 'node:readline'
 import { setTimeout as delay } from 'node:timers/promises'
+import zlib, { zstdDecompressSync } from 'node:zlib'
 import { PaneInput } from '../../src/outputs/tmux/input.ts'
 import { codexComposer } from '../../src/hosts/codex/footer.ts'
-import { selectedView } from '../../src/hosts/codex/views.ts'
+import { RolloutReader } from '../../src/hosts/codex/rollout.ts'
+import { Views, selectedView } from '../../src/hosts/codex/views.ts'
+import { foldDescendantCounts, RolloutReaderCache } from '../../src/cli/codex/worker.ts'
 import { nativeFixtureEnv, removeNativeFixture, startTestDaemon } from './native-fixture.mts'
 
 const exec = promisify(execFile)
@@ -730,6 +735,138 @@ trust_level = "trusted"
     await tmux('kill-server').catch(() => {})
     await exec('codex', ['app-server', 'daemon', 'stop'], { env, timeout: 10000 }).catch(() => {})
     provider.closeAllConnections(); await new Promise<void>(done => provider.close(() => done()))
+    await removeNativeFixture(dir)
+  }
+})
+
+test('official Codex includeSubagents retains compressed child rollouts after rollout/compress', { timeout: 30000 }, async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-codex-compress-test-'))
+  const cfg = join(dir, 'codex')
+  const sessionsDay = join(cfg, 'sessions', '2026', '11', '09')
+  await mkdir(sessionsDay, { recursive: true })
+  const parentId = '019a0000-0000-7000-8000-000000000001'
+  const childId = '019a0000-0000-7000-8000-000000000002'
+  const ts = '2026-11-09T10:00:00.000Z'
+  const jsonl = (rows: Record<string, unknown>[]) => rows.map((r, i) => JSON.stringify({ ...r, timestamp: ts, ordinal: i }) + '\n').join('')
+  const meta = (id: string, parent?: string) => ({
+    type: 'session_meta',
+    payload: {
+      id, cwd: '/repo', timestamp: ts, originator: 'codex_cli_rs', cli_version: '0.171.0',
+      model_provider: 'openai',
+      source: parent ? { subagent: { thread_spawn: { parent_thread_id: parent, depth: 1, agent_path: '/root/child' } } } : 'cli',
+    },
+  })
+  const tok = (input: number) => ({
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: {
+        total_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0, total_tokens: input },
+        last_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0, total_tokens: input },
+        model_context_window: 200000,
+      },
+    },
+  })
+  const parentName = `rollout-2026-11-09T10-00-00-${parentId}.jsonl`
+  const childName = `rollout-2026-11-09T10-00-00-${childId}.jsonl`
+  const parentFile = join(sessionsDay, parentName)
+  const childFile = join(sessionsDay, childName)
+  const childBytes = Buffer.from(jsonl([meta(childId, parentId), tok(7000)]))
+  await writeFile(parentFile, jsonl([meta(parentId), tok(2000)]))
+  await writeFile(childFile, childBytes)
+  const old = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000)
+  await utimes(childFile, old, old)
+
+  // Warm a running Views + RolloutReaderCache before compression -> 9,000 tokens.
+  const liveViews = new Views(cfg, parentId, parentFile)
+  const liveReaders = new RolloutReaderCache(cfg)
+  await liveViews.refresh(true)
+  const liveRoot = liveReaders.get(liveViews.known.get(parentId)!)
+  await liveRoot.poll(false)
+  const beforeExtra = await foldDescendantCounts(liveViews.descendants(parentId), v => liveReaders.get(v))
+  assert.equal(liveRoot.collector.snapshot()!.session.counts.tokens + (beforeExtra?.tokens ?? 0), 9000)
+
+  const child = spawn('codex', ['app-server', '--stdio'], {
+    cwd: dir,
+    env: nativeFixtureEnv(dir, { CODEX_HOME: cfg }),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  const lines = createInterface({ input: child.stdout })
+  let errors = '', sequence = 0
+  child.stderr.on('data', data => { errors = (errors + String(data)).slice(-4000) })
+  const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
+  lines.on('line', line => {
+    let message: any; try { message = JSON.parse(line) } catch { return }
+    const request = pending.get(message.id)
+    if (request) {
+      pending.delete(message.id); clearTimeout(request.timer)
+      if (message.error) request.reject(new Error(JSON.stringify(message.error)))
+      else request.resolve(message.result)
+    }
+  })
+  const rpc = (method: string, params: unknown): Promise<any> => new Promise((resolve, reject) => {
+    const id = ++sequence
+    const timer = setTimeout(() => reject(new Error(method + ' timed out: ' + errors)), 12000)
+    pending.set(id, { resolve, reject, timer })
+    child.stdin.write(JSON.stringify({ id, method, params }) + '\n')
+  })
+  try {
+    await rpc('initialize', { clientInfo: { name: 'vargus_compress_test', version: '0.1.0' }, capabilities: { experimentalApi: true } })
+    await rpc('rollout/compress', {})
+    const until = Date.now() + 10000
+    let files: string[] = []
+    while (Date.now() < until) {
+      files = await readdir(sessionsDay)
+      if (files.includes(childName + '.zst') && !files.includes(childName)) break
+      await delay(100)
+    }
+    assert.ok(files.includes(childName + '.zst') && !files.includes(childName), `expected compressed child, got ${JSON.stringify(files)}`)
+    assert.ok(zstdDecompressSync(await readFile(childFile + '.zst')).equals(childBytes))
+
+    // Live transition after real compression keeps 9,000.
+    await liveViews.refresh(true)
+    const liveAfterExtra = await foldDescendantCounts(liveViews.descendants(parentId), v => liveReaders.get(v))
+    assert.equal(liveViews.descendants(parentId).length, 1)
+    assert.equal(liveRoot.collector.snapshot()!.session.counts.tokens + (liveAfterExtra?.tokens ?? 0), 9000)
+
+    // Fresh discovery after real compression also calculates 9,000.
+    const freshViews = new Views(cfg, parentId, parentFile)
+    const freshReaders = new RolloutReaderCache(cfg)
+    await freshViews.refresh(true)
+    const freshRoot = freshReaders.get(freshViews.known.get(parentId)!)
+    await freshRoot.poll(false)
+    const freshExtra = await foldDescendantCounts(freshViews.descendants(parentId), v => freshReaders.get(v))
+    assert.equal(freshViews.descendants(parentId).length, 1)
+    assert.equal(freshRoot.collector.snapshot()!.session.counts.tokens + (freshExtra?.tokens ?? 0), 9000)
+
+    // Folding off stays at 2,000 without discovering or decompressing the compressed child.
+    const origZstd = zlib.createZstdDecompress
+    let offDecompressCalls = 0
+    const spy = t.mock.method(zlib, 'createZstdDecompress', (...args: Parameters<typeof origZstd>) => {
+      offDecompressCalls += 1
+      return Reflect.apply(origZstd, zlib, args)
+    })
+    syncBuiltinESMExports()
+    try {
+      const offViews = new Views(cfg, parentId, parentFile)
+      await offViews.refresh(false)
+      assert.equal(offViews.descendants(parentId).length, 0)
+      const offRoot = new RolloutReader(parentFile, parentId, '/repo', cfg)
+      await offRoot.poll(false)
+      assert.equal(offRoot.collector.snapshot()!.session.counts.tokens, 2000)
+      assert.equal(offDecompressCalls, 0)
+    } finally {
+      spy.mock.restore()
+      syncBuiltinESMExports()
+    }
+  } finally {
+    for (const request of pending.values()) clearTimeout(request.timer)
+    lines.close()
+    if (child.exitCode === null && child.signalCode === null) {
+      const exit = once(child, 'exit'); child.kill('SIGTERM')
+      const kill = setTimeout(() => child.kill('SIGKILL'), 2000)
+      try { await exit } finally { clearTimeout(kill) }
+    }
     await removeNativeFixture(dir)
   }
 })

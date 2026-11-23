@@ -1,8 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink } from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import zlib from 'node:zlib'
 import { Views, selectedView, footerThread, footerCandidates, readingHold, type ViewScreen } from '../../src/hosts/codex/views.ts'
 import { codexComposer } from '../../src/hosts/codex/footer.ts'
 
@@ -305,4 +307,118 @@ test('descendants returns proper subtree views with cycle safety and excludes fo
   assert.deepEqual(ids(cyclic.descendants('child')), new Set(['root', 'grand']))
   assert.deepEqual(cyclic.descendants('self'), [])
   assert.deepEqual(ids(cyclic.descendants('cycA')), new Set(['cycB']))
+})
+
+test('Views discovers compressed .jsonl.zst logs, handles same-stem transitions and skips corrupt or disabled compressed logs', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'vargus-views-zst-'))
+  const sessions = join(home, 'sessions')
+  await mkdir(sessions)
+  const metaLine = (id: string, parent?: string, path?: string) => JSON.stringify({
+    type: 'session_meta',
+    payload: { id, cwd: '/project', source: parent ? { subagent: { thread_spawn: { parent_thread_id: parent, agent_path: path } } } : 'cli' },
+  }) + '\n'
+  const origZstd = zlib.createZstdDecompress
+  let decompressCalls = 0
+  const spy = t.mock.method(zlib, 'createZstdDecompress', (...args: Parameters<typeof origZstd>) => {
+    decompressCalls++
+    return Reflect.apply(origZstd, zlib, args)
+  })
+  syncBuiltinESMExports()
+  try {
+    const parentFile = join(sessions, 'rollout-parent.jsonl')
+    const childPlain = join(sessions, 'rollout-child.jsonl')
+    const childZst = join(sessions, 'rollout-child.jsonl.zst')
+    const coldZst = join(sessions, 'rollout-cold.jsonl.zst')
+    const corruptZst = join(sessions, 'rollout-corrupt.jsonl.zst')
+    const corruptPayloadZst = join(sessions, 'rollout-corrupt-payload.jsonl.zst')
+
+    await writeFile(parentFile, metaLine('parent'))
+    await writeFile(childPlain, metaLine('child', 'parent', '/root/child'))
+    await writeFile(coldZst, zlib.zstdCompressSync(Buffer.from(metaLine('cold', 'parent', '/root/cold'))))
+    await writeFile(corruptZst, Buffer.from('not valid zstd bytes\n'))
+    const badChecksumMeta = Buffer.from(zlib.zstdCompressSync(
+      Buffer.from(metaLine('bad-checksum', 'parent', '/root/bad').trimEnd()),
+      { params: { [zlib.constants.ZSTD_c_checksumFlag]: 1 } },
+    ))
+    badChecksumMeta[badChecksumMeta.length - 1]! ^= 0xff
+    await writeFile(corruptPayloadZst, badChecksumMeta)
+
+    // 1. With includeCompressed = false, compressed files are neither discovered nor decompressed.
+    const viewsOff = new Views(home, 'parent', parentFile)
+    await viewsOff.refresh(false)
+    assert.equal(decompressCalls, 0, 'refresh(false) must not decompress any .jsonl.zst file')
+    assert.deepEqual(viewsOff.descendants('parent').map(v => v.thread), ['child'])
+
+    // 2. Enabling compressed discovery on the same Views instance discovers cold.jsonl.zst once and skips corrupt.jsonl.zst.
+    await viewsOff.refresh(true)
+    const callsAfterFirstScan = decompressCalls
+    assert.ok(callsAfterFirstScan >= 2, 'positive control: refresh(true) inspects compressed logs')
+    assert.deepEqual(new Set(viewsOff.descendants('parent').map(v => v.thread)), new Set(['child', 'cold']))
+    assert.equal(viewsOff.known.get('cold')?.file, coldZst)
+    // Repeating refresh without file changes must not re-decompress either valid or corrupt .jsonl.zst.
+    await viewsOff.refresh(true)
+    assert.equal(decompressCalls, callsAfterFirstScan, 'unchanged valid and corrupt .jsonl.zst must not re-decompress')
+
+    // 3. Coexisting same-stem .jsonl and .jsonl.zst counts once, prefers plain, and is not ambiguous.
+    await writeFile(childZst, zlib.zstdCompressSync(Buffer.from(metaLine('child', 'parent', '/root/child'))))
+    await viewsOff.refresh(true)
+    assert.equal(decompressCalls, callsAfterFirstScan, 'coexisting .jsonl.zst is skipped while plain sibling exists')
+    assert.equal(viewsOff.known.get('child')?.file, childPlain)
+
+    // 4. Removing plain .jsonl transitions known child seamlessly to .jsonl.zst without ambiguity.
+    await rm(childPlain)
+    await viewsOff.refresh(true)
+    assert.equal(viewsOff.known.get('child')?.file, childZst)
+    assert.deepEqual(new Set(viewsOff.descendants('parent').map(v => v.thread)), new Set(['child', 'cold']))
+
+    // 5. Coexist (.jsonl.zst already seen, then .jsonl appears, then .jsonl disappears): must re-adopt .jsonl.zst cleanly.
+    await writeFile(childPlain, metaLine('child', 'parent', '/root/child'))
+    await viewsOff.refresh(true)
+    assert.equal(viewsOff.known.get('child')?.file, childPlain)
+    await rm(childPlain)
+    await viewsOff.refresh(true)
+    assert.equal(viewsOff.known.get('child')?.file, childZst)
+
+    // 6. Reverse transition (.jsonl.zst -> .jsonl with .zst removed) also updates cleanly without ambiguity.
+    await writeFile(childPlain, metaLine('child', 'parent', '/root/child'))
+    await rm(childZst)
+    await viewsOff.refresh(true)
+    assert.equal(viewsOff.known.get('child')?.file, childPlain)
+
+    // 7. A different filename stem with the same thread ID IS ambiguous and removes the child.
+    await writeFile(join(sessions, 'rollout-other-child.jsonl.zst'),
+      zlib.zstdCompressSync(Buffer.from(metaLine('child', 'parent', '/root/child'))))
+    await viewsOff.refresh(true)
+    assert.equal(viewsOff.known.get('child'), undefined)
+    assert.deepEqual(viewsOff.descendants('parent').map(v => v.thread), ['cold'])
+
+    // 8. Under refresh(false), a live root .jsonl -> .jsonl.zst transition and a symlinked CODEX_HOME
+    //    with a realpath-reported compressed root still resolve the root while skipping background children.
+    const rootZst = join(sessions, 'rollout-parent.jsonl.zst')
+    const liveOff = new Views(home, 'parent', await realpath(parentFile))
+    await liveOff.refresh(false)
+    assert.equal(liveOff.known.get('parent')?.file, parentFile)
+    await writeFile(rootZst, zlib.zstdCompressSync(Buffer.from(metaLine('parent'))))
+    await rm(parentFile)
+    const callsBeforeRootLive = decompressCalls
+    await liveOff.refresh(false)
+    assert.equal(liveOff.known.get('parent')?.file, rootZst)
+    assert.equal(liveOff.known.get('cold'), undefined)
+    assert.equal(decompressCalls, callsBeforeRootLive + 1)
+
+    if (process.platform !== 'win32') {
+      const linkHome = join(home, 'link-home')
+      await symlink(home, linkHome)
+      const callsBeforeLink = decompressCalls
+      const linkViews = new Views(linkHome, 'parent', await realpath(rootZst))
+      await linkViews.refresh(false)
+      assert.equal(linkViews.known.get('parent')?.file, join(linkHome, 'sessions', 'rollout-parent.jsonl.zst'))
+      assert.equal(linkViews.known.get('cold'), undefined)
+      assert.equal(decompressCalls, callsBeforeLink + 1)
+    }
+  } finally {
+    spy.mock.restore()
+    syncBuiltinESMExports()
+    await rm(home, { recursive: true, force: true })
+  }
 })

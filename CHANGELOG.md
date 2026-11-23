@@ -6,6 +6,13 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Claude Code: if you upgrade from VArgus 0.8.1 with `/reload-plugins`, the
+  existing token total retains any earlier subagent usage. New usage follows
+  the Include subagents setting immediately. Starting a new session or using
+  `/clear` starts a fresh total.
+
 ## [0.8.1] - 2026-11-22
 
 ### Added

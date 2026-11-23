@@ -7,8 +7,9 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import fs from 'node:fs'
+import zlib from 'node:zlib'
 import { syncBuiltinESMExports } from 'node:module'
-import { RolloutReader, findRollout } from '../../src/hosts/codex/rollout.ts'
+import { RolloutReader, findRollout, savedTranscript } from '../../src/hosts/codex/rollout.ts'
 import { cachedModelDefault } from '../../src/hosts/codex/model-defaults.ts'
 import { FooterSettings } from '../../src/hosts/codex/footer.ts'
 import { codexLine } from '../../src/cli/codex/line.ts'
@@ -736,4 +737,239 @@ test('buffered complete records after foreign session_meta drain on unchanged si
     await writeFile(replacedBuffered, jsonl([meta, count, count, count]))
     await assert.rejects(rb.poll(false), /replaced/, 'replaced error must remain latched after regrowth')
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('RolloutReader replays .jsonl.zst with stat caching, paginated boundaries and latched corruption', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-rollout-zst-'))
+  const sessions = join(dir, 'sessions')
+  await mkdir(sessions)
+  const jsonl = (records: unknown[]) => records.map(r => JSON.stringify(r) + '\n').join('')
+  const origZstd = zlib.createZstdDecompress
+  let decompressCalls = 0
+  const spy = t.mock.method(zlib, 'createZstdDecompress', (...args: Parameters<typeof origZstd>) => {
+    decompressCalls++
+    return Reflect.apply(origZstd, zlib, args)
+  })
+  syncBuiltinESMExports()
+  try {
+    // 1. Clean compressed transcript with UTF-8, stat-cached across repeated polls, and modelDefault on promotion.
+    const cleanZst = join(sessions, 'rollout-date-thread-a.jsonl.zst')
+    const first = { ...meta, payload: { ...meta.payload, model_provider: 'openai' } }
+    const utf8Ctx = { type: 'turn_context', payload: { model: 'gpt-6.1-sol', cwd: '/repo/中文', effort: 'low' } }
+    await writeFile(cleanZst, zlib.zstdCompressSync(Buffer.from(jsonl([first, utf8Ctx, count]))))
+    assert.equal(await savedTranscript(dir, 'thread-a', cleanZst), await realpath(cleanZst))
+    assert.equal(await findRollout(dir, 'thread-a'), await realpath(cleanZst))
+
+    let defaultLookups = 0
+    const reader = new RolloutReader(cleanZst, 'thread-a', '/repo', dir, async () => { defaultLookups++; return 'high' })
+    const beforePoll = decompressCalls
+    await reader.poll(false)
+    assert.equal(decompressCalls, beforePoll + 1)
+    assert.equal(defaultLookups, 0)
+    assert.equal(reader.attributable, true)
+    assert.equal(reader.collector.snapshot()!.core.cwd, '/repo/中文')
+    assert.equal(reader.collector.snapshot()!.session.counts.tokens, 3201)
+
+    // Repeated unchanged polls do zero decompression; promoting to active view resolves modelDefault from cache.
+    await reader.poll(false)
+    await reader.poll(true)
+    assert.equal(decompressCalls, beforePoll + 1, 'unchanged .jsonl.zst must not re-decompress')
+    assert.equal(defaultLookups, 1)
+    assert.equal(reader.collector.snapshot()!.session.defaultEffort, 'high')
+
+    // Replacing a previously replayed .jsonl.zst latches a replacement error.
+    await writeFile(cleanZst, zlib.zstdCompressSync(Buffer.from(jsonl([first, count, count]))))
+    await assert.rejects(reader.poll(false), /replaced/)
+    assert.equal(reader.attributable, false)
+    await assert.rejects(reader.poll(false), /replaced/)
+
+    // 2. Paginated compressed child preserves subagent_history_start_ordinal and inherited skill catalog.
+    const paginatedZst = join(sessions, 'rollout-paginated.jsonl.zst')
+    const childMeta = { ...meta, ordinal: 0, payload: { ...meta.payload,
+      history_mode: 'paginated', subagent_history_start_ordinal: 4 } }
+    const paginatedRows = [
+      childMeta,
+      { ...meta, ordinal: 1, payload: { ...meta.payload, id: 'parent' } },
+      { ...count, ordinal: 2 },
+      { type: 'response_item', ordinal: 3, payload: {
+        type: 'message', role: 'developer',
+        content: [{ type: 'input_text', text: '- alpha: Fixture. (file: /repo/alpha/SKILL.md)' }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'p1', content_item_kinds: ['host_skills.instructions'] },
+      } },
+      { ...count, ordinal: 4 },
+      { type: 'event_msg', ordinal: 5, payload: { type: 'task_started', turn_id: 'c1' } },
+      { type: 'event_msg', ordinal: 6, payload: { type: 'item_completed', thread_id: 'thread-a', turn_id: 'c1',
+        item: { id: 'own-read', type: 'CommandExecution', source: 'agent', cwd: '/repo',
+          parsed_cmd: [{ type: 'read', path: 'alpha/SKILL.md' }], exit_code: 0, status: 'completed' } } },
+    ]
+    await writeFile(paginatedZst, zlib.zstdCompressSync(Buffer.from(jsonl(paginatedRows))))
+    const paginated = new RolloutReader(paginatedZst, 'thread-a', '/repo', dir)
+    await paginated.poll(false)
+    assert.equal(paginated.attributable, true)
+    assert.deepEqual(paginated.collector.snapshot()!.session.counts, { tokens: 3201, tools: 1, agents: 0, skills: 1 })
+
+    // 3. Corrupt framing (garbage, single-block, multi-block >128 KiB, multi-frame, checksum-truncated,
+    //    trailing garbage), corrupted compressed payload and corrupt JSON all latch and drop attribution.
+    const garbageZst = join(sessions, 'rollout-garbage.jsonl.zst')
+    await writeFile(garbageZst, Buffer.from('not zstd bytes\n'))
+    const garbage = new RolloutReader(garbageZst, 'thread-a', '/repo', dir)
+    const callsBeforeGarbage = decompressCalls
+    await assert.rejects(garbage.poll(false), /decompressed/)
+    assert.equal(garbage.attributable, false)
+    await assert.rejects(garbage.poll(false), /decompressed/)
+    assert.equal(decompressCalls, callsBeforeGarbage, 'invalid zstd framing is rejected before allocating a decompressor')
+
+    // Valid frame header with corrupted checksum hits ZSTD_error_checksum_wrong inside createZstdDecompress and latches.
+    const checksumValid = zlib.zstdCompressSync(Buffer.from(jsonl([meta, count])), {
+      params: { [zlib.constants.ZSTD_c_checksumFlag]: 1 },
+    })
+    const badChecksum = Buffer.from(checksumValid)
+    badChecksum[badChecksum.length - 1]! ^= 0xff
+    const corruptPayloadZst = join(sessions, 'rollout-corrupt-payload.jsonl.zst')
+    await writeFile(corruptPayloadZst, badChecksum)
+    const corruptPayload = new RolloutReader(corruptPayloadZst, 'thread-a', '/repo', dir)
+    const callsBeforeCorrupt = decompressCalls
+    await assert.rejects(corruptPayload.poll(false), /decompressed/)
+    assert.equal(corruptPayload.attributable, false)
+    await assert.rejects(corruptPayload.poll(false), /decompressed/)
+    assert.equal(decompressCalls, callsBeforeCorrupt + 1, 'latched zstd payload error must not re-decompress')
+
+    const fullCompressed = zlib.zstdCompressSync(Buffer.from(jsonl([meta, count])))
+    const multiBlockPrefix = jsonl([meta, count])
+    const padLen = 131072 - Buffer.byteLength(multiBlockPrefix) - Buffer.byteLength('{"type":"note","payload":{"p":""}}\n')
+    const multiBlockJsonl = multiBlockPrefix
+      + JSON.stringify({ type: 'note', payload: { p: 'x'.repeat(padLen) } }) + '\n'
+      + Array.from({ length: 1200 }, (_, i) => JSON.stringify({ type: 'note', payload: { i, v: Math.cos(i * 777).toString(36) } }) + '\n').join('')
+      + jsonl([count])
+    const multiBlockCompressed = zlib.zstdCompressSync(Buffer.from(multiBlockJsonl))
+    const frame2 = zlib.zstdCompressSync(Buffer.from(jsonl([count])))
+    const checksumCompressed = zlib.zstdCompressSync(Buffer.from(jsonl([meta, count])), {
+      params: { [zlib.constants.ZSTD_c_checksumFlag]: 1 },
+    })
+
+    for (const [label, bytes] of [
+      ['single-truncated', fullCompressed.subarray(0, Math.floor(fullCompressed.length / 2))],
+      ['multiblock-truncated', multiBlockCompressed.subarray(0, multiBlockCompressed.length - 1)],
+      ['multiframe-truncated', Buffer.concat([fullCompressed, frame2.subarray(0, Math.floor(frame2.length / 2))])],
+      ['checksum-truncated', checksumCompressed.subarray(0, checksumCompressed.length - 1)],
+      ['trailing-garbage', Buffer.concat([fullCompressed, Buffer.from('TRAILING_GARBAGE')])],
+    ] as const) {
+      const f = join(sessions, `rollout-${label}.jsonl.zst`)
+      await writeFile(f, bytes)
+      const r = new RolloutReader(f, 'thread-a', '/repo', dir)
+      await assert.rejects(r.poll(false), /decompressed/, label)
+      assert.equal(r.attributable, false, label)
+    }
+
+    const badJsonZst = join(sessions, 'rollout-badjson.jsonl.zst')
+    await writeFile(badJsonZst, zlib.zstdCompressSync(Buffer.from(jsonl([meta]) + '{broken\n')))
+    const badJson = new RolloutReader(badJsonZst, 'thread-a', '/repo', dir)
+    await assert.rejects(badJson.poll(false), /invalid JSON/)
+    assert.equal(badJson.attributable, false)
+
+    // 4. Non-paginated mixed history inside .jsonl.zst drops attribution and avoids re-decompressing unchanged file.
+    const mixedZst = join(sessions, 'rollout-mixed.jsonl.zst')
+    await writeFile(mixedZst, zlib.zstdCompressSync(Buffer.from(jsonl([meta, { ...meta, payload: { ...meta.payload, id: 'parent' } }, count]))))
+    const mixed = new RolloutReader(mixedZst, 'thread-a', '/repo', dir)
+    const callsBeforeMixed = decompressCalls
+    await assert.rejects(mixed.poll(false), /another Codex thread/)
+    assert.equal(mixed.attributable, false)
+    await mixed.poll(false)
+    assert.equal(mixed.attributable, false)
+    assert.equal(decompressCalls, callsBeforeMixed + 1, 'unchanged mixed .jsonl.zst must not re-decompress')
+
+    // 5. Multi-frame and skippable-frame .jsonl.zst: replays every data frame (including split UTF-8/lines),
+    //    skips skippable frames, rejects corrupt Frame 2+ payloads/JSON/skippable-only, and honours RFC 8878 FHD bits.
+    const skippable = (payload: string, variant = 0) => {
+      const body = Buffer.from(payload)
+      const header = Buffer.alloc(8)
+      header.writeUInt32LE(0x184D2A50 + variant, 0)
+      header.writeUInt32LE(body.length, 4)
+      return Buffer.concat([header, body])
+    }
+    const count2 = {
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: { input_tokens: 6000, cached_input_tokens: 1000, output_tokens: 500, total_tokens: 6500 },
+          last_token_usage: { input_tokens: 1000, cached_input_tokens: 200, output_tokens: 100, total_tokens: 1100 },
+          model_context_window: 200000,
+        },
+        rate_limits: null,
+      },
+    }
+    const splitLineBytes = Buffer.from(jsonl([utf8Ctx]))
+    const splitPoint = splitLineBytes.indexOf(Buffer.from('中文')) + 2 // mid-UTF-8 character
+    const metaBytes = Buffer.from(jsonl([meta]))
+    const metaSplit = Math.floor(metaBytes.length / 2)
+    const multiFrameBytes = Buffer.concat([
+      skippable('lead-meta', 0),
+      zlib.zstdCompressSync(metaBytes.subarray(0, metaSplit)),
+      zlib.zstdCompressSync(Buffer.concat([metaBytes.subarray(metaSplit), Buffer.from(jsonl([count]))])),
+      zlib.zstdCompressSync(splitLineBytes.subarray(0, splitPoint)),
+      skippable('mid-meta', 3),
+      zlib.zstdCompressSync(Buffer.concat([splitLineBytes.subarray(splitPoint), Buffer.from(jsonl([count2]))])),
+    ])
+    const multiFrameZst = join(sessions, 'rollout-multiframe.jsonl.zst')
+    await writeFile(multiFrameZst, multiFrameBytes)
+    assert.equal(await savedTranscript(dir, 'thread-a', multiFrameZst), await realpath(multiFrameZst))
+    const mfReader = new RolloutReader(multiFrameZst, 'thread-a', '/repo', dir)
+    const callsBeforeMf = decompressCalls
+    await mfReader.poll(false)
+    assert.equal(mfReader.attributable, true)
+    assert.equal(mfReader.collector.snapshot()!.core.cwd, '/repo/中文')
+    assert.equal(mfReader.collector.snapshot()!.session.counts.tokens, 5500)
+    assert.equal(decompressCalls, callsBeforeMf + 4)
+    await mfReader.poll(false)
+    assert.equal(decompressCalls, callsBeforeMf + 4, 'unchanged multi-frame .jsonl.zst must not re-decompress')
+
+    // Frame 1 valid + Frame 2 corrupted checksum or invalid JSON must reject instead of stopping after Frame 1.
+    const f2BadChecksum = Buffer.from(zlib.zstdCompressSync(Buffer.from(jsonl([count2])), {
+      params: { [zlib.constants.ZSTD_c_checksumFlag]: 1 },
+    }))
+    f2BadChecksum[f2BadChecksum.length - 1]! ^= 0xff
+    const mfBadChecksumZst = join(sessions, 'rollout-mf-bad-checksum.jsonl.zst')
+    await writeFile(mfBadChecksumZst, Buffer.concat([fullCompressed, f2BadChecksum]))
+    const mfBadChecksum = new RolloutReader(mfBadChecksumZst, 'thread-a', '/repo', dir)
+    await assert.rejects(mfBadChecksum.poll(false), /decompressed/)
+    assert.equal(mfBadChecksum.attributable, false)
+
+    const mfBadJsonZst = join(sessions, 'rollout-mf-bad-json.jsonl.zst')
+    await writeFile(mfBadJsonZst, Buffer.concat([fullCompressed, zlib.zstdCompressSync(Buffer.from('{not valid json\n'))]))
+    const mfBadJson = new RolloutReader(mfBadJsonZst, 'thread-a', '/repo', dir)
+    await assert.rejects(mfBadJson.poll(false), /invalid JSON/)
+    assert.equal(mfBadJson.attributable, false)
+
+    const skipOnlyZst = join(sessions, 'rollout-skip-only.jsonl.zst')
+    await writeFile(skipOnlyZst, skippable('only-skippable', 1))
+    await assert.rejects(savedTranscript(dir, 'thread-a', skipOnlyZst), /decompressed/)
+    const skipOnly = new RolloutReader(skipOnlyZst, 'thread-a', '/repo', dir)
+    await assert.rejects(skipOnly.poll(false), /decompressed/)
+    assert.equal(skipOnly.attributable, false)
+
+    // RFC 8878 §3.1.1.1.1: Unused_bit (0x10) is accepted, Reserved_bit (0x08) is rejected before decompression.
+    const unusedBitBytes = Buffer.from(fullCompressed)
+    unusedBitBytes[4]! |= 0x10
+    const unusedBitZst = join(sessions, 'rollout-unused-bit.jsonl.zst')
+    await writeFile(unusedBitZst, unusedBitBytes)
+    const unusedBitReader = new RolloutReader(unusedBitZst, 'thread-a', '/repo', dir)
+    await unusedBitReader.poll(false)
+    assert.equal(unusedBitReader.attributable, true)
+    assert.equal(unusedBitReader.collector.snapshot()!.session.counts.tokens, 3201)
+
+    const reservedBitBytes = Buffer.from(fullCompressed)
+    reservedBitBytes[4]! |= 0x08
+    const reservedBitZst = join(sessions, 'rollout-reserved-bit.jsonl.zst')
+    await writeFile(reservedBitZst, reservedBitBytes)
+    const reservedBitReader = new RolloutReader(reservedBitZst, 'thread-a', '/repo', dir)
+    const callsBeforeReserved = decompressCalls
+    await assert.rejects(reservedBitReader.poll(false), /decompressed/)
+    assert.equal(reservedBitReader.attributable, false)
+    assert.equal(decompressCalls, callsBeforeReserved)
+  } finally {
+    spy.mock.restore()
+    syncBuiltinESMExports()
+    await rm(dir, { recursive: true, force: true })
+  }
 })

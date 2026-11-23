@@ -648,3 +648,117 @@ test('OmoSubagents matches byParent and byRoot independently and recovers after 
     assert.deepEqual([...recovered.taskIds], ['st_00000006'])
   }
 })
+
+test('OmoSubagents excludes confirmed pre-launch refused task records while keeping children that ran and later failed', async t => {
+  const root = await makeTempRoot(t)
+  const home = join(root, 'home')
+  const agentDir = join(root, 'agent')
+  const project = join(root, 'proj')
+  await mkdir(home, { recursive: true })
+  await mkdir(project, { recursive: true })
+
+  const stateDir = join(agentDir, 'projects', projectStateKey(project), 'senpi-task')
+  const reader = new OmoSubagents({ env: { HOME: home, OMO_CODING_AGENT_DIR: agentDir }, accountHomeDir: home })
+
+  // 1. Confirmed pre-launch refusal (no child_session_id, no recorded child work): must NOT enter taskIds.
+  await writeTask(stateDir, 'st_00000001', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    status: 'error',
+    failure_kind: 'model_unavailable',
+    failure_reason: 'model_not_in_child_profile',
+  })
+
+  // 2. Accepted completed child.
+  await writeTask(stateDir, 'st_00000002', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    child_session_id: 'child-2',
+    status: 'completed',
+  })
+  // Child 2 also recorded a refused grandchild spawn receipt in its own JSONL (must be excluded too).
+  await writeChildJsonl(stateDir, 'st_00000002', '001.jsonl', [
+    assistantLine({ id: 'c2-a1', input: 100, output: 20, tools: [{ name: 'task' }] }),
+    JSON.stringify({
+      id: 'c2-r1',
+      type: 'message',
+      timestamp: '2026-11-23T00:00:01Z',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'call-1',
+        toolName: 'task',
+        details: {
+          mode: 'spawn',
+          task_id: 'st_00000009',
+          status: 'error',
+          failure_kind: 'model_unavailable',
+          failure_reason: 'model_not_in_child_profile',
+        },
+      },
+    }) + '\n',
+  ].join(''))
+
+  const snap1 = await reader.refresh(project, 'root', 10_000)
+  assert.deepEqual([...snap1.taskIds], ['st_00000002'])
+  assert.equal(snap1.tokens, 120)
+  assert.equal(snap1.tools, 1)
+
+  // 3. Controls that actually ran and later errored MUST stay counted along with their work:
+  //    (a) bare status:'error' with runtime work; (b) paused child that failed resume with session_unavailable + child_session_id;
+  //    (c) reused task_id whose record later got overwritten with a pre-launch refusal but still has recorded JSONL work.
+  await writeTask(stateDir, 'st_00000003', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    child_session_id: 'child-3',
+    status: 'error',
+    error_message: 'runtime failure',
+  })
+  await writeChildJsonl(stateDir, 'st_00000003', '001.jsonl', assistantLine({
+    id: 'c3-a1', input: 200, output: 50, tools: [{ name: 'read' }],
+  }))
+  await writeTask(stateDir, 'st_00000004', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    child_session_id: 'child-4',
+    status: 'error',
+    failure_kind: 'session_unavailable',
+  })
+  await writeTask(stateDir, 'st_00000005', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    status: 'error',
+    failure_kind: 'model_unavailable',
+  })
+  await writeChildJsonl(stateDir, 'st_00000005', '001.jsonl', assistantLine({
+    id: 'c5-a1', input: 30, output: 10,
+  }))
+  await writeTask(stateDir, 'st_00000006', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    status: 'error',
+    failure_kind: 'host_unavailable',
+    pid: 9876,
+  })
+  await writeTask(stateDir, 'st_00000007', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    status: 'error',
+    failure_kind: 'session_unavailable',
+    host_session: { session_path: '/tmp/child.jsonl' },
+  })
+  await writeTask(stateDir, 'st_00000008', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    status: 'error',
+    failure_kind: 'host_unavailable',
+    effective_model: { model_id: 'gpt-6.1-sol' },
+  })
+
+  const snap2 = await reader.refresh(project, 'root', 20_000, true)
+  assert.deepEqual(
+    [...snap2.taskIds].sort(),
+    ['st_00000002', 'st_00000003', 'st_00000004', 'st_00000005', 'st_00000006', 'st_00000007', 'st_00000008'],
+  )
+  assert.equal(snap2.tokens, 120 + 250 + 40)
+  assert.equal(snap2.tools, 2)
+})
