@@ -6,7 +6,7 @@ import { restoreFooter, clearFooter, codexComposer, footerCommandError, footerId
 import { cachedModelDefault } from '../../hosts/codex/model-defaults.ts'
 import { resolveCodexOptions } from '../../hosts/codex/options.ts'
 import { RolloutReader } from '../../hosts/codex/rollout.ts'
-import { Views, canHoldReadings, selectedView, type View, type ViewScreen } from '../../hosts/codex/views.ts'
+import { Views, readingHold, selectedView, type View, type ViewScreen } from '../../hosts/codex/views.ts'
 import { en } from '../../i18n/en.ts'
 import { TmuxOutput } from '../../outputs/tmux/client.ts'
 import { PaneInput } from '../../outputs/tmux/input.ts'
@@ -65,7 +65,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
   let mode = spec.mode, selected: string | undefined, error: string | undefined
   let stopping = false, attached = false, refreshAt = 0, renderAt = 0
   let lastConfirmed: string | undefined, readingError: string | undefined, published = ''
-  let lastReadings: { thread: string; label: string; line: ReturnType<typeof codexLine> } | undefined
+  let lastReadings: { thread: string; label: string; readFailed: boolean; line: ReturnType<typeof codexLine> } | undefined
   let paused: Running['paused']
   let identity: 'first' | 'whole' | 'none' = 'none'
   let candidates: View[] = []
@@ -122,9 +122,9 @@ export async function rowWorker(spec: Spec): Promise<number> {
       } catch (e) { error = (e as Error).message }
     }
     if (!view) error = 'View identity is unknown; widen the pane or close the popup and leave the composer empty.'
-    const hold = !!(lastReadings && !view && canHoldReadings(screen))
+    const hold = lastReadings && !view ? readingHold(screen) : undefined
     if (mode !== 'on') paused = undefined
-    if (mode === 'on' && (changed || Date.now() >= renderAt || hold !== !!paused)) {
+    if (mode === 'on' && (changed || Date.now() >= renderAt || !!hold !== !!paused)) {
       renderAt = Date.now() + 1000
       let line = ''
       let width: number | undefined
@@ -144,14 +144,17 @@ export async function rowWorker(spec: Spec): Promise<number> {
             : undefined
           width = await output.width()
           line = await viewLine(width, extraCounts)
-          if (line) lastReadings = { thread: view.thread, label: cleanText(view.path ?? 'main'), line: viewLine }
-        } catch (e) { readingError = (e as Error).message }
-      } else if (hold) {
+          if (line) lastReadings = { thread: view.thread, label: cleanText(view.path ?? 'main'), line: viewLine, readFailed: false }
+        } catch (e) {
+          readingError = (e as Error).message
+          if (lastReadings?.thread === view.thread) lastReadings.readFailed = true
+        }
+      } else if (hold && lastReadings) {
         width = await output.width()
-        const frozen = lastReadings!.line.paused(width)
+        const frozen = lastReadings.line.paused(width, hold === 'side' || lastReadings.readFailed)
         if (frozen) {
           line = frozen
-          paused = { thread: lastReadings!.thread, label: lastReadings!.label }
+          paused = { thread: lastReadings.thread, label: lastReadings.label }
         }
       }
       // Release the row when there are no readings and the composer is empty.

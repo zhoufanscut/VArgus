@@ -109,7 +109,7 @@ If the row is blank and the current view is unknown, see
 If the worker misses its check-ins, the next bar redraw shows the last readings
 with `| ⌛stale` (`| !:stale` on WSL). This also applies when a previously readable transcript
 becomes unreadable while its view is still identified. The marker clears once the view is
-identified and updated again (paused drafts and side chats retain the marker while the view is unknown).
+identified and updated again.
 The bar follows your existing `status-interval`.
 With periodic redraws disabled, the marker can appear on the next redraw.
 
@@ -289,8 +289,8 @@ helper still owns a row; use `!vargus off` to restore the footer too.
 Leave the composer empty when switching views and wait for footer automation before
 typing. Drafts pause footer automation and are preserved. Standalone Codex keeps
 the last confirmed readings while typing hides the view label, including with plain
-`!vargus on`; no options file is needed. Readings and time stay frozen with the
-row's `| ⌛stale` (`| !:stale` on WSL) marker; `!vargus status` reports that the current view is unknown.
+`!vargus on`; no options file is needed. Typing alone leaves the row as it was. Readings and time stay
+frozen, and `!vargus status` reports that the current view is unknown.
 These historical readings may belong to a different view after navigation.
 Live readings resume when the view is identified again. Holding readings in an
 ordinary draft requires a previously rendered snapshot in the current helper and
@@ -309,7 +309,7 @@ command there returns “'/statusline' is unavailable in side conversations.”
 Even with the side thread's ID, VArgus cannot use that command to hide its footer.
 
 VArgus controls the tmux row directly. In a side chat opened with `/btw` or
-`/side`, the row keeps the last confirmed readings while the side chat prompt
+`/side`, the row marks the last confirmed readings `stale` while the side chat prompt
 or its draft hint is visible. Live readings resume when you return to a
 recognized saved conversation.
 

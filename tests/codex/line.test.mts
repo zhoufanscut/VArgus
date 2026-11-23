@@ -43,7 +43,7 @@ test('cwd changes clear the previous Git readings before rendering or pausing', 
     const changed = await line(500)
     assert.equal(changed.split(' | ')[0], '.../' + basename(dir) + '/second')
     assert.doesNotMatch(changed, /repo:|branch:|\?1/)
-    assert.equal(line.paused(500), changed + ' | ⌛stale')
+    assert.equal(line.paused(500), changed)
     await ready(collector, 'second')
     assert.match(await line(500), /repo:second.*branch:second.*\?1/)
     const vcs = collector.snapshot()!.vcs
@@ -94,7 +94,7 @@ test('Codex renders a detached tag and linked worktree by default and with a leg
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
-test('codexLine forwards isWsl to call counts and reuses the stale marker when paused', async () => {
+test('codexLine forwards isWsl to call counts and reuses the stale marker for a held side chat', async () => {
   const collector = new CodexCollector('/repo', undefined)
   collector.start('/repo', 0)
   collector.snapshot()!.session.counts.tools = 3
@@ -103,7 +103,7 @@ test('codexLine forwards isWsl to call counts and reuses the stale marker when p
   const line = codexLine(collector, options, colored, true)
   const live = await line(200)
   assert.ok(live.includes(colored.paint('label', 'T:3')))
-  assert.equal(line.paused(200), live + colored.paint('sep', ' | ') + colored.paint('label', '!:stale'))
+  assert.equal(line.paused(200, true), live + colored.paint('sep', ' | ') + colored.paint('label', '!:stale'))
 })
 
 test('codexLine renders SVN working copies outside Git', { skip: process.platform === 'win32' }, async t => {
@@ -138,7 +138,7 @@ test('codexLine renders SVN working copies outside Git', { skip: process.platfor
   assert.match(await line(500), /repo:svnproj \| branch:trunk \| \?1/)
 })
 
-test('codexLine folds extraCounts without mutating the collector, keeps viewed metrics and VCS live, and preserves folded counts when paused', async () => {
+test('codexLine folds extraCounts without mutating the collector, keeps viewed metrics and VCS live, and preserves folded counts in an ordinary draft', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-line-extra-'))
   try {
     const cwd = await repository(dir, 'project')
@@ -165,7 +165,7 @@ test('codexLine folds extraCounts without mutating the collector, keeps viewed m
     assert.match(first, /🔧5 🤖3 ⚡5/)
     assert.deepEqual(collector.snapshot()!.session.counts, { tokens: 3201, tools: 2, agents: 1, skills: 1 },
       'folding extraCounts must not mutate the live collector counts')
-    assert.equal(line.paused(500), first + ' | ⌛stale', 'paused snapshot must retain folded counts')
+    assert.equal(line.paused(500), first, 'paused snapshot must retain folded counts')
 
     // Live async pollVcs() must still populate v.vcs even when extraCounts is passed.
     await ready(collector, 'project')
@@ -173,7 +173,7 @@ test('codexLine folds extraCounts without mutating the collector, keeps viewed m
     assert.match(withVcs, /token:8\.2k\(94\.3%, 150t\/s\)/)
     assert.match(withVcs, /🔧5 🤖3 ⚡5/)
     assert.match(withVcs, /repo:project \| branch:project \| \?1/)
-    assert.equal(line.paused(500), withVcs + ' | ⌛stale')
+    assert.equal(line.paused(500), withVcs)
 
     // Rendering without extraCounts returns to the viewed thread's own totals.
     const selfOnly = await line(500)

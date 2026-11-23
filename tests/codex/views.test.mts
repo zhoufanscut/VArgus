@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Views, selectedView, footerThread, footerCandidates, canHoldReadings, type ViewScreen } from '../../src/hosts/codex/views.ts'
+import { Views, selectedView, footerThread, footerCandidates, readingHold, type ViewScreen } from '../../src/hosts/codex/views.ts'
 import { codexComposer } from '../../src/hosts/codex/footer.ts'
 
 const screen = (footer: string, composer = 'Viewing sub-agent — direct input is disabled'): ViewScreen => ({
@@ -84,14 +84,14 @@ test('side chat and its draft can keep readings without selecting a thread or ad
   const draft = { ...side, lines: [arrow + 'side draft', '', side.lines[2]!,
     '  ? for shortcuts · Side from main thread · ^/ to switch · ^c to close'] }
   for (const current of [side, draft]) {
-    assert.equal(canHoldReadings(current), true)
+    assert.equal(readingHold(current), 'side')
     assert.equal(selectedView(current, family, parent, 'first'), undefined)
     assert.equal(codexComposer(current, ''), false)
     assert.deepEqual(footerCandidates(current), [])
-    assert.equal(canHoldReadings({ ...current, visible: false }), false)
+    assert.equal(readingHold({ ...current, visible: false }), undefined)
   }
   const typedPlaceholder = { ...side, lines: [arrow + 'Ask a follow-up question'] }
-  assert.equal(canHoldReadings(typedPlaceholder), false)
+  assert.equal(readingHold(typedPlaceholder), undefined)
 })
 
 test('restoration uses full IDs across roots while path labels remain family-local', () => {
@@ -170,7 +170,7 @@ test('unlabelled drafts retain unknown identity while footer and startup readers
     for (let cursor = 0; cursor < text.length; cursor++) {
       const current = draft(text, cursor)
       assert.equal(views.selected(current), undefined)
-      assert.equal(canHoldReadings(current), true)
+      assert.equal(readingHold(current), 'draft')
       assert.equal(codexComposer(current, ''), false, 'display recognition must not admit footer keys')
       assert.equal(footerThread(current), undefined, 'startup identity must still require empty input')
       assert.deepEqual(footerCandidates(current), [])
@@ -178,32 +178,32 @@ test('unlabelled drafts retain unknown identity while footer and startup readers
     }
   }
   for (const prefix of ['\x1b[1;38;5;214m›\x1b[0m ', '\x1b[1;38;2;246;197;67m›\x1b[0m ']) {
-    assert.equal(canHoldReadings(draft(['draft'], 0, undefined, prefix)), true)
+    assert.equal(readingHold(draft(['draft'], 0, undefined, prefix)), 'draft')
   }
-  assert.equal(canHoldReadings(draft(['printf draft'], 0, ['  Shell mode'], '\x1b[1;31m!\x1b[0m ')), true)
+  assert.equal(readingHold(draft(['printf draft'], 0, ['  Shell mode'], '\x1b[1;31m!\x1b[0m ')), 'draft')
   assert.equal(views.selected(draft(['draft'], 0, ['  Shell mode'])), undefined)
   assert.equal(views.selected(draft(['draft'], 0, undefined, '\x1b[1m!\x1b[0m ')), undefined)
   assert.equal(views.selected(draft(['draft'], 0, ['  ' + child, '  82% context left']))?.thread, child)
   assert.equal(views.selected(draft(['draft'], 0, ['  ' + foreign, '  82% context left'])), undefined)
-  assert.equal(canHoldReadings(draft(['draft'], 0, ['  ' + foreign, '  82% context left'])), false)
+  assert.equal(readingHold(draft(['draft'], 0, ['  ' + foreign, '  82% context left'])), undefined)
   const clipped = draft(['draft'], 0, ['  ' + parent + ' · model · ' + child.slice(0, 28) + '…', '  82% context left'])
   assert.equal(views.selected(clipped), undefined)
-  assert.equal(canHoldReadings(clipped), false)
+  assert.equal(readingHold(clipped), undefined)
   assert.equal(views.selected(clipped, 'first')?.thread, parent)
   for (const prefix of ['\x1b[1;2m› \x1b[0m', '\x1b[1;7m›\x1b[0m ', '› ']) {
     assert.equal(views.selected(draft(['draft'], 0, undefined, prefix)), undefined, 'history and modal selection arrows are not live editors')
-    assert.equal(canHoldReadings(draft(['draft'], 0, undefined, prefix)), false)
+    assert.equal(readingHold(draft(['draft'], 0, undefined, prefix)), undefined)
   }
   for (const placeholder of ['Ask Codex to d', 'Viewing sub-agent — d']) {
     const clipped = draft(['\x1b[2m' + placeholder + '\x1b[0m'])
     assert.equal(views.selected({ ...clipped, x: 2 }), undefined, 'a clipped dim placeholder is not a draft')
-    assert.equal(canHoldReadings({ ...clipped, x: 2 }), false)
+    assert.equal(readingHold({ ...clipped, x: 2 }), undefined)
   }
   const current = draft(['draft'])
   assert.equal(views.selected({ ...current, visible: false }), undefined)
-  assert.equal(canHoldReadings({ ...current, visible: false }), false)
+  assert.equal(readingHold({ ...current, visible: false }), undefined)
   assert.equal(views.selected({ ...current, command: 'bash' }), undefined)
-  assert.equal(canHoldReadings({ ...current, command: 'bash' }), false)
+  assert.equal(readingHold({ ...current, command: 'bash' }), undefined)
   assert.equal(views.selected(draft(['draft'], 0, ['  unrelated dialog'])), undefined)
   assert.equal(views.selected(draft(['Ask Codex to do anything'], 0, ['  unrelated dialog'])), undefined,
     'typing placeholder words is not evidence of an empty primary editor, even without the draft hint')
@@ -223,7 +223,7 @@ test('native warning notices retain draft readings without admitting footer comm
         current.lines[current.lines.length - 1] = current.lines.at(-1)!.replace('82% context left', 'Shell mode')
       }
       const detail = JSON.stringify({ notice, shell })
-      assert.equal(canHoldReadings(current), true, detail)
+      assert.equal(readingHold(current), 'draft', detail)
       assert.equal(selectedView(current, [{ thread: parent }], parent), undefined, detail)
       assert.equal(codexComposer(current, ''), false, detail)
       assert.equal(footerThread(current), undefined, detail)
@@ -231,7 +231,7 @@ test('native warning notices retain draft readings without admitting footer comm
       for (const metadata of [foreign, '`/root/child…']) {
         const explicit = structuredClone(current)
         explicit.lines.splice(explicit.lines.length - 1, 0, '  ' + metadata)
-        assert.equal(canHoldReadings(explicit), false, detail + ' ' + metadata)
+        assert.equal(readingHold(explicit), undefined, detail + ' ' + metadata)
         assert.equal(selectedView(explicit, [{ thread: parent }], parent), undefined, detail + ' ' + metadata)
       }
     }
@@ -245,7 +245,7 @@ test('context percentages separated from an agent label retain draft identity', 
   const parent = 'parent', child = 'child', foreign = '01a10000-0000-0000-0000-000000000000'
   const family = [{ thread: parent }, { thread: child, path: '/root/child' }]
   assert.equal(selectedView(captured, family, parent)?.thread, parent)
-  assert.equal(canHoldReadings(captured), false, 'a visible Main label selects current readings')
+  assert.equal(readingHold(captured), undefined, 'a visible Main label selects current readings')
   assert.equal(codexComposer(captured, ''), false, 'recognizing a draft never admits footer commands')
   assert.equal(footerThread(captured), undefined)
   assert.deepEqual(footerCandidates(captured), [])

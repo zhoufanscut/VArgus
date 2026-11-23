@@ -208,7 +208,7 @@ trust_level = "trusted"
     if (!initialPrompt) {
       await tmux('send-keys', '-l', '-t', pane, 'Fresh default draft')
       await delay(1400)
-      assert.match(await row(), / \| (?:⌛|!:)stale$/)
+      assert.doesNotMatch(await row(), /(?:⌛|!:)stale$/)
       assert.match(await row(), new RegExp('token:' + expectedTokens.replace('.', '\\.')))
       const controlDir = join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`)
       const runtimePath = join(controlDir, (await readdir(controlDir)).find(n => n.endsWith('.json'))!)
@@ -258,7 +258,7 @@ trust_level = "trusted"
       for (const [file, from, to] of [
         ['src/cli/codex/state.ts', 'const workerVersion = 8', 'const workerVersion = 5'],
         ['src/options.ts', 'export const DEFAULTS = {', 'export const DEFAULTS = { codexDraftHold: false,'],
-        ['src/cli/codex/worker.ts', 'const hold = !!(lastReadings', 'const hold = !!(options.codexDraftHold && lastReadings'],
+        ['src/cli/codex/worker.ts', 'const hold = lastReadings', 'const hold = options.codexDraftHold && lastReadings'],
       ] as const) {
         const path = join(legacyRoot, file), old = await readFile(path, 'utf8')
         assert.equal(old.split(from).length, 2, from)
@@ -300,12 +300,13 @@ trust_level = "trusted"
         // Observe past the render interval so a stale pre-draft row cannot pass.
         await delay(1400)
         assert.match(await row(), /token:6\.4k/, JSON.stringify({ text, screen: await input.snapshot(), state: await runtime() }))
-        assert.match(await row(), / \| (?:⌛|!:)stale$/)
+        assert.doesNotMatch(await row(), /(?:⌛|!:)stale$/)
         assert.equal((await runtime()).selected, undefined)
         assert.equal((await runtime()).paused.thread, active.thread)
         assert.equal(codexComposer(await input.snapshot(), ''), false)
         await tmux('send-keys', '-t', pane, 'C-a'); await delay(1200)
-        assert.match(await row(), /token:6\.4k.* \| (?:⌛|!:)stale$/, 'moving the draft caret must keep the row')
+        assert.match(await row(), /token:6\.4k/, 'moving the draft caret must keep the row')
+        assert.doesNotMatch(await row(), /(?:⌛|!:)stale$/)
         assert.equal((await runtime()).selected, undefined)
         assert.equal((await runtime()).paused.thread, active.thread)
         assert.equal(await readFile(join(footerDir, backupName), 'utf8'), backup)
@@ -364,6 +365,10 @@ trust_level = "trusted"
       const staleMark = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release())) ? '!:stale' : '⌛stale'
       const expanded = async () => (await tmux('display-message', '-p', '-t', pane, '#{E:status-format[0]}')).replace(/#\[[^\]]*\]/g, '')
       await wait(expanded, new RegExp('token:6\\.4k.*' + staleMark))
+      await tmux('send-keys', '-l', '-t', pane, 'Typing after a read failure')
+      await wait(async () => (await runtime()).paused?.thread ?? '', new RegExp(first.thread))
+      assert.ok((await expanded()).endsWith(staleMark))
+      await tmux('send-keys', '-t', pane, 'C-e', 'C-u')
       await rename(first.transcript + '.held', first.transcript)
       await wait(async () => (await expanded()).includes(staleMark) ? 'stale' : await row(), /token:6\.4k/)
       assert.match((await control('reload')).stdout, /helper reloaded/)

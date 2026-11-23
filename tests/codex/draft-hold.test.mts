@@ -22,21 +22,22 @@ test('paused readings clone the last rendered values and time by default', async
   assert.equal(line.paused(200), '', 'no confirmed reading exists before the first render')
   const original = await line(200)
   assert.match(original, /sol:xhigh.*ctx:18%.*🤖1/)
-  assert.equal(line.paused(200), original + ' | ⌛stale')
+  assert.equal(line.paused(200), original)
   now = 180000
   value.core.cwd = '/changed'
   value.session.model = 'gpt-6.1-terra'
   value.session.contextPercent = 90
   value.session.counts.agents = 2
   value.session.startedAt = Date.now()
-  assert.equal(line.paused(200), original + ' | ⌛stale', 'mutable collector state cannot change paused readings')
+  assert.equal(line.paused(200), original, 'mutable collector state cannot change paused readings')
   const narrow = line.paused(24)
   assert.ok(stringWidth(narrow) <= 24, 'the frozen values can reflow within the current width')
-  assert.match(narrow, / \| ⌛stale$/)
-  assert.equal(line.paused(8), '⌛stale')
+  assert.match(narrow, /^sol:xhigh/)
+  assert.doesNotMatch(narrow, /stale/)
+  assert.equal(line.paused(8, true), '⌛stale')
   const changed = await line(200)
   assert.match(changed, /terra:xhigh.*ctx:90%.*🤖2/)
-  assert.equal(line.paused(200), changed + ' | ⌛stale', 'a new confirmed render replaces the snapshot')
+  assert.equal(line.paused(200), changed, 'a new confirmed render replaces the snapshot')
 })
 
 test('a retained obsolete false option cannot disable paused readings', async () => {
@@ -48,5 +49,5 @@ test('a retained obsolete false option cannot disable paused readings', async ()
   const line = codexLine(collector, options, makeTheme('graphite', true))
   const rendered = await line(200)
   assert.match(rendered, /sol/)
-  assert.equal(line.paused(200), rendered + ' | ⌛stale')
+  assert.equal(line.paused(200), rendered)
 })

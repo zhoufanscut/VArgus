@@ -279,10 +279,11 @@ as the root fallback. Labels in titles, ambiguous agent paths and clipped or
 foreign identifiers cannot establish a different thread.
 
 An unidentified ordinary draft or a side chat (`/btw` or `/side`) may hold
-the last confirmed snapshot. The snapshot freezes readings and time and reuses
-the whole-row stale marker (` | ⌛stale`, or ` | !:stale` on WSL, fitting to
-the current width; `staleLine` is idempotent so an expired tmux deadline does
-not double-append it). The current view remains unknown and
+the last confirmed snapshot. Readings and time stay frozen while the row reflows
+using the normal width rules.
+An ordinary draft shows the normal row unless the last read of its source failed.
+A side chat marks the held readings stale because they belong to another view.
+The current view remains unknown and
 `status` identifies the source of the held readings. An unrecognized popup,
 foreign ID or clipped ordinary draft blanks the row. At an empty composer,
 a blank row releases ownership and discards the snapshot. Reload also needs
@@ -833,7 +834,10 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   live polling and fresh rollout replay, preserved both suffixes across a
   subsequent 0 ms fast burst, and cleared both suffixes when a response omitted
   usage. The standalone
-  fixture observed `token:3.2k(94.3%)` in the tmux row. The native skill
+  fixture observed `token:3.2k(94.3%)` in the tmux row. On Linux it also checked
+  ordinary, multiline and shell drafts with an unmarked row, a `/btw` prompt
+  and draft with the stale badge, and a draft entered after a transcript read failure.
+  The native skill
   test checks a child thread's token, tool, agent and skill totals. The native
   `views-engine` `includeSubagents` fixture (Linux, Codex 0.171.0, tmux 3.5a)
   exercised a parent spawning both a paginated forked child (`fork_turns: "all"`)

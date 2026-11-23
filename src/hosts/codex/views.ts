@@ -165,15 +165,15 @@ function draftFrame(screen: ViewScreen): { start: number; footer: string[]; side
 }
 
 // An unidentified draft or a side chat can show the last confirmed snapshot.
-export function canHoldReadings(screen: ViewScreen): boolean {
-  if (!screen.visible || screen.command !== 'codex' || codexComposer(screen, '')) return false
-  if (emptySideComposer(screen)) return true
+export function readingHold(screen: ViewScreen): 'draft' | 'side' | undefined {
+  if (!screen.visible || screen.command !== 'codex' || codexComposer(screen, '')) return
+  if (emptySideComposer(screen)) return 'side'
   const draft = draftFrame(screen)
-  if (!draft) return false
-  if (draft.side) return true
+  if (!draft) return
+  if (draft.side) return 'side'
   const footer = draft.footer.join('\n')
-  return !/[`…]/.test(footer) && !/^\s*Main \[default\]/m.test(footer)
-    && !draft.footer.some(line => line.split(' · ').some(field => isId(field.trim())))
+  if (!/[`…]/.test(footer) && !/^\s*Main \[default\]/m.test(footer)
+    && !draft.footer.some(line => line.split(' · ').some(field => isId(field.trim())))) return 'draft'
 }
 
 // Resolve the displayed saved-log family through the versioned Codex UI.

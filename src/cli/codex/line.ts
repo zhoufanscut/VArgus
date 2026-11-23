@@ -27,10 +27,10 @@ export function codexLine(collector: CodexCollector, o: CodexOptions, t: ReturnT
     return result
   }
   return Object.assign(line, {
-    paused(width: number): string {
+    paused(width: number, stale = false): string {
       if (!confirmed) return ''
       const rendered = render({ ...confirmed, v: { ...confirmed.v, core: { ...confirmed.v.core, columns: width } } })
-      return staleLine(rendered, width, { t: confirmed.t, l: confirmed.l, isWsl: confirmed.v.core.isWsl })
+      return stale ? staleLine(rendered, width, { t: confirmed.t, l: confirmed.l, isWsl: confirmed.v.core.isWsl }) : rendered
     },
   })
 }
