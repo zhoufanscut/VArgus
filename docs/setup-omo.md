@@ -143,6 +143,17 @@ assistant tool calls; calls hidden inside `eval` are not added. Agents count dis
 task IDs from accepted spawn results. Skill counts are omitted because a `SKILL.md`
 read alone does not establish a skill load.
 
+By default (`includeSubagents: false`), tokens, tools and agents count main-session
+activity only with no extra disk I/O. Enable `includeSubagents: true` (in
+`vargus.jsonc`, your `--config` file, or `/vargus config {"includeSubagents":true}`)
+to asynchronously read OmO's on-disk `senpi-task` store and fold subagent tokens,
+tools and deduplicated agent counts across direct children, nested descendants,
+revived runs and DAG/team/workpool tasks. Cache-hit percentage, output speed (`t/s`),
+context, model, effort, session time, quotas and VCS always remain on the main
+session. Skills remain omitted, expunged tasks' tokens and tools drop once removed from disk
+(while accepted spawn IDs already recorded in surviving transcripts remain counted),
+and background memory sidecars outside `senpi-task` are excluded.
+
 OmO shortens known models to labels such as `opus`, `sol`, `sol-pro`,
 and `nova-pro`. For example, `deepseek-v4-flash` displays `deepseek`
 and `deepseek-v4-pro` displays `deepseek-pro`. Unfamiliar IDs are shown in full.

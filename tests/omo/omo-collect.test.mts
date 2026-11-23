@@ -1,7 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MAX_STALE_MS } from '../../src/core/limits.ts'
-import { collectOmo, omoHistoryReducer, omoSettingsReducer, OMO_CONFIG_ENTRY } from '../../src/hosts/omo/collect.ts'
+import {
+  collectOmo,
+  collectOmoAgents,
+  createOmoHistory,
+  foldOmoEntry,
+  omoHistoryReducer,
+  omoSettingsReducer,
+  OMO_CONFIG_ENTRY,
+} from '../../src/hosts/omo/collect.ts'
 import type { AccountLimits, HistoryReducer, NativeContext, SessionEntry } from '../../src/hosts/omo/contracts.ts'
 
 const now = Date.parse('2026-11-14T12:00:00Z')
@@ -214,4 +222,25 @@ test('malformed persisted message data is ignored at the host boundary', () => {
     tokens: 0, tools: 0, agents: 0, skills: 0,
   })
   assert.equal(h.ctx.sessionManager.reduceHistory(omoHistoryReducer).counts.tokens, 0)
+})
+
+test('foldOmoEntry counts id-less JSONL entries separately and collectOmoAgents exposes memoized agents', () => {
+  const state = createOmoHistory()
+  foldOmoEntry(state, {
+    type: 'message',
+    message: { role: 'assistant', content: [call('c1', 'read')], usage: { input: 10, output: 5 } },
+  }, 'line:0')
+  foldOmoEntry(state, {
+    id: '',
+    type: 'message',
+    message: { role: 'assistant', content: [call('c2', 'write')], usage: { input: 20, output: 10 } },
+  }, 'line:1')
+  assert.deepEqual(state.counts, { tokens: 45, tools: 2, agents: 0, skills: 0 })
+  assert.equal(state.entries.size, 0)
+
+  const h = host([
+    assistant('a', [call('t1', 'task')]),
+    result('r1', 't1', 'task', { mode: 'spawn', items: [{ task_id: 'st_00000001' }, { task_id: 'st_00000002' }] }),
+  ])
+  assert.deepEqual([...collectOmoAgents(h.ctx)].sort(), ['st_00000001', 'st_00000002'])
 })

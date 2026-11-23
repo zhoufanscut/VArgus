@@ -112,7 +112,7 @@ own display rules.
 and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
 The shared `callCounts` setting controls the tool, agent and skill counts together.
 The shared `includeSubagents` setting defaults to `false`, keeping token and call
-counts on the active conversation unless enabled (currently read by Claude Code and Codex CLI).
+counts on the active conversation unless enabled (currently read by Claude Code, Codex CLI and OmO Native).
 Codex's [startup hook option](src/hosts/codex/options.ts) defaults on.
 Explicit activation or hook installation enables its tmux integration.
 
@@ -469,6 +469,40 @@ agent counts use distinct task IDs from accepted spawns. Skills lack a canonical
 For a native assistant edit that copies usage,
 registration writes a receipt naming the new entry. Older unobserved copies
 remain in the total, and equal usage amounts alone do not identify copies.
+
+With `includeSubagents: false` (default), or when both `tokens` and `callCounts`
+are `false`, OmO performs no task-store disk I/O and keeps tokens, tools and
+agents on the main session. With `includeSubagents: true` (and `tokens` or
+`callCounts` enabled), [subagents.ts](src/hosts/omo/subagents.ts) asynchronously
+reads OmO's on-disk `senpi-task` store (`tasks/*.json` for session-tree links and
+`children/<taskId>/sessions/<taskId>/*.jsonl` across live and revived runs).
+Store resolution mirrors OmO's config and state-directory rules: it reads user
+(`$HOME/.omo`) and farthest-to-nearest non-symlinked project `.omo`
+`omo.jsonc`/`omo.json` layers up to the home and account-home boundaries (with a
+self-contained comment and trailing-comma JSONC parser, per-layer `[senpi]` to
+`[native]` canonicalization, and `profiles` overlays from `OMO_PROFILE`,
+`OCX_PROFILE` or `OPENCODE_CONFIG_DIR`) for an explicit `task.state_dir`;
+otherwise it adopts a populated legacy `<cwd>/.omo/senpi-task` read-only without
+writing `.in-project`, or falls back to
+`<agentDir>/projects/<projectStateKey(cwd)>/senpi-task` (`OMO_CODING_AGENT_DIR`,
+`SENPI_CODING_AGENT_DIR` or `PI_CODING_AGENT_DIR`, else `~/.omo/agent`).
+Task records are cached by `(ino, mtimeMs, size)`, skipping `*.json.expunging`
+tombstones and invalid `task_id` values; fixed-point session-tree closure admits
+direct children, nested descendants, DAG nodes, team members and workpool tasks
+matching `parent_session_id` or `root_session_id`. Child JSONLs are read
+incrementally with raw-`Buffer` line carry so multi-byte UTF-8 and partial lines
+are never split, resetting from offset 0 on inode change or shrink and pruning
+removed/expunged caches. Polling uses a 1-second floor when any matched task is
+non-terminal (`pending`, `running` or `paused`) or forced (`message_end`,
+`tool_execution_end`), a 5-second idle floor when all matched children are
+terminal, and a 10x slow-scan holdoff. At render time, registration folds
+subagent tokens and tools and computes agent count as the set union of main
+spawned `task_id`s and subagent `task_id`s without mutating main counts or
+`history.agents`. Cache-hit percentage, output speed (`t/s`), context, model,
+effort, session age, quotas and VCS stay on the main session. Skills remain
+omitted, expunged tasks' tokens and tools drop once removed from disk (while
+accepted spawn `task_id`s already recorded in surviving transcripts remain in
+agent counts), and background memory sidecars outside `senpi-task` are excluded.
 
 Model, effective effort, default effort and context come from the current
 OmO context. Known [model aliases](src/hosts/omo/display.ts) preserve

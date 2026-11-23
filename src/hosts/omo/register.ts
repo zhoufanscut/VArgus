@@ -1,7 +1,8 @@
 import { homedir, release } from 'node:os'
-import { collectOmo, omoSettingsReducer, OMO_CONFIG_ENTRY, OMO_EDIT_ENTRY } from './collect.ts'
+import { collectOmo, collectOmoAgents, omoSettingsReducer, OMO_CONFIG_ENTRY, OMO_EDIT_ENTRY } from './collect.ts'
 import { omoDisplay } from './display.ts'
 import type { AccountLimits, NativeContext, SessionEntry } from './contracts.ts'
+import { OmoSubagents } from './subagents.ts'
 import { OmoVcs } from './vcs.ts'
 import { OmoKimi, type ProviderAuth } from './kimi.ts'
 import { outputTokensPerSecond } from '../../core/session.ts'
@@ -64,11 +65,17 @@ function modelKey(model: Record<string, unknown> | undefined): string | undefine
   return `${typeof model.provider === 'string' ? model.provider : ''}\0${model.id}`
 }
 
+function unionSize(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
+  let count = a.size
+  for (const id of b) if (!a.has(id)) count++
+  return count
+}
+
 export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> = readCheckoutOptions()): void {
   let active: {
     ctx: Context
     stop(): void
-    update(forceVcs?: boolean): void
+    update(opts?: { forceVcs?: boolean; forceSubagents?: boolean }): void
     messageStart(event: unknown): void
     messageUpdate(event: unknown): void
     messageEnd(event: unknown): void
@@ -89,6 +96,8 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     if (!settings.enabled) return
     const options = resolveOptions({ ...fileOptions, ...settings.options })
     const vcs = new OmoVcs()
+    const subagents = options.includeSubagents && (options.tokens || options.callCounts)
+      ? new OmoSubagents() : undefined
     const kimi = new OmoKimi(() => instance.ctx.modelRegistry.getProviderAuth('kimi-coding'))
     const theme = makeTheme(options.theme, Boolean(process.env.NO_COLOR))
     const labels = resolveLabels('en')
@@ -98,6 +107,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     let tokensPerSecond: number | undefined
     let lastModelKey = modelKey(ctx.model)
     let values = collectOmo(ctx, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
+    let mainAgents: ReadonlySet<string> = collectOmoAgents(ctx)
     let checkedAt = Date.now()
     const instance = {
       ctx,
@@ -151,12 +161,20 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         stream = undefined
         tokensPerSecond = undefined
       },
-      update(forceVcs = false) {
+      update(opts?: { forceVcs?: boolean; forceSubagents?: boolean }) {
         if (disposed) return
         const current = instance.ctx
+        const forceVcs = opts?.forceVcs ?? false
+        const forceSubagents = opts?.forceSubagents ?? false
+        let sessionId = ''
         try {
-          values = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
-          values.session.tokensPerSecond = tokensPerSecond
+          const nextValues = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
+          const nextAgents = collectOmoAgents(current)
+          const nextSessionId = subagents ? current.sessionManager.getSessionId() : ''
+          nextValues.session.tokensPerSecond = tokensPerSecond
+          values = nextValues
+          mainAgents = nextAgents
+          sessionId = nextSessionId
           checkedAt = Date.now()
         } catch {
           output.refresh()
@@ -169,6 +187,12 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
           })
         }
         values.vcs = vcs.values
+        if (subagents) {
+          void subagents.refresh(current.cwd, sessionId, Date.now(), forceSubagents).then(() => {
+            if (disposed) return
+            output.refresh()
+          })
+        }
         output.refresh()
         if (options.repo || options.branch || options.status) {
           void vcs.refresh(current.cwd, Date.now(), forceVcs).then(reading => {
@@ -183,6 +207,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         clearInterval(timer)
         unsubscribe()
         vcs.dispose()
+        subagents?.dispose()
         kimi.dispose()
         output.dispose()
       },
@@ -192,9 +217,21 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
       const now = stale ? checkedAt : Date.now()
       const limits = options.rateLimits && instance.ctx.model?.provider === 'kimi-coding'
         ? kimi.readings(now, labels) : values.limits
+      const sub = subagents?.snapshot
+      const effectiveSession = sub && (sub.tokens > 0 || sub.tools > 0 || sub.taskIds.size > 0)
+        ? {
+            ...values.session,
+            counts: {
+              tokens: values.session.counts.tokens + sub.tokens,
+              tools: values.session.counts.tools + sub.tools,
+              agents: unionSize(mainAgents, sub.taskIds),
+              skills: values.session.counts.skills,
+            },
+          }
+        : values.session
       const line = render({
-        v: { ...values, limits, core: { ...values.core, columns: width, isWsl } },
-        display: omoDisplay(values.session),
+        v: { ...values, session: effectiveSession, limits, core: { ...values.core, columns: width, isWsl } },
+        display: omoDisplay(effectiveSession),
         o: options, l: labels, t: theme, now,
       })
       return stale ? staleLine(line, width, { t: theme, l: labels, isWsl }) : line
@@ -262,7 +299,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     if (!active) return
     active.ctx = ctx
     active.messageEnd(event)
-    active.update()
+    active.update({ forceSubagents: true })
   })
   pi.on('model_select', (event, ctx) => {
     active?.modelSelected(event, ctx)
@@ -272,7 +309,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
   pi.on('tool_execution_end', (_event, ctx) => {
     if (!active) return
     active.ctx = ctx
-    active.update(true)
+    active.update({ forceVcs: true, forceSubagents: true })
   })
   pi.registerCommand('vargus', {
     description: 'VArgus: on, off, status, or config JSON (saved in this session)',

@@ -55,71 +55,97 @@ export const omoSettingsReducer: HistoryReducer<OmoSettings> = {
   },
 }
 
+export type OmoEntryInput = {
+  readonly id?: unknown
+  readonly type?: unknown
+  readonly customType?: unknown
+  readonly data?: unknown
+  readonly message?: unknown
+}
+
+export function createOmoHistory(): OmoHistory {
+  return {
+    counts: initialCounts(), entries: new Set(), calls: new Set(),
+    agents: new Set(), usage: new Map(), edits: new Set(),
+  }
+}
+
+export function foldOmoEntry(state: OmoHistory, entry: OmoEntryInput, fallbackId?: string): OmoHistory {
+  const id = typeof entry.id === 'string' && entry.id !== '' ? entry.id : undefined
+  if (id !== undefined) {
+    if (state.entries.has(id)) return state
+    state.entries.add(id)
+  }
+  if (entry.type === 'custom' && entry.customType === OMO_EDIT_ENTRY) {
+    const data = record(entry.data)
+    if (typeof data?.entryId === 'string' && data.entryId !== '' && !state.edits.has(data.entryId)) {
+      state.edits.add(data.entryId)
+      const copy = state.usage.get(data.entryId)
+      if (copy) {
+        state.counts.tokens -= copy.tokens
+        state.usage.delete(data.entryId)
+        // Edits are rare. Normal appends and rendering use the saved latest reading.
+        if (state.latestUsage === copy) state.latestUsage = Array.from(state.usage.values()).at(-1)
+      }
+    }
+    return state
+  }
+  if (entry.type !== 'message') return state
+  const message = record(entry.message)
+  if (!message) return state
+  if (message.role === 'assistant') {
+    const usage = record(message.usage)
+    // input is already separate from cacheRead/cacheWrite. Tool-result usage
+    // belongs to nested work and is deliberately excluded.
+    const tokens = (nonnegative(usage?.input) ? usage.input : 0)
+      + (nonnegative(usage?.output) ? usage.output : 0)
+    if (id === undefined || !state.edits.has(id)) {
+      const reading: AssistantUsage = {
+        tokens,
+        cacheHitPercent: cacheHitFromSplitInput(usage?.cacheRead, usage?.input, usage?.cacheWrite),
+      }
+      state.latestUsage = reading
+      if (id !== undefined) state.usage.set(id, reading)
+      state.counts.tokens += tokens
+    }
+    if (Array.isArray(message.content)) {
+      const entryKey = id ?? fallbackId ?? ''
+      for (const [index, value] of message.content.entries()) {
+        const call = record(value)
+        if (call?.type !== 'toolCall') continue
+        const key = typeof call.runtimeItemKey === 'string' && call.runtimeItemKey !== ''
+          ? call.runtimeItemKey : `${entryKey}:${index}`
+        if (state.calls.has(key)) continue
+        state.calls.add(key)
+        state.counts.tools++
+      }
+    }
+  } else if (message.role === 'toolResult') {
+    const details = record(message.details)
+    // Count accepted task identities, never requested batch sizes or tool names.
+    if (message.toolName === 'task' && details?.mode === 'spawn') {
+      if (Array.isArray(details.items)) {
+        for (const item of details.items) agent(state, item)
+      } else {
+        agent(state, details)
+      }
+    }
+  }
+  state.counts.agents = state.agents.size
+  // No canonical skill-load receipt is exposed by the established history
+  // contract. Reading a file named SKILL.md does not establish a skill load.
+  return state
+}
+
 // A stable reducer lets the host fold only appended entries after the first read.
 // It covers every branch of this session, including pre-compaction history.
 export const omoHistoryReducer: HistoryReducer<OmoHistory> = {
-  initial: () => ({
-    counts: initialCounts(), entries: new Set(), calls: new Set(),
-    agents: new Set(), usage: new Map(), edits: new Set(),
-  }),
-  add(state, entry) {
-    if (state.entries.has(entry.id)) return state
-    state.entries.add(entry.id)
-    if (entry.type === 'custom' && entry.customType === OMO_EDIT_ENTRY) {
-      const data = record(entry.data)
-      if (typeof data?.entryId === 'string' && !state.edits.has(data.entryId)) {
-        state.edits.add(data.entryId)
-        const copy = state.usage.get(data.entryId)
-        if (copy) {
-          state.counts.tokens -= copy.tokens
-          state.usage.delete(data.entryId)
-          // Edits are rare. Normal appends and rendering use the saved latest reading.
-          if (state.latestUsage === copy) state.latestUsage = Array.from(state.usage.values()).at(-1)
-        }
-      }
-      return state
-    }
-    if (entry.type !== 'message') return state
-    const message = record(entry.message)
-    if (!message) return state
-    if (message.role === 'assistant') {
-      const usage = record(message.usage)
-      // input is already separate from cacheRead/cacheWrite. Tool-result usage
-      // belongs to nested work and is deliberately excluded.
-      const tokens = (nonnegative(usage?.input) ? usage.input : 0)
-        + (nonnegative(usage?.output) ? usage.output : 0)
-      if (!state.edits.has(entry.id)) {
-        state.latestUsage = { tokens, cacheHitPercent: cacheHitFromSplitInput(usage?.cacheRead, usage?.input, usage?.cacheWrite) }
-        state.usage.set(entry.id, state.latestUsage)
-        state.counts.tokens += tokens
-      }
-      if (Array.isArray(message.content)) {
-        for (const [index, value] of message.content.entries()) {
-          const call = record(value)
-          if (call?.type !== 'toolCall') continue
-          const key = typeof call.runtimeItemKey === 'string'
-            ? call.runtimeItemKey : `${entry.id}:${index}`
-          if (state.calls.has(key)) continue
-          state.calls.add(key)
-          state.counts.tools++
-        }
-      }
-    } else if (message.role === 'toolResult') {
-      const details = record(message.details)
-      // Count accepted task identities, never requested batch sizes or tool names.
-      if (message.toolName === 'task' && details?.mode === 'spawn') {
-        if (Array.isArray(details.items)) {
-          for (const item of details.items) agent(state, item)
-        } else {
-          agent(state, details)
-        }
-      }
-    }
-    state.counts.agents = state.agents.size
-    // No canonical skill-load receipt is exposed by the established history
-    // contract. Reading a file named SKILL.md does not establish a skill load.
-    return state
-  },
+  initial: createOmoHistory,
+  add: (state, entry) => foldOmoEntry(state, entry),
+}
+
+export function collectOmoAgents(ctx: NativeContext): ReadonlySet<string> {
+  return ctx.sessionManager.reduceHistory(omoHistoryReducer).agents
 }
 
 export function collectOmo(
