@@ -3,9 +3,6 @@ export type Bucket = { percent: number; resetsAt: number | null }
 
 export type QuotaWindow = Bucket & {
   label: string
-  stale?: boolean
-  unclamped?: boolean
-  cost?: { spentUsd: number; limitUsd: number }
 }
 
 export type ApiError = 'rate_limited' | 'auth' | 'network'

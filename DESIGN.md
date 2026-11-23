@@ -95,9 +95,9 @@ switch governs the whole fragment.
 
 Hosts produce ordered [quota readings](src/core/limits.ts), including labels
 and error badges. The [limits fragment](src/render/fragments/limits.ts) rounds
-and colours percentages, formats amounts and reset times, skips expired
-windows, and keeps windows without a known reset. Host-marked spend windows
-can exceed 100%. Each host decides which readings are current, stale or absent.
+and colours percentages, formats reset times, skips expired
+windows, and keeps windows without a known reset. Each host decides which
+readings are current or absent.
 
 A whole-row freshness warning appends ` | ⌛stale` (` | !:stale` on WSL) to the
 last available readings, using `sep` for the divider and `label` for the text
@@ -109,7 +109,6 @@ own display rules.
 
 [Shared defaults](src/options.ts) and the Claude manifest agree on picker keys
 and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
-The spend option defaults off.
 The shared `callCounts` setting controls the tool, agent and skill counts together.
 Codex's [startup hook option](src/hosts/codex/options.ts) defaults on.
 Explicit activation or hook installation enables its tmux integration.
@@ -181,9 +180,8 @@ expanding content from paths or branches.
 - Prefixes (`xxx:`), the model name (with or without effort), detached `@`,
   call-count numbers, and stale text (`⌛stale` with unstyled `⌛`, or WSL
   `T:`/`A:`/`S:`/`!:stale`) use `label`.
-- Secondary parentheticals (`(fast)`/`(ultrafast)`, rate-limit reset countdowns
-  and spend amounts, token cache/speed details, `(wt:x)`), stale `*` and
-  `[API 429]` use `faint`.
+- Secondary parentheticals (`(fast)`/`(ultrafast)`, rate-limit reset countdowns,
+  token cache/speed details, `(wt:x)`) use `faint`.
 - Readings with a threshold use two flat tiers (`calm` / `alert`): `ctx` and
   rate-limit percentages flip at 80%, `tokens` flips at `1.00M` (999,950
   tokens, matching its `k`/`M` switch), and `session` age flips at 12 hours.
@@ -192,7 +190,7 @@ expanding content from paths or branches.
   an unfamiliar named level. Unranked or numeric values that cannot be compared
   use `alert`. The host supplies the baseline separately from the model's
   display name. [Model fragment and comparison](src/render/fragments/model.ts)
-- `[API auth]`, `[API err]` and in-progress Git operations (`(rebase …)`,
+- `[API 429]`, `[API auth]`, `[API err]` and in-progress Git operations (`(rebase …)`,
   `(merge)`, etc.) use `alert`.
 - Working-tree counts use `add` (`+`, `⇡`), `del` (`✗`, `!`, `⇣`) and `track`
   (`?`).
@@ -317,7 +315,8 @@ the previous rate; responses without usage, compaction, model switches and Fast
 tier toggles clear it. The context gauge uses the last context
 reading with Codex's baseline allowance, and compaction clears that reading.
 Quota selection prefers the active model's exact recorded slug, then the
-general Codex bucket. Labels follow the recorded window duration.
+general Codex bucket. Labels follow the recorded window duration, falling back
+to `1st`/`2nd` when missing or non-positive.
 
 ### Codex startup hooks
 
@@ -613,28 +612,30 @@ state shapes. [Mod reference](https://code.claude.com/docs/en/plugins/mods/refer
   The 2.1.323 `TurnStepInput.model` declaration describes the model “as the
   engine resolved it for this step,” which can differ from the display model.
 - [Claude quota assembly](src/hosts/claude/quota.ts) combines engine windows
-  with provider-specific results. The engine's five-hour and seven-day
-  windows take precedence. Claude Code 2.1.323 describes `SessionRateLimit.kind`
-  as “`five_hour`, `seven_day`, or a Claude gateway's `spend_limit`.” OAuth supplies extra
-  usage. Kimi can supply five-hour and monthly windows. Shared formatting consumes
-  those readings while the persisted cache keeps its host-specific shape.
+  with direct provider results. The engine's five-hour and seven-day
+  windows take precedence; gateway `spend_limit` windows are omitted. Claude
+  Code 2.1.323 describes `SessionRateLimit.kind` as “`five_hour`, `seven_day`,
+  or a Claude gateway's `spend_limit`.” Direct Kimi usage supplies five-hour
+  and monthly (`1mo`) windows. Shared formatting consumes those readings while
+  the persisted cache keeps its host-specific shape.
 
 ### Usage cache and staleness
 
-[The usage collector](src/hosts/claude/collect/limits.ts) keys its cache by
-provider and Claude config directory. It checks the store every 15 seconds
-and refreshes after 90 seconds on success. Failures back off and honour
-bounded numeric `Retry-After` on 429. Recent cached windows are marked
-stale on failure, then replaced by an error badge after 15 minutes without
-a successful reading. Engine windows are separate.
+[The usage collector](src/hosts/claude/collect/limits.ts) polls only matched
+direct third-party usage providers; Anthropic OAuth usage is not polled and
+`$.session.authorize()` is not called. Engine `five_hour` and `seven_day`
+windows are separate.
 
-Anthropic usage borrows a bearer handle from `$.session.authorize()`.
-It skips non-Anthropic provider setups and
-`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. Refresh tokens stay with the
-host. [Direct Kimi usage](src/hosts/claude/collect/usage-providers.ts) requires a
-matching normalized coding base URL. It uses the existing environment
-credential for the fixed HTTPS destination, independently of the Anthropic
-traffic flag. The credential stays out of the cache.
+[Direct Kimi usage](src/hosts/claude/collect/usage-providers.ts) requires a
+matching normalized coding base URL and keys its cache in `$.store` by provider
+and Claude config directory. It uses the existing environment credential for
+the fixed HTTPS destination, independently of
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`; the credential stays out of the
+cache. The collector checks the store every 15 seconds and refreshes after 90
+seconds on success. Failures back off and honour bounded numeric `Retry-After`
+on 429. Recent cached windows stay displayed without a stale mark on failure,
+then switch to an error badge (`[API 429]`, `[API auth]`, or `[API err]`) after
+15 minutes without a successful reading.
 
 ### When the line is written
 
@@ -696,7 +697,6 @@ VantageHUD 0.6.0 is the read-only reference for these rules.
 | Preserve fragment order, label text and terminal-column fitting. | A narrow row keeps the higher-priority fragments and handles wide characters. See [Fragments](#fragments) and [Languages](#languages). |
 | Use a palette registry with safe lookup and flat status tiers. | Unexpected names fall back to a known palette; VArgus uses two flat tiers (`calm` and `alert`). See [Colours](#colours). |
 | Omit expired quota readings and keep Claude's usage cache separate by provider and config directory. | After an account switch in the same directory, the previous account's cached reading can still appear. See [Usage cache and staleness](#usage-cache-and-staleness). |
-| Use the host's OAuth handle without refreshing its credential. | The usage read leaves the login lifecycle with the host. See [Claude data sources](#data-sources). |
 | Pace repository status, resolve the actual worktree and count SVN item and property changes. | Reading status stays bounded and the branch reflects the session's repository. See [Repository readings](#repository-readings). |
 
 The [shared renderer tests](tests/shared/render.test.mts) and

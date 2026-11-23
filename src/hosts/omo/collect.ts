@@ -1,6 +1,4 @@
 import { isRecentUsage, resetTime, type QuotaWindow } from '../../core/limits.ts'
-import { en, type Labels } from '../../i18n/en.ts'
-import { DEFAULTS } from '../../options.ts'
 import { cacheHitFromSplitInput, initialCounts, initialSession, type Counts } from '../../core/session.ts'
 import type { Values } from '../../core/types.ts'
 import { initialVcs } from '../../core/vcs.ts'
@@ -129,8 +127,6 @@ export function collectOmo(
   accounts: readonly AccountLimits[],
   home: string | undefined,
   now: number,
-  spendLimit = DEFAULTS.spendLimit,
-  labels: Labels = en,
 ): Values {
   const history = ctx.sessionManager.reduceHistory(omoHistoryReducer)
   const session = initialSession()
@@ -148,26 +144,22 @@ export function collectOmo(
     if (nonnegative(context.contextWindow) && context.contextWindow > 0) session.contextWindow = context.contextWindow
   }
   const fiveHour: QuotaWindow[] = [], sevenDay: QuotaWindow[] = [], others: QuotaWindow[] = []
-  let spend: QuotaWindow | undefined
   for (const account of accounts) {
     if (account.provider !== ctx.model?.provider || !isRecentUsage(Date.parse(account.reportedAt), now)) continue
     for (const window of account.windows) {
+      if (window.id === 'spend_limit') continue
       if (!nonnegative(window.usedPercent) || window.usedPercent > 100) continue
       const reading: QuotaWindow = {
         label: window.label, percent: window.usedPercent, resetsAt: resetTime(window.resetsAt),
-        ...(account.error ? { stale: true } : {}),
       }
       const kind = window.windowMinutes === 300 || window.label === '5h' ? 'five_hour'
         : window.windowMinutes === 10080 || window.label === '7d' ? 'seven_day' : window.id
       if (kind === 'five_hour') fiveHour.push(reading)
       else if (kind === 'seven_day') sevenDay.push(reading)
-      else if (kind === 'spend_limit') {
-        if (spendLimit && !spend) spend = { ...reading, label: labels.spendLimit, stale: undefined, unclamped: true }
-      } else if (window.label) others.push(reading)
+      else if (window.label) others.push(reading)
     }
   }
   const limits = [...fiveHour, ...sevenDay, ...others]
-  if (spend) limits.push(spend)
   return {
     core: { cwd: ctx.cwd, home, columns: undefined, isWsl: false },
     session, limits, vcs: initialVcs(),

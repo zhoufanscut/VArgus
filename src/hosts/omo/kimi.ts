@@ -30,10 +30,9 @@ export class OmoKimi {
   readings(now: number, labels: Labels): QuotaReading[] {
     if (!this.usage || !isRecentUsage(this.usage.at, now)) return this.error ? [this.error] : []
     const { fiveHour, monthly } = this.usage.data
-    const stale = this.error !== null
     const windows: QuotaWindow[] = []
-    if (fiveHour) windows.push({ label: labels.fiveHour, ...fiveHour, stale })
-    if (monthly) windows.push({ label: labels.monthly, ...monthly, stale })
+    if (fiveHour) windows.push({ label: labels.fiveHour, ...fiveHour })
+    if (monthly) windows.push({ label: labels.monthly, ...monthly })
     return windows
   }
 

@@ -97,7 +97,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     let stream: { firstAt?: number; lastAt?: number; events: number } | undefined
     let tokensPerSecond: number | undefined
     let lastModelKey = modelKey(ctx.model)
-    let values = collectOmo(ctx, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now(), options.spendLimit, labels)
+    let values = collectOmo(ctx, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
     let checkedAt = Date.now()
     const instance = {
       ctx,
@@ -155,7 +155,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         if (disposed) return
         const current = instance.ctx
         try {
-          values = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now(), options.spendLimit, labels)
+          values = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
           values.session.tokensPerSecond = tokensPerSecond
           checkedAt = Date.now()
         } catch {

@@ -94,6 +94,25 @@ test('Codex quota windows use reported duration and sparse notifications preserv
   assert.deepEqual(c.snapshot()!.limits, [{ label: '5h', percent: 70, resetsAt: null }])
   c.snapshot()!.session.model = 'gpt-6-luna'
   assert.deepEqual(c.snapshot()!.limits, bothWindows)
+  c.updateLimits({
+    limitId: 'fallback', normalModelSlug: 'gpt-6-fallback',
+    primary: { usedPercent: 18, windowDurationMins: null, resetsAt: null },
+    secondary: { usedPercent: 42, windowDurationMins: 0, resetsAt: null },
+  })
+  c.snapshot()!.session.model = 'gpt-6-fallback'
+  assert.deepEqual(c.snapshot()!.limits, [
+    { label: '1st', percent: 18, resetsAt: null },
+    { label: '2nd', percent: 42, resetsAt: null },
+  ])
+  c.updateLimits({
+    limitId: 'fallback', normalModelSlug: 'gpt-6-fallback',
+    primary: { usedPercent: 30, windowDurationMins: -5, resetsAt: null },
+    secondary: { usedPercent: 55, windowDurationMins: Number.NaN, resetsAt: null },
+  })
+  assert.deepEqual(c.snapshot()!.limits, [
+    { label: '1st', percent: 30, resetsAt: null },
+    { label: '2nd', percent: 55, resetsAt: null },
+  ])
 })
 
 test('item identities prevent duplicate tool counts; messages and subagent tools do not inflate lead counts', () => {

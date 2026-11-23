@@ -17,8 +17,8 @@ test('Kimi plan reads five-hour and monthly usage and polls no faster than 90 se
   try {
     await kimi.refresh('kimi-coding')
     assert.deepEqual(kimi.readings(now, en), [
-      { label: '5h', percent: 25, resetsAt: Date.parse('2026-11-14T20:00:00Z'), stale: false },
-      { label: '1m', percent: 60, resetsAt: Date.parse('2026-12-01T00:00:00Z'), stale: false },
+      { label: '5h', percent: 25, resetsAt: Date.parse('2026-11-14T20:00:00Z') },
+      { label: '1mo', percent: 60, resetsAt: Date.parse('2026-12-01T00:00:00Z') },
     ])
     await kimi.refresh('kimi-coding')
     assert.equal(request.mock.callCount(), 1)
@@ -37,7 +37,7 @@ test('Kimi count windows use remaining counts when aggregate five-hour ratios ar
   try {
     await kimi.refresh('kimi-coding')
     assert.deepEqual(kimi.readings(Date.now(), en), [
-      { label: '5h', percent: 75, resetsAt: Date.parse('2026-11-14T20:00:00Z'), stale: false },
+      { label: '5h', percent: 75, resetsAt: Date.parse('2026-11-14T20:00:00Z') },
     ])
   } finally { kimi.dispose() }
 })
@@ -54,7 +54,10 @@ test('Kimi retains its last good usage on throttling and honors Retry-After', as
     throttled = true
     t.mock.timers.setTime(now + 90_000)
     await kimi.refresh('kimi-coding')
-    assert.partialDeepStrictEqual(kimi.readings(now + 15 * 60_000, en)[0], { label: '5h', percent: 25, stale: true })
+    assert.deepEqual(kimi.readings(now + 15 * 60_000, en), [
+      { label: '5h', percent: 25, resetsAt: Date.parse('2026-11-14T20:00:00Z') },
+      { label: '1mo', percent: 60, resetsAt: Date.parse('2026-12-01T00:00:00Z') },
+    ])
     assert.deepEqual(kimi.readings(now + 15 * 60_000 + 1, en), ['rate_limited'])
     t.mock.timers.setTime(now + 689_999)
     await kimi.refresh('kimi-coding')
@@ -106,7 +109,7 @@ test('Kimi credentials only go to the pinned regional usage endpoint', async t =
   try {
     await kimi.refresh('kimi-coding')
     assert.equal(request.mock.calls[0]?.arguments[0], 'https://api.kimi.com/coding/v1/usages')
-    assert.partialDeepStrictEqual(kimi.readings(Date.now(), en)[1], { label: '1m', percent: 60 })
+    assert.partialDeepStrictEqual(kimi.readings(Date.now(), en)[1], { label: '1mo', percent: 60 })
   } finally { kimi.dispose() }
 })
 

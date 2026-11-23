@@ -1,21 +1,19 @@
-// The rate limits (DESIGN, "Data sources"; "Rules carried over from
-// VantageHUD": Usage API, Usage cache and staleness).
+// The rate limits (DESIGN, "Data sources"; "Usage cache and staleness"):
 //
-// - five_hour / seven_day / spend_limit are the engine's: `$.session.usage()`
-//   at session.start, then pushed by `session.measure` after each main-thread
-//   turn and when a window moves a whole point. Never marked stale.
+// - five_hour / seven_day come from the engine: `$.session.usage()` at
+//   session.start, then pushed by `session.measure` after each main-thread
+//   turn and when a window moves a whole point.
 // - Kimi Code's five-hour and monthly-total windows come from its direct
 //   usage API after an exact coding base-URL match, using the existing env
-//   credential; session.authorize() is not called.
-// - Extra usage comes from the OAuth usage API, read every 90 s and cached
-//   in `$.store` per account. Concurrent sessions can each refresh the cache.
+//   credential and cached in `$.store` per provider and config directory.
+//   Anthropic OAuth usage is not polled; session.authorize() is not called.
 
 import type { ApiError } from '../../../core/limits'
-import type { ClaudeLimits, ExtraBucket, UsageData } from '../quota'
+import type { ClaudeLimits, UsageData } from '../quota'
 import type { EngineInterface, HttpInit, SessionMeasureInput, SessionStartInput, Timer } from 'claude-code'
 import { directUsageProvider } from './usage-providers'
 
-// What `$.store` keeps per account, shared by every session of that account.
+// What `$.store` keeps per provider and config directory, shared across sessions.
 export type UsageCache = {
   data: UsageData | null
   lastSuccessAt: number | null
@@ -26,14 +24,12 @@ export type UsageCache = {
   rateLimitedCount: number
 }
 
-export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
-// VantageHUD's poll interval (DESIGN, "Config"): the endpoint answers 429 to
-// a few reads a minute.
+// Poll interval on success.
 export const POLL_MS = 90_000
 // How often the store is checked: picks up another session's read and ends a
 // backoff close to its time, without a request.
 export const CHECK_MS = 15_000
-// A failed read is retried after this (VantageHUD's transient-network pace).
+// A failed read is retried after this.
 export const RETRY_MS = 120_000
 // Sustained 429s back off up to this; a Retry-After counts up to an hour.
 export const MAX_429_BACKOFF_MS = 5 * 60_000
@@ -75,35 +71,6 @@ async function firstRead($: EngineInterface, values: ClaudeLimits): Promise<void
   await readUsage($, values)
 }
 
-// An env switch is on unless empty, `0`, `false`, `no` or `off` (VantageHUD).
-function isOn(value: string | undefined): boolean {
-  const v = (value ?? '').trim().toLowerCase()
-  return v !== '' && v !== '0' && v !== 'false' && v !== 'no' && v !== 'off'
-}
-
-function isAnthropicHost(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.toLowerCase()
-    return host === 'anthropic.com' || host.endsWith('.anthropic.com')
-  } catch {
-    return false
-  }
-}
-
-// The API describes the subscription of the local login, so behind another
-// provider it would show limits that traffic does not draw on (VantageHUD).
-// CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC refuses a plugin's request that
-// carries `auth` (types, HttpInit.auth): skipped, rather than an [API err].
-async function isApiSkipped($: EngineInterface): Promise<boolean> {
-  const base = ((await $.env.get('ANTHROPIC_BASE_URL')) ?? '').trim()
-  if (base && !isAnthropicHost(base)) return true
-  // Each name a literal: the validator lists the variables a module reads.
-  if (isOn(await $.env.get('CLAUDE_CODE_USE_BEDROCK'))) return true
-  if (isOn(await $.env.get('CLAUDE_CODE_USE_VERTEX'))) return true
-  if (isOn(await $.env.get('CLAUDE_CODE_USE_FOUNDRY'))) return true
-  return !!(await $.env.get('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'))
-}
-
 function show(values: ClaudeLimits, cache: UsageCache | null): void {
   values.api = cache?.data ?? null
   values.lastSuccessAt = cache?.lastSuccessAt ?? null
@@ -122,43 +89,24 @@ type UsageRequest = {
   parse: (body: unknown) => UsageData | null
 }
 
-// One read: the account's cache when it is fresh (this or another session
-// read it), else the API. One key per provider and account: CLAUDE_CONFIG_DIR
-// picks the credentials, and one shared cache once showed one account's
-// numbers in another's session (DESIGN, "Usage cache and staleness").
+// One read for a matching direct usage provider: use the shared cache when
+// fresh (this or another session read it), else fetch the provider API.
+// Keyed by provider and CLAUDE_CONFIG_DIR so profiles keep separate caches.
 async function readUsage($: EngineInterface, values: ClaudeLimits): Promise<void> {
   if (reading) return
   reading = true
   try {
     const provider = directUsageProvider(await $.env.get('ANTHROPIC_BASE_URL'))
-    // Direct third-party providers deliberately bypass the nonessential-
-    // traffic flag. Their exact URL match and own credential are the boundary;
-    // the Anthropic OAuth path below keeps every existing skip.
-    if (!provider && await isApiSkipped($)) return show(values, null)
-
-    let key: string
-    let request: UsageRequest
-    if (provider) {
-      // Literal names: plugin validation lists every environment variable read.
-      const token = (await $.env.get('ANTHROPIC_AUTH_TOKEN'))?.trim()
-        || (await $.env.get('ANTHROPIC_API_KEY'))?.trim()
-      if (!token) return show(values, null)
-      key = `usage:${provider.id}:${(await $.env.get('CLAUDE_CONFIG_DIR')) ?? ''}`
-      request = { url: provider.usageUrl, init: { headers: { Authorization: `Bearer ${token}` } }, parse: provider.parse }
-    } else {
-      // Never refresh an OAuth token: refresh tokens are single-use, so a
-      // refresh revokes Claude Code's own token (anthropics/claude-code#42603).
-      // The engine holds the credential; the mod only borrows a handle. Null
-      // (a gateway, a 3P provider, no login) or an API key: the OAuth endpoint
-      // has nothing for it, so no API numbers and no badge.
-      const auth = await $.session.authorize()
-      if (!auth || auth.kind !== 'bearer') return show(values, null)
-      key = `usage:${(await $.env.get('CLAUDE_CONFIG_DIR')) ?? ''}`
-      request = {
-        url: USAGE_URL,
-        init: { headers: { 'anthropic-beta': 'oauth-2025-04-20' }, auth: auth.handle },
-        parse: parseUsage,
-      }
+    if (!provider) return show(values, null)
+    // Literal names: plugin validation lists every environment variable read.
+    const token = (await $.env.get('ANTHROPIC_AUTH_TOKEN'))?.trim()
+      || (await $.env.get('ANTHROPIC_API_KEY'))?.trim()
+    if (!token) return show(values, null)
+    const key = `usage:${provider.id}:${(await $.env.get('CLAUDE_CONFIG_DIR')) ?? ''}`
+    const request: UsageRequest = {
+      url: provider.usageUrl,
+      init: { headers: { Authorization: `Bearer ${token}` } },
+      parse: provider.parse,
     }
     const now = await $.clock.now()
     const cache = asCache(await $.store.get(key))
@@ -197,15 +145,9 @@ async function fetchUsage(
     const backoff = Math.max(POLL_MS, Math.min(POLL_MS * 2 ** (count - 1), MAX_429_BACKOFF_MS))
     return failed('rate_limited', now + Math.max(backoff, retryAfterMs(res.headers['retry-after'])), count)
   }
-  // 401: the server rejected the credential. VantageHUD kept a fingerprint of
-  // the rejected token so it would not re-send that token faster than the
-  // transient pace while re-reading the store for a new one. The Anthropic
-  // OAuth path never sees the token, and the handle is opaque (the types do not
-  // say it changes with the credential), so every 401 waits that pace; after a re-login the
-  // badge or the stale mark can stay up to RETRY_MS (+ CHECK_MS).
   if (res.status === 401) return failed('auth', now + RETRY_MS)
   // 403 is what a region block answers too, which no credential fixes: a
-  // network error, not auth (VantageHUD).
+  // network error, not auth.
   if (res.status !== 200) return failed('network', now + RETRY_MS)
   let data: UsageData | null = null
   try {
@@ -222,42 +164,4 @@ async function fetchUsage(
 export function retryAfterMs(value: string | undefined): number {
   if (typeof value !== 'string' || !/^\s*\d+\s*$/.test(value)) return 0
   return Math.min(parseInt(value, 10) * 1000, MAX_RETRY_AFTER_MS)
-}
-
-type Json = Record<string, any>
-
-function percentOf(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null
-}
-
-function timeOf(value: unknown): number | null {
-  if (typeof value !== 'string' || !value) return null
-  const ms = Date.parse(value)
-  return Number.isNaN(ms) ? null : ms
-}
-
-// The parts of the usage API's answer the engine does not give. Null when the
-// body is not the usage shape (no five_hour, seven_day or limits): counted as
-// a failed read, keeping the last good numbers.
-//
-// - extra: the `limit_usd` / `spent_usd` form, and none at all when the
-//   answer carries `used_credits`: VantageHUD showed no extra: for
-//   `used_credits` on an Enterprise or unknown plan, and a mod cannot read the
-//   plan (`$.session.identity()` answers only an organization-installed mod).
-export function parseUsage(body: unknown): UsageData | null {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
-  const b = body as Json
-  if (!('five_hour' in b) && !('seven_day' in b) && !Array.isArray(b.limits)) return null
-  let extra: ExtraBucket | null = null
-  const x = b.extra_usage as Json | null | undefined
-  if (x && x.is_enabled !== false && x.used_credits == null && typeof x.limit_usd === 'number' && x.limit_usd > 0) {
-    const spentUsd = typeof x.spent_usd === 'number' ? x.spent_usd : 0
-    extra = {
-      percent: percentOf(x.utilization) ?? percentOf((spentUsd / x.limit_usd) * 100) ?? 0,
-      resetsAt: timeOf(x.resets_at),
-      spentUsd,
-      limitUsd: x.limit_usd,
-    }
-  }
-  return { extra }
 }

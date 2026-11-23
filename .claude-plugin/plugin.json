@@ -65,12 +65,6 @@
       "description": "Show the 5-hour and 7-day limits with time to reset (5h:4%(4h37m))",
       "default": true
     },
-    "spendLimit": {
-      "type": "boolean",
-      "title": "Rate limits: spend limit",
-      "description": "Add a gateway's spend limit (spend:63%(25d3h))",
-      "default": false
-    },
     "repo": {
       "type": "boolean",
       "title": "Repository",

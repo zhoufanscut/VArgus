@@ -154,7 +154,6 @@ Rate-limit API reads stop when `rateLimits` is off. Git/svn polling stops when
 
 On a detached Git HEAD, the branch label shows the checkout ref or short commit ID.
 During a rebase it shows the branch being rebased when available.
-The spend limit (`spendLimit`) defaults to off.
 Claude shows the account-wide five-hour and seven-day limits when available.
 
 - **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only alert and
@@ -213,13 +212,12 @@ install or replace the command in the original scope using the manual setup abov
 
 With Claude Code on Kimi Code, an exact match for
 `https://api.kimi.com/coding/` or `https://api.kimi.ai/coding/` enables Kimi's
-`/coding/v1/usages` read and its `5h` and `1m` windows. It uses the existing
+`/coding/v1/usages` read and its `5h` and `1mo` windows. It uses the existing
 `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` as a Bearer token, only for the
 matched HTTPS host; the token is not cached. No Claude OAuth read or extra
 setting is involved. Usage reads share the 90-second cache. Direct third-party
-providers deliberately bypass `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`; the
-flag still blocks the Anthropic OAuth usage read. Kimi's direct usage endpoint
-is experimental, so its response shape may change.
+providers deliberately bypass `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. Kimi's
+direct usage endpoint is experimental, so its response shape may change.
 
 Claude's token total includes the main conversation and subagents since the mod
 first loaded, or since the last `/clear` or in-session resume. Cache reads and

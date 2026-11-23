@@ -93,7 +93,7 @@ export class CodexCollector {
     v.session.counts.tokens = this.usage
     const limit = [...this.limits.values()].find(l => v.session.model !== undefined && l.normalModelSlug === v.session.model)
       ?? this.limits.get('codex')
-    v.limits = limit ? [this.window(limit.primary, 'primary'), this.window(limit.secondary, 'secondary')]
+    v.limits = limit ? [this.window(limit.primary, '1st'), this.window(limit.secondary, '2nd')]
       .filter((w): w is QuotaWindow => w !== undefined) : []
     return v
   }
@@ -101,7 +101,7 @@ export class CodexCollector {
   private window(w: Limits['primary'], fallbackLabel: string): QuotaWindow | undefined {
     if (!w) return undefined
     const mins = w.windowDurationMins
-    const label = mins == null ? fallbackLabel
+    const label = mins == null || !Number.isFinite(mins) || mins <= 0 ? fallbackLabel
       : mins % 1440 === 0 ? `${mins / 1440}d` : mins % 60 === 0 ? `${mins / 60}h` : `${mins}m`
     return { label, percent: w.usedPercent, resetsAt: w.resetsAt == null ? null : w.resetsAt * 1000 }
   }

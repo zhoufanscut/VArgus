@@ -13,19 +13,14 @@ export type DirectUsageProvider = {
   parse: (body: unknown) => UsageData | null
 }
 
-function kimiUsage(body: unknown): UsageData | null {
-  const usage = parseKimiUsage(body)
-  return usage ? { ...usage, extra: null } : null
-}
-
 const DIRECT_PROVIDERS: DirectUsageProvider[] = [
   {
     id: 'kimi.com', baseUrl: 'https://api.kimi.com/coding', usageUrl: 'https://api.kimi.com/coding/v1/usages',
-    parse: kimiUsage,
+    parse: parseKimiUsage,
   },
   {
     id: 'kimi.ai', baseUrl: 'https://api.kimi.ai/coding', usageUrl: 'https://api.kimi.ai/coding/v1/usages',
-    parse: kimiUsage,
+    parse: parseKimiUsage,
   },
 ]
 

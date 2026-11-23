@@ -149,12 +149,15 @@ test('unknown context and invalid header stay unknown', () => {
   assert.equal(collectOmo(h.ctx, [], undefined, now).session.contextWindow, undefined)
 })
 
-test('quotas show window labels without account names and preserve readings and stale errors', () => {
+test('quotas show window labels without account names, omit spend_limit, and keep recent readings on error without stale marks', () => {
   const accounts: AccountLimits[] = [{
     provider: 'chatgpt-subscription', account: 'a', reportedAt: new Date(now - MAX_STALE_MS).toISOString(),
     windows: [
       { id: 'codex:primary', label: '5h', windowMinutes: 300, usedPercent: 0 },
       { id: 'codex:secondary', label: '7d', usedPercent: 40, resetsAt: new Date(now + 1000).toISOString() },
+      { id: 'spend_limit', label: 'spend', usedPercent: 63 },
+      { id: 'spend_limit', label: 'spend', windowMinutes: 10080, usedPercent: 55 },
+      { id: 'spend_limit', label: '5h', windowMinutes: 300, usedPercent: 20 },
       { id: 'codex:review', label: 'review', windowMinutes: 120, usedPercent: 100 },
     ],
   }, {
@@ -164,7 +167,7 @@ test('quotas show window labels without account names and preserve readings and 
   const limits = collectOmo(host().ctx, accounts, undefined, now).limits
   assert.deepEqual(limits, [
     { label: '5h', percent: 0, resetsAt: null },
-    { label: '5h', percent: 50, resetsAt: null, stale: true },
+    { label: '5h', percent: 50, resetsAt: null },
     { label: '7d', percent: 40, resetsAt: now + 1000 },
     { label: 'review', percent: 100, resetsAt: null },
   ])
@@ -191,7 +194,7 @@ test('quota windows follow the selected provider across subscription and API mod
     { provider: 'chatgpt-subscription', account: 'chatgpt', reportedAt: new Date(now).toISOString(),
       windows: [{ id: '5h', label: '5h', usedPercent: 37 }] },
     { provider: 'kimi-coding', account: 'kimi', reportedAt: new Date(now).toISOString(),
-      windows: [{ id: 'monthly', label: '1m', usedPercent: 62 }] },
+      windows: [{ id: 'monthly', label: '1mo', usedPercent: 62 }] },
   ]
   for (const [provider, expected] of [
     ['chatgpt-subscription', [37]], ['kimi-coding', [62]], ['deepseek', []],

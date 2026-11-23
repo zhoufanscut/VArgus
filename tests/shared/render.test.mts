@@ -85,10 +85,10 @@ describe('render', () => {
 describe('options and labels', () => {
   test('defaults as VantageHUD, theme graphite; wrong types keep the default', () => {
     assert.deepEqual(resolveOptions({}), DEFAULTS)
-    assert.deepEqual(resolveOptions({ spendLimit: true, theme: 'ember', folder: 'no' }), {
-      ...DEFAULTS, spendLimit: true, theme: 'ember',
+    assert.deepEqual(resolveOptions({ effort: false, theme: 'ember', folder: 'no' }), {
+      ...DEFAULTS, effort: false, theme: 'ember',
     })
-    assert.equal(DEFAULTS.spendLimit, false)
+    assert.equal(Object.hasOwn(resolveOptions({ spendLimit: true }), 'spendLimit'), false)
     assert.equal(resolveOptions({ folderFoldThreshold: 16 }).folderFoldThreshold, 16)
     for (const width of [0, -1, 16.5, Infinity, '16']) {
       assert.equal(resolveOptions({ folderFoldThreshold: width }).folderFoldThreshold, 24)
@@ -103,18 +103,27 @@ describe('options and labels', () => {
   })
 })
 
-test('quota windows retain labels, stale marks, reset times and dollar amounts', () => {
+test('quota windows retain labels, clamp percents, format reset times, and paint all API badges in alert', () => {
   const f = input()
   f.v.limits = [
     { label: 'account-a/5h', percent: 10, resetsAt: null },
-    { label: 'account-b/5h', percent: 20, stale: true, resetsAt: 3600000 },
+    { label: 'account-b/5h', percent: 120, resetsAt: 3600000 },
     { label: 'provider/day\n', percent: 30, resetsAt: null },
     { label: 'expired', percent: 99, resetsAt: 0 },
   ]
-  assert.equal(limits(f), 'account-a/5h:10% account-b/5h:20%*(~1h0m) provider/day?:30%')
+  assert.equal(limits(f), 'account-a/5h:10% account-b/5h:100%(1h0m) provider/day?:30%')
 
-  f.v.limits = [{ label: 'extra', percent: 40, resetsAt: 60_000, cost: { spentUsd: 20, limitUsd: 50 } }]
-  assert.equal(limits(f), 'extra:40%($20.00/$50.00)(1m)')
+  const styled = input()
+  styled.t = makeTheme('graphite', false)
+  styled.v.limits = ['rate_limited', 'auth', 'network']
+  assert.equal(
+    limits(styled),
+    [
+      styled.t.paint('alert', '[API 429]'),
+      styled.t.paint('alert', '[API auth]'),
+      styled.t.paint('alert', '[API err]'),
+    ].join(' '),
+  )
 })
 
 test('stale rows style the separator and marker, fit complete readings, handle WSL and leave empty rows empty', () => {

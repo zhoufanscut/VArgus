@@ -115,7 +115,7 @@ After removing the host integration, check these paths separately.
 |---|---|
 | `~/proj/VArgus` | the working folder |
 | `opus:high` / `carbon:high` / `sol:xhigh` | the model and effort level |
-| `5h:` `7d:` `1m:` | rate-limit windows with used percent and time until reset. `1m` is Kimi Code's membership monthly total. |
+| `5h:` `7d:` `1mo:` | rate-limit windows with used percent and time until reset. `1mo` is Kimi Code's membership monthly total. |
 | `ctx:` | how full the context window is |
 | `token:` | uncached input plus output tokens (scope varies by host), with the latest prompt's cache-hit share and output speed (`t/s`) in parentheses when available |
 | `session:` | age of the session or active conversation |

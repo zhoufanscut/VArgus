@@ -151,17 +151,18 @@ Kimi highspeed variants and Venice's Kimi K3 Fast use `(fast)`.
 
 Context stays absent until OmO supplies a reading. Quotas follow the selected
 provider: Claude and ChatGPT subscription windows come from OmO's subscription-limit
-service. Kimi Coding uses its regional usage endpoint for five-hour and monthly
+service. Kimi Coding uses its regional usage endpoint for five-hour (`5h`) and monthly (`1mo`)
 windows, enabled by default. OmO resolves its existing Kimi credential and region;
 VArgus does not read credential files. Usage refreshes every 90 seconds while Kimi
-is selected, with a 30-second request timeout and longer waits after errors.
+is selected, with a 30-second request timeout and longer waits after errors; on
+failure, Kimi keeps its last readings for up to 15 minutes before showing an error badge.
 Switching to another provider clears Kimi readings and cancels pending requests.
 Other API providers do not inherit unrelated subscription windows.
 Only window labels, percentages and reset
 countdowns are shown; provider/account names are hidden. Multiple accounts' windows
 remain separate, without implying which account is active. Unknown durations keep their host labels.
-Errored reports retain a stale `*` for at most 15 minutes; older readings and expired
-windows disappear. An existing `kimi-coding-status.js` extension remains independent
+Errored subscription reports keep their last readings for at most 15 minutes; older
+readings and expired windows disappear. An existing `kimi-coding-status.js` extension remains independent
 and may also poll Kimi; VArgus does not consume its hidden footer status.
 
 Support targets the native TUI. RPC, JSON and print modes are not modified.

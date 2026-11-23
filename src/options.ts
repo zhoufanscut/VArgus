@@ -10,7 +10,6 @@ export const DEFAULTS = {
   session: true,
   callCounts: true,
   rateLimits: true,
-  spendLimit: false,
   repo: true,
   branch: true,
   status: true,
