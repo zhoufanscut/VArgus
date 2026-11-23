@@ -2,13 +2,13 @@ import type { Fragment, FragmentInput } from '../../core/types.ts'
 import { cleanText } from '../text.ts'
 
 // 9-11. repo, branch, working-tree status, for git or svn (DESIGN,
-// "Fragments"): prefixes and `@` in `label`, repo and branch names in bold
-// `text` like folder, worktree in `faint`, an operation in progress in `alert`,
+// "Fragments"): prefixes and `@` in `label`, repo and branch names in plain
+// `text` (no bold), worktree in `faint`, an operation in progress in `alert`,
 // then `add` / `del` / `track` for all status counts (including conflicts in `del`).
 
 // repo:VArgus
 export const repo: Fragment = ({ v, l, t }) =>
-  v.vcs.kind && v.vcs.repo ? t.paint('label', `${l.repo}:`) + t.bold(t.paint('text', cleanText(v.vcs.repo))) : null
+  v.vcs.kind && v.vcs.repo ? t.paint('label', `${l.repo}:`) + t.paint('text', cleanText(v.vcs.repo)) : null
 
 // git: branch:main, branch:main (wt:x), or a detached HEAD:
 // branch:@v1.0, branch:@a1b2c3d (bisect), branch:feat (rebase 2/3).
@@ -25,10 +25,10 @@ export const branch: Fragment = f => {
 
 function branchName({ v, l, t }: FragmentInput): string | null {
   if (!v.vcs.kind) return null
-  if (v.vcs.branch) return t.bold(t.paint('text', cleanText(v.vcs.branch)))
+  if (v.vcs.branch) return t.paint('text', cleanText(v.vcs.branch))
   const d = v.vcs.detached
   if (v.vcs.kind !== 'git' || !d) return null
-  const name = t.bold(t.paint('text', cleanText(d.name)))
+  const name = t.paint('text', cleanText(d.name))
   const head = d.onBranch ? name : t.paint('label', l.detachedAt) + name
   if (!d.operation) return head
   const step = d.progress ? ` ${d.progress}` : ''

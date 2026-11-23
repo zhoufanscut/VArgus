@@ -5,7 +5,7 @@ import { collectAntigravityPayload, type AntigravityPayload } from '../hosts/ant
 import { antigravityDisplay } from '../hosts/antigravity/display.ts'
 import { updateAntigravityRate } from '../hosts/antigravity/rate.ts'
 import { readTranscriptState, resolveTranscriptPath } from '../hosts/antigravity/transcript.ts'
-import { readCachedGit } from '../hosts/antigravity/vcs.ts'
+import { readCachedVcs } from '../hosts/antigravity/vcs.ts'
 import { resolveLabels } from '../i18n/index.ts'
 import { readCheckoutOptions, readOptionsFile } from '../node/options.ts'
 import { resolveOptions } from '../options.ts'
@@ -114,7 +114,7 @@ async function collectLine(payload: AntigravityPayload, runtime: StatuslineRunti
   }
 
   if (collectVcs && values.core.cwd) {
-    values.vcs = await readCachedGit(
+    values.vcs = await readCachedVcs(
       values.core.cwd,
       sessionKey,
       mutatingToolsSeen,

@@ -24,5 +24,5 @@ export function shortAntigravityModelName(model: string): string | null {
 }
 
 export function antigravityDisplay(session: SessionValues) {
-  return displaySession(session, shortAntigravityModelName, 0)
+  return displaySession(session, shortAntigravityModelName)
 }

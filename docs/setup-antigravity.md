@@ -156,7 +156,7 @@ The explicit file accepts JSON or JSONC and uses the keys and defaults in
 - On a detached Git HEAD, the branch label shows the checkout ref or short commit ID
   and any detected Git operation. During a rebase it shows the branch being rebased
   when available. Setting `repo`, `branch` and `status` all to `false` disables
-  Git checks. Setting `NO_COLOR` in the shell environment disables ANSI colours.
+  Git/SVN checks. Setting `NO_COLOR` in the shell environment disables ANSI colours.
 
 ## Update
 

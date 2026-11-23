@@ -108,8 +108,9 @@ If the row is blank and the current view is unknown, see
 
 If the worker misses its check-ins, the next bar redraw shows the last readings
 with `| ⌛stale` (`| !:stale` on WSL). This also applies when a previously readable transcript
-becomes unreadable while its view is still identified. The marker clears after a successful update, including a
-normal update while you type. The bar follows your existing `status-interval`.
+becomes unreadable while its view is still identified. The marker clears once the view is
+identified and updated again (paused drafts and side chats retain the marker while the view is unknown).
+The bar follows your existing `status-interval`.
 With periodic redraws disabled, the marker can appear on the next redraw.
 
 ## Configure
@@ -140,7 +141,7 @@ An explicit JSON or JSONC file uses the [shared defaults](../src/options.ts) and
 Pass it with `!vargus on --config /absolute/path/to/vargus.json`, or with
 `!vargus reload --config /absolute/path/to/vargus.json` for an existing helper.
 `NO_COLOR` disables colours in the environment that starts the helper.
-Setting `repo`, `branch` and `status` all to `false` stops the row's Git polling.
+Setting `repo`, `branch` and `status` all to `false` stops the row's Git/SVN polling.
 On a detached HEAD, the branch label shows the checkout ref or short commit ID
 and any detected Git operation. During a rebase it shows the branch being rebased when available.
 
@@ -235,7 +236,8 @@ sub-0.5 s bursts preserve the previous speed. Compaction, a response without
 fresh usage, or changing the model or Fast tier clears the affected suffix.
 Tool counts replay completed visible items and exclude `!` controls. `🤖2` counts
 recorded subagent starts in the displayed conversation; `⚡3` counts observed skill
-loads, once per skill path per user turn. Missing readings stay hidden.
+loads, once per skill path per user turn. Context defaults to `ctx:0%` until
+recorded; other missing readings stay hidden.
 Live readings come from saved transcripts and update as Codex writes them.
 Model and effort picks appear once recorded.
 For paginated subagent logs with Codex's recorded history boundary, VArgus skips
@@ -279,8 +281,8 @@ helper still owns a row; use `!vargus off` to restore the footer too.
 Leave the composer empty when switching views and wait for footer automation before
 typing. Drafts pause footer automation and are preserved. Standalone Codex keeps
 the last confirmed readings while typing hides the view label, including with plain
-`!vargus on`; no options file is needed. Readings and time stay frozen without an
-extra label in the row; `!vargus status` reports that the current view is unknown.
+`!vargus on`; no options file is needed. Readings and time stay frozen with the
+row's `| ⌛stale` (`| !:stale` on WSL) marker; `!vargus status` reports that the current view is unknown.
 These historical readings may belong to a different view after navigation.
 Live readings resume when the view is identified again. Holding readings in an
 ordinary draft requires a previously rendered snapshot in the current helper and

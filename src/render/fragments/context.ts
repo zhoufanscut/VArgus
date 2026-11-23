@@ -4,7 +4,6 @@ import type { Fragment } from '../../core/types.ts'
 const ALERT_PERCENT = 80
 
 export const context: Fragment = ({ display, l, t }) => {
-  if (display.contextPercent === undefined) return null
   const percent = Math.min(100, Math.max(0, Math.round(display.contextPercent)))
   return t.paint('label', `${l.context}:`) + t.paint(percent >= ALERT_PERCENT ? 'alert' : 'calm', `${percent}%`)
 }

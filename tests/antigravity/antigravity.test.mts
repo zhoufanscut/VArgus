@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
-import { appendFile, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { fixtureCheckout } from '../checkout.mts'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { promisify } from 'node:util'
 import { renderAntigravityStatusLine } from '../../src/cli/antigravity.ts'
 import { collectAntigravityPayload, type AntigravityPayload } from '../../src/hosts/antigravity/collect.ts'
@@ -21,7 +21,7 @@ import {
   resolveTranscriptPath,
   type TranscriptState,
 } from '../../src/hosts/antigravity/transcript.ts'
-import { POLL_MS, readCachedGit } from '../../src/hosts/antigravity/vcs.ts'
+import { POLL_MS, readCachedVcs } from '../../src/hosts/antigravity/vcs.ts'
 import { en } from '../../src/i18n/en.ts'
 import { DEFAULTS } from '../../src/options.ts'
 import { limits } from '../../src/render/fragments/limits.ts'
@@ -422,7 +422,7 @@ test('readTranscriptState incrementally counts uncached tokens, tools, agents an
   }
 })
 
-test('readCachedGit honours 5s polling, mutating-tool invalidation, linked worktrees and detached refs', async () => {
+test('readCachedVcs honours 5s polling, mutating-tool invalidation, linked worktrees and detached refs', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vargus-agy-git-'))
   try {
     const cacheDir = join(root, 'cache')
@@ -447,7 +447,7 @@ test('readCachedGit honours 5s polling, mutating-tool invalidation, linked workt
     await git(repoDir, ['tag', 'v1.0.0'])
 
     const t0 = 1_000_000
-    const first = await readCachedGit(repoDir, 'session-a', 0, cacheDir, t0)
+    const first = await readCachedVcs(repoDir, 'session-a', 0, cacheDir, t0)
     assert.equal(first.kind, 'git')
     assert.equal(first.repo, 'VArgus')
     assert.equal(first.branch, 'main')
@@ -455,45 +455,98 @@ test('readCachedGit honours 5s polling, mutating-tool invalidation, linked workt
 
     // Create an untracked file; within POLL_MS with no mutating tool, cached counts stay.
     await writeFile(join(repoDir, 'untracked.txt'), 'new\n')
-    const cachedHit = await readCachedGit(repoDir, 'session-a', 0, cacheDir, t0 + 500)
+    const cachedHit = await readCachedVcs(repoDir, 'session-a', 0, cacheDir, t0 + 500)
     assert.equal(cachedHit.counts?.untracked, 0)
 
     // A mutating tool in the same session invalidates the poll window (past 10x lastMs).
-    const afterTool = await readCachedGit(repoDir, 'session-a', 1, cacheDir, t0 + 2000)
+    const afterTool = await readCachedVcs(repoDir, 'session-a', 1, cacheDir, t0 + 2000)
     assert.equal(afterTool.counts?.untracked, 1)
 
     // Past POLL_MS, external changes also show without a tool call.
     await rm(join(repoDir, 'untracked.txt'))
     const tAfterPoll = t0 + 2000 + POLL_MS + 2000
-    const afterPoll = await readCachedGit(repoDir, 'session-a', 1, cacheDir, tAfterPoll)
+    const afterPoll = await readCachedVcs(repoDir, 'session-a', 1, cacheDir, tAfterPoll)
     assert.equal(afterPoll.counts?.untracked, 0)
 
     // Lowering `mutatingToolsSeen` (after `/rewind`) updates the baseline in cache so the
     // next mutating tool (`0 -> 1`) invalidates immediately within `POLL_MS`.
-    await readCachedGit(repoDir, 'session-a', 0, cacheDir, tAfterPoll + 500)
+    await readCachedVcs(repoDir, 'session-a', 0, cacheDir, tAfterPoll + 500)
     await writeFile(join(repoDir, 'after-rewind.txt'), 'new\n')
-    const afterRewindTool = await readCachedGit(repoDir, 'session-a', 1, cacheDir, tAfterPoll + 2000)
+    const afterRewindTool = await readCachedVcs(repoDir, 'session-a', 1, cacheDir, tAfterPoll + 2000)
     assert.equal(afterRewindTool.counts?.untracked, 1)
 
     // Backward wall-clock jump (`now < cached.lastEnd`) refreshes instead of freezing.
     await rm(join(repoDir, 'after-rewind.txt'))
-    const afterClockJump = await readCachedGit(repoDir, 'session-a', 1, cacheDir, t0)
+    const afterClockJump = await readCachedVcs(repoDir, 'session-a', 1, cacheDir, t0)
     assert.equal(afterClockJump.counts?.untracked, 0)
 
     // Linked worktree + detached HEAD: worktree add --detach shows short SHA;
     // `git checkout v1.0.0` records the reflog entry and names `v1.0.0`.
     const wtDir = join(root, 'wt-feature')
     await git(repoDir, ['worktree', 'add', '--detach', wtDir, 'v1.0.0'])
-    const detachedSha = await readCachedGit(wtDir, 'session-b', 0, cacheDir, t0 + 20_000)
+    const detachedSha = await readCachedVcs(wtDir, 'session-b', 0, cacheDir, t0 + 20_000)
     assert.equal(detachedSha.worktree, 'wt-feature')
     assert.equal(detachedSha.branch, null)
     assert.match(detachedSha.detached?.name ?? '', /^[0-9a-f]{7}$/)
 
     await git(wtDir, ['checkout', '-B', 'temp-branch'])
     await git(wtDir, ['checkout', 'v1.0.0'])
-    const detachedTag = await readCachedGit(wtDir, 'session-b', 1, cacheDir, t0 + 30_000)
+    const detachedTag = await readCachedVcs(wtDir, 'session-b', 1, cacheDir, t0 + 30_000)
     assert.deepEqual(detachedTag.detached, { name: 'v1.0.0', onBranch: false, operation: null, progress: '' })
   } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('readCachedVcs reads SVN working copies outside Git and honours cache invalidation', { skip: process.platform === 'win32' }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vargus-agy-svn-'))
+  const savedPath = process.env.PATH
+  try {
+    const cacheDir = join(root, 'cache')
+    const bin = join(root, 'bin')
+    const wc = join(root, 'wc')
+    const stateFile = join(root, 'status.xml')
+    await mkdir(bin, { recursive: true })
+    await mkdir(join(wc, '.svn'), { recursive: true })
+    await writeFile(stateFile, '<status><target path="."></target></status>')
+    const shim = join(bin, 'svn')
+    await writeFile(shim, [
+      '#!/bin/sh',
+      'if [ "$2" = "info" ]; then',
+      '  printf \'%s\' \'<info><entry kind="dir" path="." revision="3"><url>https://h/r/agysvn/trunk</url><repository><root>https://h/r</root></repository></entry></info>\'',
+      'elif [ "$2" = "status" ]; then',
+      `  cat "${stateFile}"`,
+      'else exit 1; fi',
+    ].join('\n') + '\n')
+    await chmod(shim, 0o755)
+    process.env.PATH = `${bin}${delimiter}${savedPath ?? ''}`
+
+    const t0 = 2_000_000
+    // A legacy v1 VCS cache entry (within POLL_MS, non-backward clock) must be
+    // invalidated and upgraded to v2 rather than returning stale kind: null.
+    const vcsCacheFile = cachePath(cacheDir, 'vcs', wc)
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(vcsCacheFile, JSON.stringify({
+      version: 1,
+      cwd: wc,
+      lastEnd: t0 - 100,
+      lastMs: 5,
+      mutatingBySession: { 'session-svn': 0 },
+      vcs: { kind: null, repo: null, branch: null, detached: null, worktree: null, revision: null, counts: null },
+    }))
+    const first = await readCachedVcs(wc, 'session-svn', 0, cacheDir, t0)
+    assert.equal(first.kind, 'svn')
+    assert.equal(first.repo, 'agysvn')
+    assert.equal(first.branch, 'trunk')
+    assert.equal(first.counts?.modified, 0)
+    assert.equal(JSON.parse(await readFile(vcsCacheFile, 'utf8')).version, 2)
+
+    await writeFile(stateFile, '<status><target path="."><entry path="f"><wc-status item="modified" props="none"></wc-status></entry></target></status>')
+    assert.equal((await readCachedVcs(wc, 'session-svn', 0, cacheDir, t0 + 500)).counts?.modified, 0)
+    assert.equal((await readCachedVcs(wc, 'session-svn', 1, cacheDir, t0 + 2000)).counts?.modified, 1)
+  } finally {
+    if (savedPath === undefined) delete process.env.PATH
+    else process.env.PATH = savedPath
     await rm(root, { recursive: true, force: true })
   }
 })

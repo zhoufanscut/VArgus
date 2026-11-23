@@ -2,7 +2,7 @@ import type { TokenName } from '../core/types.ts'
 
 // Five bundled palettes derived from VantageHUD 0.6.0 (src/hud/themes.js), 9
 // hex tokens each (two tiers: calm and alert). What each token paints:
-//   text      location anchors (folder, repo name, branch/ref name), with bold
+//   text      location anchors (bold folder; plain repo and branch/ref names)
 //   label     `xxx:` prefixes, model name, detached `@`, call counts and stale text
 //   faint     secondary parentheticals (`(fast)`, reset times, cache/speed, `(wt:x)`)
 //   sep       the ` | ` separator (including before the stale marker)

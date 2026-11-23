@@ -120,9 +120,9 @@ After removing the host integration, check these paths separately.
 | `token:` | uncached input plus output tokens (scope varies by host), with the latest prompt's cache-hit share and output speed (`t/s`) in parentheses when available |
 | `session:` | age of the session or active conversation |
 | `🔧` `🤖` `⚡` | tool, agent and skill counts described in the host guides |
-| `repo:` `branch:` | Git repository and branch. On a detached HEAD, the label shows the checkout ref or short commit ID. During a rebase it shows the branch being rebased when available. Claude Code also supports SVN. |
+| `repo:` `branch:` | Git or SVN repository and branch. On a detached Git HEAD, the label shows the checkout ref or short commit ID. During a rebase it shows the branch being rebased when available. |
 | `?4` | Working-tree marks include staged `+`, modified `!`, untracked `?`, conflicts `✗`, ahead `⇡`, and behind `⇣`. |
-| `⌛stale` / `!:stale` | shown at the end of the row on a missed or failed refresh (WSL uses `!:stale`); keeps the last refreshed readings and clears on recovery |
+| `⌛stale` / `!:stale` | shown at the end of the row on a missed, failed or paused refresh (WSL uses `!:stale`); keeps the last refreshed readings and clears on recovery |
 
 ## Development
 

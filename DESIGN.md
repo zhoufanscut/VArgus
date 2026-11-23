@@ -34,7 +34,7 @@ formatting and themes live in shared code.
 - Hosts collect independently. CLI entries wire Node hosts to outputs. OmO's
   registration module is the only host entry that imports an output adapter.
   Output adapters stay independent of collectors and CLI wiring.
-- `src/node` holds reusable Node I/O such as the Git reader. It depends on
+- `src/node` holds reusable Node I/O such as the Git and SVN readers. It depends on
   Node and shared code. The Claude mod graph uses local modules and the
   `claude-code` API.
 - The Node launcher runs the checkout's TypeScript directly on Node 24.12 or
@@ -72,10 +72,11 @@ first if it is the only one left. Width counts terminal columns. A host output
 can fit the result further, as OmO does at grapheme boundaries.
 
 The [folder fragment](src/render/fragments/folder.ts) measures the sanitized,
-home-shortened path before styling. Above `folderFoldThreshold` it shows `.../`
-and the last two components in full. The folded label can exceed the threshold.
-At 16 columns `~/projects/payments/api` folds. The 24-column default keeps
-that 23-column path intact.
+home-shortened path before styling. Above `folderFoldThreshold` it folds to
+`.../` and the last two components in full only when that drops at least one
+ancestor and is strictly shorter than the home-shortened path. The folded label
+can still exceed the threshold. At 16 columns `~/projects/payments/api` folds.
+The 24-column default keeps that 23-column path intact.
 
 The [token fragment](src/render/fragments/tokens.ts) keeps the session's token
 total and appends a faint parenthesized suffix with the latest request's
@@ -159,10 +160,9 @@ used Daylight through a reload. VArgus remembers a rewrite with the shared value
 that requested it and retires that association when the file value changes.
 
 The displayed context percentage is rounded and uses `calm` below 80% and `alert`
-from 80%, with no text suffixes. WSL uses text call-count and stale marks
-(`T:`, `A:`, `S:`, `!:stale`) painted in `label`. Hosts choose the context
-supplied to the renderer, including whether an unknown reading is omitted or
-starts at `ctx:0%`.
+from 80%, with no text suffixes. Unknown context readings default to `ctx:0%`
+across all hosts. WSL uses text call-count and stale marks
+(`T:`, `A:`, `S:`, `!:stale`) painted in `label`.
 
 ### Colours
 
@@ -170,13 +170,13 @@ starts at `ctx:0%`.
 Each palette in [palettes.ts](src/theme/palettes.ts) defines 9 tokens: `text`,
 `label`, `faint`, `sep`, `calm`, `alert`, `add`, `del` and `track`.
 The palette registry uses own-property lookup and falls back for unknown
-names. When a host enables `NO_COLOR`, the theme returns plain text. External
+names. When a host sees a non-empty `NO_COLOR`, the theme returns plain text. External
 text passes through [control-character sanitization](src/render/text.ts) before
 styling. The tmux output translates the renderer's styles without recursively
 expanding content from paths or branches.
 
-- Location anchors (`folder`, `repo` name and `branch` / detached ref name) use
-  bold `text`.
+- Location anchors use `text`: bold for `folder`, plain for `repo` name and
+  `branch` / detached ref name.
 - Prefixes (`xxx:`), the model name (with or without effort), detached `@`,
   call-count numbers, and stale text (`⌛stale` with unstyled `⌛`, or WSL
   `T:`/`A:`/`S:`/`!:stale`) use `label`.
@@ -205,9 +205,11 @@ display text written directly into fragments.
 
 ### Repository readings
 
-[Node Git I/O](src/node/git.ts) is shared by Codex, OmO and Antigravity. Claude
-uses its own [Git and SVN collector](src/hosts/claude/collect/vcs.ts) through the
-mod API. Both Git readers use porcelain status with `GIT_OPTIONAL_LOCKS=0` and
+[Node VCS I/O](src/node/vcs.ts) ([Git](src/node/git.ts) and [SVN](src/node/svn.ts))
+is shared by Codex, OmO and Antigravity. Claude uses its own
+[Git and SVN collector](src/hosts/claude/collect/vcs.ts) through the mod API.
+Pure Git porcelain and SVN XML/URL parsers live in [src/core/vcs.ts](src/core/vcs.ts).
+Both Git readers use porcelain status with `GIT_OPTIONAL_LOCKS=0` and
 `core.fsmonitor=false` to avoid rewriting the user's index or invoking its
 filesystem monitor. When porcelain reports `# branch.head (detached)`, the
 branch fragment uses the actual worktree's metadata to name the checkout and
@@ -219,9 +221,10 @@ Hosts gate polling on the repository, branch and status switches. They poll
 on a five-second baseline and hold off a slow walk by ten times its duration.
 Claude, OmO and Antigravity can request earlier work after relevant tools
 subject to that hold. A directory or worktree change invalidates old readings.
-Claude falls back to local SVN XML in a working copy outside Git, counting
-property as well as item status. The SVN branch label shows the name from
-the repository URL, for example `branch:trunk`.
+All four hosts fall back to local SVN XML in a working copy outside Git (Git
+wins ties when nested), counting property as well as item status. The SVN
+branch label shows the name from the repository URL without a revision suffix,
+for example `branch:trunk`.
 
 ## Codex CLI
 
@@ -274,8 +277,10 @@ as the root fallback. Labels in titles, ambiguous agent paths and clipped or
 foreign identifiers cannot establish a different thread.
 
 An unidentified ordinary draft or a side chat (`/btw` or `/side`) may hold
-the last confirmed snapshot. The snapshot freezes readings and time while
-fitting to the current width. The current view remains unknown and
+the last confirmed snapshot. The snapshot freezes readings and time and reuses
+the whole-row stale marker (` | ⌛stale`, or ` | !:stale` on WSL, fitting to
+the current width; `staleLine` is idempotent so an expired tmux deadline does
+not double-append it). The current view remains unknown and
 `status` identifies the source of the held readings. An unrecognized popup,
 foreign ID or clipped ordinary draft blanks the row. At an empty composer,
 a blank row releases ownership and discards the snapshot. Reload also needs
@@ -475,12 +480,12 @@ The [command](src/cli/antigravity.ts) runs once per host refresh. It reads
 stdin JSON and emits one ANSI line with two leading spaces, included in the
 width budget. Empty or invalid input can exit successfully with no row.
 Successful rows for identified conversations are cached alongside the transcript
-and Git caches. A collection exception can reuse that conversation’s row for
+and VCS caches. A collection exception can reuse that conversation’s row for
 the same workspace, profile, options and colour mode. With no further invocation
 there is no observer to draw a warning. Lazy dispatch keeps this path
 independent of the Codex and tmux modules.
 The `agy` 1.5.8 Linux probe on 2026-11-14 observed roughly 300 ms streaming
-refreshes, which is why transcript and Git state are cached across invocations.
+refreshes, which is why transcript and VCS state are cached across invocations.
 
 [Payload collection](src/hosts/antigravity/collect.ts) uses host context,
 model, terminal width and quota. The model label can supply effort before the
@@ -540,9 +545,10 @@ while model switches (ignoring effort changes), compaction (`CHECKPOINT`),
 `/rewind` and zero-output steps clear it.
 [Google status-line payload](https://antigravity.google/docs/cli/statusline)
 
-[Git cache](src/hosts/antigravity/vcs.ts) is scoped to the working directory.
-Mutating tools can trigger a refresh after the slow-walk hold. Each Git subprocess
-has a four-second timeout to leave room inside the host's status command budget.
+[VCS cache](src/hosts/antigravity/vcs.ts) is scoped to the working directory.
+Mutating tools can trigger a refresh after the slow-walk hold. Git and any SVN
+fallback share a four-second timeout budget to leave room inside the host's
+status command budget.
 
 Setup in the agent sandbox hands the final change to the user. The Linux
 `agy` 1.5.8 probe was denied a read of the protected settings file. The host's

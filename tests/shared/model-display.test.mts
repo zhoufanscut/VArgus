@@ -67,7 +67,7 @@ test('Codex short names retain full IDs internally and preserve unfamiliar model
   assert.deepEqual(oldOptions, defaults)
   assert.match(render(codexInput(v, oldOptions)), /🔧7 🤖2 ⚡3/)
   assert.doesNotMatch(render(codexInput(v, { ...defaults, callCounts: false })), /🔧|🤖|⚡/)
-  assert.equal(context(codexInput(v)), null)
+  assert.equal(context(codexInput(v)), 'ctx:0%')
   v.session.contextPercent = 0
   assert.equal(context(codexInput(v)), 'ctx:0%')
 })

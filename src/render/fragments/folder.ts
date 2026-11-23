@@ -9,7 +9,9 @@ function folderLabel(cwd: string, home: string | undefined, threshold: number): 
   const windows = /^(?:[A-Za-z]:[\\/]|\\\\)/.test(cwd)
   const path = windows ? cwd.replace(/^[A-Za-z]:/, '') : cwd
   const parts = path.split(windows ? /[\\/]+/ : /\/+/).filter(Boolean)
-  return parts.length ? '.../' + cleanText(parts.slice(-2).join('/')) : label
+  if (parts.length <= 2) return label
+  const folded = '.../' + cleanText(parts.slice(-2).join('/'))
+  return stringWidth(folded) < stringWidth(label) ? folded : label
 }
 
 export const folder: Fragment = ({ v, t, o }) =>

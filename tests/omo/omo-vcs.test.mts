@@ -1,9 +1,9 @@
 import { test, type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { promisify } from 'node:util'
 import { initialVcs } from '../../src/core/vcs.ts'
 import { OmoVcs } from '../../src/hosts/omo/vcs.ts'
@@ -138,4 +138,35 @@ test('OmO clears Git values on an empty or non-repository directory', async t =>
   await reader.refresh(cwd)
   assert.deepEqual(await reader.refresh(''), initialVcs())
   assert.deepEqual(await reader.refresh(root), initialVcs())
+})
+
+test('OmO reads SVN working copies outside Git', { skip: process.platform === 'win32' }, async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-svn-'))
+  const savedPath = process.env.PATH
+  t.after(async () => {
+    if (savedPath === undefined) delete process.env.PATH
+    else process.env.PATH = savedPath
+    await rm(dir, { recursive: true, force: true })
+  })
+  const bin = join(dir, 'bin')
+  const wc = join(dir, 'wc')
+  await mkdir(bin, { recursive: true })
+  await mkdir(join(wc, '.svn'), { recursive: true })
+  const shim = join(bin, 'svn')
+  await writeFile(shim, [
+    '#!/bin/sh',
+    'if [ "$2" = "info" ]; then',
+    '  printf \'%s\' \'<info><entry kind="dir" path="." revision="5"><url>https://h/r/demo/branches/rel</url><repository><root>https://h/r</root></repository></entry></info>\'',
+    'elif [ "$2" = "status" ]; then',
+    '  printf \'%s\' \'<status><target path="."><entry path="x"><wc-status item="added" props="none"></wc-status></entry></target></status>\'',
+    'else exit 1; fi',
+  ].join('\n') + '\n')
+  await chmod(shim, 0o755)
+  process.env.PATH = `${bin}${delimiter}${savedPath ?? ''}`
+
+  const vcs = await new OmoVcs().refresh(wc)
+  assert.equal(vcs.kind, 'svn')
+  assert.equal(vcs.repo, 'demo')
+  assert.equal(vcs.branch, 'rel')
+  assert.deepEqual(vcs.counts, { staged: 1, modified: 0, untracked: 0, conflicted: 0, ahead: 0, behind: 0 })
 })

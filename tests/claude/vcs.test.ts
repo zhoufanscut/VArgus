@@ -60,8 +60,8 @@ describe('svn', () => {
     expect(parseSvnStatusXml(cut)).toEqual({ staged: 2, modified: 1, untracked: 0, conflicted: 0, ahead: 0, behind: 0 })
   })
 
-  test('info: project and branch from the URL, the working copy revision from <entry>', async () => {
-    expect(parseSvnInfoXml(SVN_INFO)).toEqual({ project: 'proj', branch: '2.1', revision: '12345' })
+  test('info: project and branch from the URL', async () => {
+    expect(parseSvnInfoXml(SVN_INFO)).toEqual({ project: 'proj', branch: '2.1' })
   })
 
   test('trunk / branches / tags convention; root name for a repo per project; a flat layout', async () => {

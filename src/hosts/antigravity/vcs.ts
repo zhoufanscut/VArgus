@@ -1,14 +1,14 @@
 import { initialVcs, type VcsValues } from '../../core/vcs.ts'
-import { readGit } from '../../node/git.ts'
+import { readVcs } from '../../node/vcs.ts'
 import { cachePath, readCache, writeCache } from './cache.ts'
 
-export { readGit } from '../../node/git.ts'
+export { readGit, readSvn, readVcs } from '../../node/vcs.ts'
 
 export const POLL_MS = 5000
 const HOLD_FACTOR = 10
 
 type VcsCache = {
-  version: 1
+  version: 2
   cwd: string
   lastEnd: number
   lastMs: number
@@ -16,7 +16,7 @@ type VcsCache = {
   vcs: VcsValues
 }
 
-export async function readCachedGit(
+export async function readCachedVcs(
   cwd: string,
   sessionKey: string,
   mutatingToolsSeen: number,
@@ -27,12 +27,12 @@ export async function readCachedGit(
   const file = cachePath(cacheDir, 'vcs', cwd)
   const cached = await readCache<VcsCache>(file)
   const mutatingMap: Record<string, number> = { ...(cached?.mutatingBySession ?? {}) }
-  if (cached && cached.version === 1 && cached.cwd === cwd) {
+  if (cached && cached.version === 2 && cached.cwd === cwd) {
     const hold = HOLD_FACTOR * Math.max(0, cached.lastMs)
     const previous = sessionKey ? cached.mutatingBySession?.[sessionKey] : undefined
     const asked = previous !== undefined && mutatingToolsSeen > previous
     // Treat backward clock steps (`now < cached.lastEnd`) as due so NTP/WSL2
-    // clock adjustments never freeze Git readings.
+    // clock adjustments never freeze VCS readings.
     const due = now < cached.lastEnd
       || (asked ? now >= cached.lastEnd + hold : now >= cached.lastEnd + Math.max(POLL_MS, hold))
     if (!due) {
@@ -45,11 +45,11 @@ export async function readCachedGit(
   }
 
   const start = Date.now()
-  const vcs = await readGit(cwd)
+  const vcs = await readVcs(cwd)
   const end = Date.now()
   if (sessionKey) mutatingMap[sessionKey] = mutatingToolsSeen
   const entry: VcsCache = {
-    version: 1,
+    version: 2,
     cwd,
     lastEnd: now + Math.max(0, end - start),
     lastMs: Math.max(0, end - start),

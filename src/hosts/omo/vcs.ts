@@ -1,5 +1,5 @@
 import { initialVcs, type VcsValues } from '../../core/vcs.ts'
-import { readGit } from '../../node/git.ts'
+import { readVcs } from '../../node/vcs.ts'
 
 const POLL_MS = 5000
 const HOLD_FACTOR = 10
@@ -42,7 +42,7 @@ export class OmoVcs {
       if (now >= this.timing.start && now < this.timing.end + interval) return this.vcs
     }
     const start = Date.now()
-    const pending = readGit(cwd).then(vcs => {
+    const pending = readVcs(cwd).then(vcs => {
       if (generation !== this.generation || this.disposed) return
       const duration = Math.max(0, Date.now() - start)
       this.timing = { start: now, end: now + duration, duration }

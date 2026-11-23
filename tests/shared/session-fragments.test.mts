@@ -34,7 +34,7 @@ function input(
     limits: [],
     vcs: initialVcs(),
   }
-  return { v, display: displaySession(v.session, shortModelName, 0), o: { ...DEFAULTS, ...o }, l: en, t: more.color ? t : plain, now: more.now ?? 0 }
+  return { v, display: displaySession(v.session, shortModelName), o: { ...DEFAULTS, ...o }, l: en, t: more.color ? t : plain, now: more.now ?? 0 }
 }
 
 const counts = (c: Partial<Values['session']['counts']>) => ({ ...initialSession().counts, ...c })
@@ -109,7 +109,7 @@ describe('context', () => {
     assert.equal(at(100), want(alert, '100%'))
   })
 
-  test('rounded and clamped; a supplied zero fallback shows 0%', () => {
+  test('rounded and clamped; unknown context defaults to 0%', () => {
     assert.equal(context(input({ contextPercent: 19.6 })), 'ctx:20%')
     assert.equal(context(input({ contextPercent: 140 })), 'ctx:100%')
     assert.equal(context(input({})), 'ctx:0%')

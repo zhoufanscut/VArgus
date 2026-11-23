@@ -98,14 +98,17 @@ function world(
 const start = { cwd: '/home/u/proj/x', surface: 'terminal', isInteractive: true } as const
 
 describe('line file', () => {
-  test('the numeric folder threshold folds the path and keeps both names in full',
+  test('the numeric folder threshold folds the path only when it shortens and keeps both names in full',
     { options: { ...FOLDER_ONLY.options, folderFoldThreshold: 16 } }, async ($, on) => {
       const clock = mock.clock(on, { now: 42 })
       const w = world(on, clock)
-      w.cwd = () => '/home/u/界界界界界/api-service'
+      w.cwd = () => '/home/u/work/界界界界界/api-service'
       await $.session.start({ ...start, cwd: w.cwd() })
       await clock.settle()
       expect(w.writes[0]?.text).toBe('.../界界界界界/api-service')
+      w.cwd = () => '/home/u/界界界界界/api-service'
+      await clock.advance(1000)
+      expect(w.writes.at(-1)?.text).toBe('~/界界界界界/api-service')
     })
 
   test('writes a temp file, then mv puts it in place; session.start passes on unchanged', FOLDER_ONLY, async ($, on) => {

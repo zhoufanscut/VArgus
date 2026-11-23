@@ -68,7 +68,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
   let active: {
     ctx: Context
     stop(): void
-    update(forceGit?: boolean): void
+    update(forceVcs?: boolean): void
     messageStart(event: unknown): void
     messageUpdate(event: unknown): void
     messageEnd(event: unknown): void
@@ -90,7 +90,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     const options = resolveOptions({ ...fileOptions, ...settings.options })
     const vcs = new OmoVcs()
     const kimi = new OmoKimi(() => instance.ctx.modelRegistry.getProviderAuth('kimi-coding'))
-    const theme = makeTheme(options.theme, process.env.NO_COLOR !== undefined)
+    const theme = makeTheme(options.theme, Boolean(process.env.NO_COLOR))
     const labels = resolveLabels('en')
     const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
     let disposed = false
@@ -151,7 +151,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         stream = undefined
         tokensPerSecond = undefined
       },
-      update(forceGit = false) {
+      update(forceVcs = false) {
         if (disposed) return
         const current = instance.ctx
         try {
@@ -171,7 +171,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         values.vcs = vcs.values
         output.refresh()
         if (options.repo || options.branch || options.status) {
-          void vcs.refresh(current.cwd, Date.now(), forceGit).then(reading => {
+          void vcs.refresh(current.cwd, Date.now(), forceVcs).then(reading => {
             if (disposed) return
             values.vcs = reading
             output.refresh()

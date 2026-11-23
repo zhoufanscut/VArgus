@@ -2,9 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, delimiter, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { CodexCollector } from '../../src/hosts/codex/collect.ts'
 import { codexLine } from '../../src/cli/codex/line.ts'
@@ -43,7 +43,7 @@ test('cwd changes clear the previous Git readings before rendering or pausing', 
     const changed = await line(500)
     assert.equal(changed.split(' | ')[0], '.../' + basename(dir) + '/second')
     assert.doesNotMatch(changed, /repo:|branch:|\?1/)
-    assert.equal(line.paused(500), changed)
+    assert.equal(line.paused(500), changed + ' | ⌛stale')
     await ready(collector, 'second')
     assert.match(await line(500), /repo:second.*branch:second.*\?1/)
     const vcs = collector.snapshot()!.vcs
@@ -94,7 +94,7 @@ test('Codex renders a detached tag and linked worktree by default and with a leg
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
-test('codexLine forwards isWsl to call counts and preserves it when paused', async () => {
+test('codexLine forwards isWsl to call counts and reuses the stale marker when paused', async () => {
   const collector = new CodexCollector('/repo', undefined)
   collector.start('/repo', 0)
   collector.snapshot()!.session.counts.tools = 3
@@ -103,5 +103,37 @@ test('codexLine forwards isWsl to call counts and preserves it when paused', asy
   const line = codexLine(collector, options, colored, true)
   const live = await line(200)
   assert.ok(live.includes(colored.paint('label', 'T:3')))
-  assert.equal(line.paused(200), live)
+  assert.equal(line.paused(200), live + colored.paint('sep', ' | ') + colored.paint('label', '!:stale'))
+})
+
+test('codexLine renders SVN working copies outside Git', { skip: process.platform === 'win32' }, async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-line-svn-'))
+  const savedPath = process.env.PATH
+  t.after(async () => {
+    if (savedPath === undefined) delete process.env.PATH
+    else process.env.PATH = savedPath
+    await rm(dir, { recursive: true, force: true })
+  })
+  const bin = join(dir, 'bin')
+  const wc = join(dir, 'wc')
+  await mkdir(bin, { recursive: true })
+  await mkdir(join(wc, '.svn'), { recursive: true })
+  const shim = join(bin, 'svn')
+  await writeFile(shim, [
+    '#!/bin/sh',
+    'if [ "$2" = "info" ]; then',
+    '  printf \'%s\' \'<info><entry kind="dir" path="." revision="5"><url>https://h/r/svnproj/trunk</url><repository><root>https://h/r</root></repository></entry></info>\'',
+    'elif [ "$2" = "status" ]; then',
+    '  printf \'%s\' \'<status><target path="."><entry path="a"><wc-status item="unversioned" props="none"></wc-status></entry></target></status>\'',
+    'else exit 1; fi',
+  ].join('\n') + '\n')
+  await chmod(shim, 0o755)
+  process.env.PATH = `${bin}${delimiter}${savedPath ?? ''}`
+
+  const collector = new CodexCollector(wc, undefined)
+  collector.start(wc, 0)
+  const line = codexLine(collector, resolveCodexOptions({ session: false }), theme)
+  await line(500)
+  await ready(collector, 'svnproj')
+  assert.match(await line(500), /repo:svnproj \| branch:trunk \| \?1/)
 })

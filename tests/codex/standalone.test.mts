@@ -208,7 +208,7 @@ trust_level = "trusted"
     if (!initialPrompt) {
       await tmux('send-keys', '-l', '-t', pane, 'Fresh default draft')
       await delay(1400)
-      assert.doesNotMatch(await row(), /\[paused:/)
+      assert.match(await row(), / \| (?:⌛|!:)stale$/)
       assert.match(await row(), new RegExp('token:' + expectedTokens.replace('.', '\\.')))
       const controlDir = join(temporary, `vargus-control-${process.getuid?.() ?? 'user'}`)
       const runtimePath = join(controlDir, (await readdir(controlDir)).find(n => n.endsWith('.json'))!)
@@ -217,6 +217,7 @@ trust_level = "trusted"
       assert.equal(paused.paused.label, 'main')
       await tmux('send-keys', '-t', pane, 'C-e', 'C-u')
       await wait(async () => JSON.parse(await readFile(runtimePath, 'utf8')).selected ?? '', new RegExp(paused.thread))
+      assert.doesNotMatch(await row(), /(?:⌛|!:)stale/)
       assert.equal(posts, afterTurn)
     }
     if (initialPrompt) {
@@ -231,11 +232,11 @@ trust_level = "trusted"
       const sidePosts = posts
       assert.ok(sidePosts > afterTurn)
       const heldRow = async () => (await runtime()).paused?.thread === main.thread ? row() : ''
-      await wait(heldRow, /token:6\.4k/)
+      await wait(heldRow, /token:6\.4k.* \| (?:⌛|!:)stale$/)
       assert.equal((await runtime()).selected, undefined)
       await tmux('send-keys', '-l', '-t', pane, 'A preserved side draft')
       await delay(1400)
-      assert.match(await heldRow(), /token:6\.4k/)
+      assert.match(await heldRow(), /token:6\.4k.* \| (?:⌛|!:)stale$/)
       assert.match(await screen(), /› A preserved side draft/)
       await tmux('send-keys', '-t', pane, 'C-e', 'C-u')
       await wait(screen, /› Ask a follow-up question/)
@@ -243,6 +244,7 @@ trust_level = "trusted"
       await wait(async () => (await runtime()).selected ?? '', new RegExp(main.thread))
       assert.equal((await runtime()).paused, undefined)
       assert.match(await row(), /token:6\.4k/)
+      assert.doesNotMatch(await row(), /(?:⌛|!:)stale/)
       assert.deepEqual(await readdir(footerDir), mainBackups)
       assert.equal(posts, sidePosts)
       afterTurn = sidePosts
@@ -298,12 +300,12 @@ trust_level = "trusted"
         // Observe past the render interval so a stale pre-draft row cannot pass.
         await delay(1400)
         assert.match(await row(), /token:6\.4k/, JSON.stringify({ text, screen: await input.snapshot(), state: await runtime() }))
-        assert.doesNotMatch(await row(), /\[paused:/)
+        assert.match(await row(), / \| (?:⌛|!:)stale$/)
         assert.equal((await runtime()).selected, undefined)
         assert.equal((await runtime()).paused.thread, active.thread)
         assert.equal(codexComposer(await input.snapshot(), ''), false)
         await tmux('send-keys', '-t', pane, 'C-a'); await delay(1200)
-        assert.match(await row(), /token:6\.4k/, 'moving the draft caret must keep the row')
+        assert.match(await row(), /token:6\.4k.* \| (?:⌛|!:)stale$/, 'moving the draft caret must keep the row')
         assert.equal((await runtime()).selected, undefined)
         assert.equal((await runtime()).paused.thread, active.thread)
         assert.equal(await readFile(join(footerDir, backupName), 'utf8'), backup)
@@ -322,6 +324,7 @@ trust_level = "trusted"
         while ((await runtime()).selected !== active.thread && Date.now() < until) await delay(100)
         assert.equal((await runtime()).selected, active.thread)
         assert.equal((await runtime()).paused, undefined)
+        assert.doesNotMatch(await row(), /(?:⌛|!:)stale/)
       }
     }
     if (initialPrompt) {

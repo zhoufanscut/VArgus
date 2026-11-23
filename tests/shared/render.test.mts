@@ -55,7 +55,7 @@ describe('render', () => {
     assert.equal(render(input(), [['folder', ORDER[0]![1]]]), '~/proj/x')
   })
 
-  test('folder folds after home shortening and preserves the last two names in full', () => {
+  test('folder folds after home shortening only when it omits an ancestor and shortens the label', () => {
     function label(cwd: string, width = 24, home = '/home/u') {
       const f = input(undefined, { folderFoldThreshold: width })
       Object.assign(f.v.core, { cwd, home })
@@ -66,7 +66,11 @@ describe('render', () => {
     assert.equal(label('/home/u/projects/payments/api'), '~/projects/payments/api')
     assert.equal(label('/home/u/projects/payments/api', 16), '.../payments/api')
     assert.equal(label('/work/company/enterprise-payments/api-server'), '.../enterprise-payments/api-server')
-    assert.equal(label('/abcdefghijklmnop', 8), '.../abcdefghijklmnop')
+    assert.equal(label('/abcdefghijklmnop', 8), '/abcdefghijklmnop')
+    assert.equal(label('/a/very-long-second-part', 8), '/a/very-long-second-part')
+    assert.equal(label('///a///b///', 2), '///a///b///')
+    assert.equal(label('/ab/b/c', 2), '/ab/b/c')
+    assert.equal(label('/abc/b/c', 2), '.../b/c')
     assert.equal(label('C:\\', 1), 'C:\\')
     assert.equal(label('/var/work/company/platform/services/billing/api'), '.../billing/api')
     assert.equal(label('/work/company/services/payments/api-server'), '.../payments/api-server')
@@ -75,9 +79,10 @@ describe('render', () => {
     assert.equal(label('/a/long/directory/a\\b/api', 16), '.../a\\b/api')
     assert.equal(label('/work/company/abcdefghijklmnop/api', 16), '.../abcdefghijklmnop/api')
     assert.equal(label('/work/company/p/abcdefghijklmnop', 16), '.../p/abcdefghijklmnop')
-    assert.equal(label('/home/u/abcdefghijklmnop', 16), '.../u/abcdefghijklmnop')
+    assert.equal(label('/home/u/abcdefghijklmnop', 16), '~/abcdefghijklmnop')
     assert.equal(label('/company/projects/界界界界界/api', 16), '.../界界界界界/api')
-    assert.equal(label('/home/u/界界界界界/api', 11), '.../界界界界界/api')
+    assert.equal(label('/home/u/界界界界界/api', 11), '~/界界界界界/api')
+    assert.equal(label('/home/u/work/界界界界界/api', 11), '.../界界界界界/api')
     assert.equal(label('/company/projects/p/' + 'e\u0301'.repeat(20), 8), '.../p/' + 'e\u0301'.repeat(20))
   })
 })
@@ -167,7 +172,7 @@ test('stale rows style the separator and marker, fit complete readings, handle W
   repoPipe.v.vcs = { ...initialVcs(), kind: 'git', repo: ' | foo', branch: 'main' }
   const repoRow = render(repoPipe)
   const expectedPrefix = render({ ...repoPipe, o: { ...DEFAULTS, repo: false, branch: false } })
-  assert.equal(staleLine(repoRow, 34, { t }), expectedPrefix + sep + '⌛' + t.paint('label', 'stale'))
+  assert.equal(staleLine(repoRow, 43, { t }), expectedPrefix + sep + '⌛' + t.paint('label', 'stale'))
 
   const wtPipe = input()
   wtPipe.t = t
@@ -178,5 +183,16 @@ test('stale rows style the separator and marker, fit complete readings, handle W
   wtPipe.v.vcs = { ...initialVcs(), kind: 'git', repo: 'R', branch: 'main', worktree: 'wt | 2' }
   const wtRow = render(wtPipe)
   const beforeBranch = render({ ...wtPipe, o: { ...DEFAULTS, branch: false } })
-  assert.equal(staleLine(wtRow, 55, { t }), beforeBranch + sep + '⌛' + t.paint('label', 'stale'))
+  assert.equal(staleLine(wtRow, 64, { t }), beforeBranch + sep + '⌛' + t.paint('label', 'stale'))
+
+  // Idempotent on rows that already end with the stale marker (including narrower refits).
+  assert.equal(staleLine(staleLine(row)), row + ' | ⌛stale')
+  assert.equal(staleLine(staleLine(row), 22), 'sol | ctx:7% | ⌛stale')
+  assert.equal(staleLine('⌛stale', 20), '⌛stale')
+  assert.equal(staleLine(' | ⌛stale', 20), '⌛stale')
+  const styledStale = staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 22, { t })
+  assert.equal(staleLine(styledStale, 22, { t }), styledStale)
+  assert.equal(staleLine('⌛' + t.paint('label', 'stale'), 20, { t }), '⌛' + t.paint('label', 'stale'))
+  const wslStale = staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 22, { t, isWsl: true })
+  assert.equal(staleLine(wslStale, 22, { t, isWsl: true }), wslStale)
 })

@@ -26,12 +26,11 @@ const LEGACY_FAMILY = /opus|sonnet|haiku|fable/
 export function displaySession(
   session: SessionValues,
   shortName: (id: string) => string | null,
-  missingContext?: number,
 ): SessionDisplay {
   return {
     modelName: shortName(cleanText(session.model ?? '')),
     speed: session.fast ? 'fast' : undefined,
-    contextPercent: session.contextPercent ?? missingContext,
+    contextPercent: session.contextPercent ?? 0,
     counts: session.counts,
   }
 }

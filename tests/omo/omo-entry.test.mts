@@ -131,6 +131,29 @@ test('OmO warns on a redraw after missed updates and clears the warning after re
   }
 })
 
+test('OmO honours NO_COLOR only when non-empty, matching the other hosts', () => {
+  const hadNoColor = 'NO_COLOR' in process.env
+  const savedNoColor = process.env.NO_COLOR
+  try {
+    process.env.NO_COLOR = ''
+    const colored = host()
+    colored.load(); colored.event('session_start')
+    const emptyLine = colored.row?.render(200).join('') ?? ''
+    colored.event('session_shutdown')
+    assert.ok(emptyLine.includes('\x1b[38;2;'), 'empty NO_COLOR must keep ANSI colours')
+
+    process.env.NO_COLOR = '1'
+    const plain = host()
+    plain.load(); plain.event('session_start')
+    const plainLine = plain.row?.render(200).join('') ?? ''
+    plain.event('session_shutdown')
+    assert.equal(plainLine.includes('\x1b['), false, 'non-empty NO_COLOR must strip all ANSI codes')
+  } finally {
+    if (hadNoColor) process.env.NO_COLOR = savedNoColor
+    else delete process.env.NO_COLOR
+  }
+})
+
 test('OmO configuration changes rendering and keeps a disabled session disabled', async () => {
   const h = host()
   h.load(); h.event('session_start')

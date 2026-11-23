@@ -149,7 +149,7 @@ and `deepseek-v4-pro` displays `deepseek-pro`. Unfamiliar IDs are shown in full.
 Speed appears after effort, as in `sol:high(fast)` and `sol:high(ultrafast)`.
 Kimi highspeed variants and Venice's Kimi K3 Fast use `(fast)`.
 
-Context stays absent until OmO supplies a reading. Quotas follow the selected
+Context defaults to `ctx:0%` until OmO supplies a reading. Quotas follow the selected
 provider: Claude and ChatGPT subscription windows come from OmO's subscription-limit
 service. Kimi Coding uses its regional usage endpoint for five-hour (`5h`) and monthly (`1mo`)
 windows, enabled by default. OmO resolves its existing Kimi credential and region;

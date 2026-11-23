@@ -70,8 +70,8 @@ test('OmO row hides the footer, redraws and restores only its own widget on disp
   assert.deepEqual(row?.render(100), [])
 })
 
-test('OmO preserves unknown context and renders short model families', () => {
-  assert.equal(context(input()), null)
+test('OmO defaults unknown context to 0% and renders short model families', () => {
+  assert.equal(context(input()), 'ctx:0%')
   assert.equal(context(input({ contextPercent: 0 })), 'ctx:0%')
   for (const [id, expected] of [
     ['gpt-6.1-sol', 'sol:high'],
