@@ -4,12 +4,15 @@ import { MAX_STALE_MS } from '../../src/core/limits.ts'
 import {
   collectOmo,
   collectOmoAgents,
+  collectOmoSpawns,
   collectOmoSubagentSkills,
   createOmoHistory,
   foldOmoEntry,
+  isPreLaunchTaskRefusal,
   omoHistoryReducer,
   omoSettingsReducer,
   OMO_CONFIG_ENTRY,
+  reconcileOmoSpawns,
 } from '../../src/hosts/omo/collect.ts'
 import type { AccountLimits, HistoryReducer, NativeContext, SessionEntry } from '../../src/hosts/omo/contracts.ts'
 
@@ -446,4 +449,219 @@ test('explicitly resolved task skills attribute to accepted children, exclude mi
   foldOmoEntry(reusedState, refusedEntry, 'line:3')
   assert.equal(reusedState.counts.skills, 0)
   assert.deepEqual([...reusedState.subagentSkills.get('st_00000007')!], ['audit'])
+})
+
+test('isPreLaunchTaskRefusal recognizes admission-exhausted model chains while preserving mid-turn chain exhaustion', () => {
+  // Single-model refusal and two-model fallback chain exhaustion at admission (single and batch items) exclude agent + skill.
+  const h = host([
+    assistant('a1', [call('t1', 'task'), call('t2', 'task'), call('t3', 'task')]),
+    result('r-single', 't1', 'task', {
+      mode: 'spawn',
+      task_id: 'st_00000001',
+      status: 'error',
+      failure_kind: 'model_unavailable',
+      failure_reason: 'model_not_in_child_profile',
+      skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+    }),
+    result('r-batch-exhausted', 't2', 'task', {
+      mode: 'spawn',
+      status: 'error',
+      items: [
+        {
+          task_id: 'st_00000002',
+          status: 'error',
+          failure_kind: 'model_chain_exhausted',
+          failure_reason: 'model_not_in_child_profile',
+          skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+        },
+        {
+          task_id: 'st_00000003',
+          status: 'error',
+          failure_kind: 'model_chain_exhausted',
+          failure_reason: 'catalog_probe_failed',
+          skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+        },
+        {
+          task_id: 'st_00000004',
+          status: 'error',
+          failure_kind: 'model_chain_exhausted',
+          failure_reason: 'catalog_probe_timed_out',
+          skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+        },
+        // Control: mid-turn chain exhaustion carries no admission failure_reason -> MUST still count agent + skill.
+        {
+          task_id: 'st_00000005',
+          status: 'error',
+          failure_kind: 'model_chain_exhausted',
+          skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+        },
+        // Control: unrecognized failure_reason on model_chain_exhausted -> stays counted.
+        {
+          task_id: 'st_00000006',
+          status: 'error',
+          failure_kind: 'model_chain_exhausted',
+          failure_reason: 'unknown_runtime_reason',
+          skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+        },
+      ],
+    }),
+    // Control: child actually started (has child_session_id) and exhausted chain -> MUST still count.
+    result('r-started-exhausted', 't3', 'task', {
+      mode: 'spawn',
+      task_id: 'st_00000007',
+      child_session_id: 'child-7',
+      status: 'error',
+      failure_kind: 'model_chain_exhausted',
+      failure_reason: 'model_not_in_child_profile',
+      skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+    }),
+  ])
+  assert.deepEqual([...collectOmoAgents(h.ctx)].sort(), ['st_00000005', 'st_00000006', 'st_00000007'])
+  assert.equal(collectOmo(h.ctx, [], undefined, now).session.counts.agents, 3)
+  assert.deepEqual([...collectOmoSubagentSkills(h.ctx).keys()].sort(), ['st_00000005', 'st_00000006', 'st_00000007'])
+  assert.deepEqual([...collectOmoSubagentSkills(h.ctx).get('st_00000005')!], ['audit'])
+  assert.deepEqual([...collectOmoSubagentSkills(h.ctx).get('st_00000007')!], ['audit'])
+
+  // Direct predicate check for prior_runs_cost_usd > 0 launch fact.
+  assert.equal(isPreLaunchTaskRefusal({
+    status: 'error', failure_kind: 'model_unavailable', failure_reason: 'model_not_in_child_profile', prior_runs_cost_usd: 0.02,
+  }), false)
+})
+
+test('reconcileOmoSpawns cancels matching provisional pending runs while retaining launched runs and earlier epochs', () => {
+  const h = host([
+    // 1. Provisional pending run 0 refused in store.
+    result('r1', 'c1', 'task', {
+      mode: 'spawn', task_id: 'st_00000001', run_epoch: 0, status: 'pending', queue_position: 1,
+      skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+    }),
+    // 2. Provisional pending run 0 refused after walking fallback chain (store fence [0, 2]).
+    result('r2', 'c2', 'task', {
+      mode: 'spawn', task_id: 'st_00000002', run_epoch: 0, status: 'pending', queue_position: 1,
+      skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+    }),
+    // 3. Reused task_id: earlier confirmed completed run + later provisional run 1 refused in store.
+    result('r3a', 'c3a', 'task', {
+      mode: 'spawn', task_id: 'st_00000003', run_epoch: 0, status: 'completed',
+      skills: { requested: ['kept'], resolved: ['kept'], missing: [] },
+    }),
+    result('r3b', 'c3b', 'task', {
+      mode: 'spawn', task_id: 'st_00000003', run_epoch: 1, status: 'pending', queue_position: 1,
+      skills: { requested: ['dropped'], resolved: ['dropped'], missing: [] },
+    }),
+    // 4. Reused task_id with two provisional runs: run 0 kept, run 1 refused in store [1, 1].
+    result('r4a', 'c4a', 'task', {
+      mode: 'spawn', task_id: 'st_00000004', run_epoch: 0, status: 'pending', queue_position: 1,
+      skills: { requested: ['old'], resolved: ['old'], missing: [] },
+    }),
+    result('r4b', 'c4b', 'task', {
+      mode: 'spawn', task_id: 'st_00000004', run_epoch: 1, status: 'pending', queue_position: 1,
+      skills: { requested: ['new'], resolved: ['new'], missing: [] },
+    }),
+    // 5. Same-epoch provisional followed by confirmed promotes its provisional skills (both orderings).
+    result('r5a', 'c5a', 'task', {
+      mode: 'spawn', task_id: 'st_00000005', run_epoch: 0, status: 'pending', queue_position: 1,
+      skills: { requested: ['promoted'], resolved: ['promoted'], missing: [] },
+    }),
+    result('r5b', 'c5b', 'task', {
+      mode: 'spawn', task_id: 'st_00000005', run_epoch: 0, status: 'completed',
+    }),
+    result('r6a', 'c6a', 'task', {
+      mode: 'spawn', task_id: 'st_00000006', run_epoch: 0, status: 'completed',
+    }),
+    result('r6b', 'c6b', 'task', {
+      mode: 'spawn', task_id: 'st_00000006', run_epoch: 0, status: 'pending', queue_position: 1,
+      skills: { requested: ['promoted2'], resolved: ['promoted2'], missing: [] },
+    }),
+    // 6. Un-epoched provisional receipts: cancelled by [0, 0], retained by [1, 1].
+    result('r7', 'c7', 'task', {
+      mode: 'spawn', task_id: 'st_00000007', status: 'pending',
+      skills: { requested: ['ep0'], resolved: ['ep0'], missing: [] },
+    }),
+    result('r8', 'c8', 'task', {
+      mode: 'spawn', task_id: 'st_00000008', status: 'pending',
+      skills: { requested: ['ep1'], resolved: ['ep1'], missing: [] },
+    }),
+    // 7. Other OmO 5.1.61 provisional shapes without launch facts:
+    //    - foreground batch recordOutput(): status:'error' without failure_kind
+    //    - slow background start (>250ms START_REPORT_WINDOW_MS): status:'running' without effective_model
+    //    - held admission: status:'paused' without run_epoch
+    result('r9', 'c9', 'task', {
+      mode: 'spawn',
+      items: [
+        {
+          task_id: 'st_00000009', run_epoch: 0, status: 'error', error_message: 'model unavailable',
+          skills: { requested: ['batch-audit'], resolved: ['batch-audit'], missing: [] },
+        },
+        {
+          task_id: 'st_0000000a', run_epoch: 0, status: 'running',
+          skills: { requested: ['slow-audit'], resolved: ['slow-audit'], missing: [] },
+        },
+        { task_id: 'st_0000000b', status: 'paused' },
+        // Controls: launched status:'running' with effective_model and post-launch failure_kind stay confirmed.
+        {
+          task_id: 'st_0000000c', run_epoch: 0, status: 'running', effective_model: { model_id: 'gpt-6.1-sol' },
+          skills: { requested: ['live-skill'], resolved: ['live-skill'], missing: [] },
+        },
+        {
+          task_id: 'st_0000000d', run_epoch: 0, status: 'error', failure_kind: 'model_chain_exhausted',
+          skills: { requested: ['mid-skill'], resolved: ['mid-skill'], missing: [] },
+        },
+        // Control: launched foreground-batch error / running task NOT in refusedTasks stays counted.
+        {
+          task_id: 'st_0000000e', run_epoch: 0, status: 'error', error_message: 'runtime crash',
+          skills: { requested: ['runtime-skill'], resolved: ['runtime-skill'], missing: [] },
+        },
+        // Control: malformed run_epoch on a provisional receipt fails closed (retained, does not collapse to run 0)
+        // and does not pollute confirmedEpochs for a separate un-epoched provisional receipt.
+        {
+          task_id: 'st_0000000f', run_epoch: '1', status: 'pending',
+          skills: { requested: ['bad-epoch'], resolved: ['bad-epoch'], missing: [] },
+        },
+        {
+          task_id: 'st_00000010', run_epoch: -1, status: 'pending',
+          skills: { requested: ['neg-epoch'], resolved: ['neg-epoch'], missing: [] },
+        },
+        {
+          task_id: 'st_00000010', status: 'pending',
+          skills: { requested: ['unepoched-dropped'], resolved: ['unepoched-dropped'], missing: [] },
+        },
+      ],
+    }),
+  ])
+
+  const reconciled = reconcileOmoSpawns(collectOmoSpawns(h.ctx), new Map([
+    ['st_00000001', { runStartEpoch: 0, runEpoch: 0 }],
+    ['st_00000002', { runStartEpoch: 0, runEpoch: 2 }],
+    ['st_00000003', { runStartEpoch: 1, runEpoch: 1 }],
+    ['st_00000004', { runStartEpoch: 1, runEpoch: 1 }],
+    ['st_00000005', { runStartEpoch: 0, runEpoch: 0 }],
+    ['st_00000006', { runStartEpoch: 0, runEpoch: 0 }],
+    ['st_00000007', { runStartEpoch: 0, runEpoch: 0 }],
+    ['st_00000008', { runStartEpoch: 1, runEpoch: 1 }],
+    ['st_00000009', { runStartEpoch: 0, runEpoch: 0 }],
+    ['st_0000000a', { runStartEpoch: 0, runEpoch: 0 }],
+    ['st_0000000b', { runStartEpoch: 0, runEpoch: 0 }],
+    ['st_0000000c', { runStartEpoch: 0, runEpoch: 0 }],
+    ['st_0000000d', { runStartEpoch: 0, runEpoch: 0 }],
+    ['st_0000000f', { runStartEpoch: 0, runEpoch: 0 }],
+    ['st_00000010', { runStartEpoch: 0, runEpoch: 0 }],
+  ]))
+  assert.deepEqual([...reconciled.agents].sort(), [
+    'st_00000003', 'st_00000004', 'st_00000005', 'st_00000006', 'st_00000008',
+    'st_0000000c', 'st_0000000d', 'st_0000000e', 'st_0000000f', 'st_00000010',
+  ])
+  assert.deepEqual([...reconciled.skills.get('st_00000003')!], ['kept'])
+  assert.deepEqual([...reconciled.skills.get('st_00000004')!], ['old'])
+  assert.deepEqual([...reconciled.skills.get('st_00000005')!], ['promoted'])
+  assert.deepEqual([...reconciled.skills.get('st_00000006')!], ['promoted2'])
+  assert.deepEqual([...reconciled.skills.get('st_00000008')!], ['ep1'])
+  assert.deepEqual([...reconciled.skills.get('st_0000000c')!], ['live-skill'])
+  assert.deepEqual([...reconciled.skills.get('st_0000000d')!], ['mid-skill'])
+  assert.deepEqual([...reconciled.skills.get('st_0000000e')!], ['runtime-skill'])
+  assert.deepEqual([...reconciled.skills.get('st_0000000f')!], ['bad-epoch'])
+  assert.deepEqual([...reconciled.skills.get('st_00000010')!], ['neg-epoch'])
+  for (const dropped of ['st_00000001', 'st_00000002', 'st_00000007', 'st_00000009', 'st_0000000a', 'st_0000000b']) {
+    assert.equal(reconciled.skills.has(dropped), false, `expected ${dropped} skills dropped`)
+  }
 })

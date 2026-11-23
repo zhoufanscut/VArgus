@@ -321,8 +321,11 @@ open descriptor and streams each validated data frame through
 (covering multi-frame and skippable-frame files and catching premature EOF and
 trailing non-zstd bytes that Node 24's single-frame `node:zlib` zstd stream
 otherwise stops on or ignores), caches completed replay by `(ino, mtimeMs, size)` so
-unchanged cold children are not re-decompressed on later polls, and latches
-replacement or decompression/JSONL errors. The worker's `RolloutReaderCache` replaces a cached
+unchanged cold children are not re-decompressed on later polls, preserves
+remaining decompressed records after a foreign `session_meta` so a directly
+viewed mixed `.jsonl.zst` drains them on the next poll without re-decompressing
+(matching plain JSONL while keeping `attributable: false` for descendant folding),
+and latches replacement or decompression/JSONL errors. The worker's `RolloutReaderCache` replaces a cached
 reader (and its view line closure) when `view.file` changes across a
 storage-format transition. Each attributable descendant's tokens, tools, agents
 and skills fold into the rendered row and paused draft snapshot without mutating
@@ -487,18 +490,26 @@ agent counts use distinct task IDs from accepted spawns, excluding confirmed
 pre-launch refusals (`status: "error"` with a pre-launch `failure_kind` such as
 `model_unavailable`, `tools_unavailable`, `depth-exceeded`,
 `session-create-failed`, `host_unavailable`, `session_unavailable` or
-`isolation_unavailable` and no `child_session_id`, `run_stats`,
-`effective_model`, `host_session` or `pid`) while
-preserving tasks that ran and later failed (bare `status: "error"`,
-`child-unresponsive`, `model_chain_exhausted`, or an earlier accepted run under
-a reused task ID). Main-session skills lack a canonical load receipt (`SKILL.md`
+`isolation_unavailable`, or `model_chain_exhausted` carrying an explicit
+model-admission `failure_reason` from `MODEL_START_FAILURE_REASONS` —
+`model_not_in_child_profile`, `catalog_probe_timed_out` or
+`catalog_probe_failed` — and no `child_session_id`, `run_stats`,
+`effective_model`, `host_session`, `pid` or positive `prior_runs_cost_usd`)
+while preserving tasks that ran and later failed (bare `status: "error"`,
+`child-unresponsive`, mid-turn `model_chain_exhausted` without an admission
+`failure_reason`, or an earlier accepted run under a reused task ID).
+Main-session skills lack a canonical load receipt (`SKILL.md`
 reads and skill catalogs do not establish a skill load); accepted `task` spawn
 receipts carrying `skills.resolved` (single `details.skills.resolved` or
 per-item `details.items[].skills.resolved`) are attributed to the accepted child
-in `subagentSkills` (keyed by `(task_id, skill_name)` so replayed receipts or
-repeated names on the same child cannot increment twice, excluding
-`skills.missing`, `skills.rejected`, confirmed pre-launch refusals and older
-receipts without `skills`) and folded only when `includeSubagents` is enabled.
+in `subagentSkills` and `spawnReceipts` (keyed by `(task_id, skill_name)` so
+replayed receipts or repeated names on the same child cannot increment twice,
+separating provisional receipts without launch facts — `status: "pending"`,
+`"running"`, `"paused"`, or bare `"error"` without `failure_kind` — by
+`run_epoch` from confirmed runs while failing closed on malformed `run_epoch`,
+excluding `skills.missing`, `skills.rejected`, confirmed pre-launch refusals
+and older receipts without `skills`) and folded only when
+`includeSubagents` is enabled.
 For a native assistant edit that copies usage,
 registration writes a receipt naming the new entry. Older unobserved copies
 remain in the total, and equal usage amounts alone do not identify copies.
@@ -524,18 +535,26 @@ tombstones and invalid `task_id` values; fixed-point session-tree closure admits
 direct children, nested descendants, DAG nodes, team members and workpool tasks
 matching `parent_session_id` or `root_session_id`, excluding confirmed
 pre-launch refused task records from `taskIds` unless recorded child work
-exists (matching the same narrow predicate used for spawn receipts). Child JSONLs are read
+exists (matching the same narrow predicate used for spawn receipts) and
+carrying each confirmed refusal's `[run_start_epoch, notification.run_epoch]`
+fence in `SubagentSnapshot.refusedTasks` so provisional spawn receipts without
+launch facts (queued `pending`, slow-admission `running`, held `paused`, or
+bare foreground-batch `error` without `failure_kind`, in parent history or
+nested child JSONLs) for the same task and
+run are reconciled away along with their provisional skills while retaining
+previously launched runs under a reused task ID. Child JSONLs are read
 incrementally with raw-`Buffer` line carry so multi-byte UTF-8 and partial lines
 are never split, resetting from offset 0 on inode change or shrink and pruning
 removed/expunged caches. Polling uses a 1-second floor when any matched task is
 non-terminal (`pending`, `running` or `paused`) or forced (`message_end`,
 `tool_execution_end`), a 5-second idle floor when all matched children are
-terminal, and a 10x slow-scan holdoff. At render time, registration folds
+terminal, and a 10x slow-scan holdoff. At render time, registration reconciles
+main provisional spawn receipts against `refusedTasks`, folds
 subagent tokens, tools and explicitly resolved child task skills (set union of
-`(task_id, skill_name)` pairs across main-session and child-JSONL accepted spawn
-receipts) and computes agent count as the set union of main spawned `task_id`s
-and subagent `task_id`s without mutating main counts, `history.agents` or
-`history.subagentSkills`. Cache-hit percentage, output speed (`t/s`), context,
+`(task_id, skill_name)` pairs across reconciled main-session and child-JSONL
+spawn receipts) and computes agent count as the set union of reconciled main
+`task_id`s and subagent `task_id`s without mutating main counts,
+`history.agents`, `history.subagentSkills` or `history.spawnReceipts`. Cache-hit percentage, output speed (`t/s`), context,
 model, effort, session age, quotas and VCS stay on the main session. Other
 skill-loading paths outside `skills.resolved` on accepted spawn receipts remain
 uncounted, expunged tasks' tokens, tools and nested child-JSONL skill receipts

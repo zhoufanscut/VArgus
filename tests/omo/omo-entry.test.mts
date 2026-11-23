@@ -1076,3 +1076,402 @@ test('OmO attributes explicitly resolved child task skills only under includeSub
     handlers.get('session_shutdown')?.({}, ctx)
   }
 })
+
+test('OmO reconciles queued pending receipts against store refusals, excludes admission-exhausted chains, and keeps launched runs', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-entry-queued-refusal-'))
+  const home = join(dir, 'home')
+  const agentDir = join(dir, 'agent')
+  const project = join(dir, 'project')
+  const savedHome = process.env.HOME
+  const savedAgentDir = process.env.OMO_CODING_AGENT_DIR
+  const savedNoColor = process.env.NO_COLOR
+  const hadHome = 'HOME' in process.env
+  const hadAgentDir = 'OMO_CODING_AGENT_DIR' in process.env
+  const hadNoColor = 'NO_COLOR' in process.env
+  t.after(async () => {
+    if (hadHome) process.env.HOME = savedHome
+    else delete process.env.HOME
+    if (hadAgentDir) process.env.OMO_CODING_AGENT_DIR = savedAgentDir
+    else delete process.env.OMO_CODING_AGENT_DIR
+    if (hadNoColor) process.env.NO_COLOR = savedNoColor
+    else delete process.env.NO_COLOR
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  await mkdir(home, { recursive: true })
+  await mkdir(project, { recursive: true })
+  process.env.HOME = home
+  process.env.OMO_CODING_AGENT_DIR = agentDir
+  process.env.NO_COLOR = '1'
+
+  const stateDir = join(agentDir, 'projects', projectStateKey(project), 'senpi-task')
+  await mkdir(join(stateDir, 'tasks'), { recursive: true })
+
+  // 1. Two-task queued admission refusal (OmO 5.1.61 concurrency=1 fixture):
+  //    st_00000001 launched and completed; st_00000002 received a pending background receipt
+  //    (status:'pending', run_epoch:0, queue_position:1, skills.resolved:['audit']) and then
+  //    failed at model admission in the store. Also add a synchronous two-model admission
+  //    exhaustion (st_00000003) that must be omitted in BOTH default and folded modes.
+  await writeFile(join(stateDir, 'tasks', 'st_00000001.json'), JSON.stringify({
+    task_id: 'st_00000001',
+    parent_session_id: 'sess-queue',
+    root_session_id: 'sess-queue',
+    child_session_id: 'child-1',
+    status: 'completed',
+    notification: { run_epoch: 0, notified_epoch: 0 },
+    run_start_epoch: 0,
+  }))
+  await writeFile(join(stateDir, 'tasks', 'st_00000002.json'), JSON.stringify({
+    task_id: 'st_00000002',
+    parent_session_id: 'sess-queue',
+    root_session_id: 'sess-queue',
+    status: 'error',
+    failure_kind: 'model_unavailable',
+    failure_reason: 'model_not_in_child_profile',
+    notification: { run_epoch: 0, notified_epoch: -1 },
+    run_start_epoch: 0,
+  }))
+  await writeFile(join(stateDir, 'tasks', 'st_00000003.json'), JSON.stringify({
+    task_id: 'st_00000003',
+    parent_session_id: 'sess-queue',
+    root_session_id: 'sess-queue',
+    status: 'error',
+    failure_kind: 'model_chain_exhausted',
+    failure_reason: 'model_not_in_child_profile',
+    notification: { run_epoch: 1, notified_epoch: -1 },
+    run_start_epoch: 0,
+  }))
+
+  const entries: SessionEntry[] = [
+    { id: 'settings', type: 'custom', timestamp: '', customType: 'vargus-settings',
+      data: { enabled: true, options: { repo: false, branch: false, status: false } } },
+    { id: 'r1', type: 'message', timestamp: '', message: {
+      role: 'toolResult', toolCallId: 'c1', toolName: 'task',
+      details: { mode: 'spawn', task_id: 'st_00000001', run_epoch: 0, status: 'running', run_in_background: true },
+    } },
+    { id: 'r2', type: 'message', timestamp: '', message: {
+      role: 'toolResult', toolCallId: 'c2', toolName: 'task',
+      details: {
+        mode: 'spawn',
+        task_id: 'st_00000002',
+        run_epoch: 0,
+        status: 'pending',
+        queue_position: 1,
+        run_in_background: true,
+        skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+      },
+    } },
+    // Synchronous two-model fallback exhaustion from failedStartDetail() carrying skills.resolved.
+    { id: 'r3', type: 'message', timestamp: '', message: {
+      role: 'toolResult', toolCallId: 'c3', toolName: 'task',
+      details: {
+        mode: 'spawn',
+        status: 'error',
+        items: [{
+          task_id: 'st_00000003',
+          status: 'error',
+          failure_kind: 'model_chain_exhausted',
+          failure_reason: 'model_not_in_child_profile',
+          skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+        }],
+      },
+    } },
+  ]
+  const memo = new Map<object, { state: unknown; through: number }>()
+  const handlers = new Map<string, (event: unknown, ctx: Context) => void>()
+  type Context = Parameters<Parameters<OmoApi['on']>[1]>[1]
+  let command: Parameters<OmoApi['registerCommand']>[1] | undefined
+  let row: { render(width: number): string[]; invalidate(): void } | undefined
+  let onRender: (() => void) | undefined
+  let getSessionIdCalls = 0
+  const ctx: Context = {
+    modelRegistry: { getProviderAuth: async () => undefined },
+    mode: 'tui', cwd: project, model: { id: 'gpt-6.1-sol', provider: 'test' }, thinkingLevel: 'high',
+    getContextUsage: () => ({ tokens: 100, contextWindow: 1000, percent: 10 }),
+    sessionManager: {
+      getSessionId: () => { getSessionIdCalls++; return 'sess-queue' },
+      getEntry: id => entries.find(entry => entry.id === id),
+      getHeader: () => ({ timestamp: '2026-11-14T00:00:00Z' }),
+      reduceHistory<S>(reducer: HistoryReducer<S>): S {
+        const previous = memo.get(reducer)
+        let state = previous ? previous.state as S : reducer.initial()
+        for (let i = previous?.through ?? 0; i < entries.length; i++) {
+          state = reducer.add(state, entries[i]!)
+        }
+        memo.set(reducer, { state, through: entries.length })
+        return state
+      },
+    },
+    ui: {
+      setFooter() {},
+      setWidget(_key, factory) { row = factory?.({ requestRender() { onRender?.() } }) },
+      notify() {},
+    },
+  }
+  const api: OmoApi = {
+    on(name, handler) { handlers.set(name, handler); return () => handlers.delete(name) },
+    getSubscriptionLimits: () => [],
+    onSubscriptionLimits: () => () => {},
+    appendEntry(customType, data) {
+      entries.push({ id: String(entries.length), type: 'custom', timestamp: '', customType, data })
+    },
+    registerCommand(_name, value) { command = value },
+  }
+  const lineText = () => row?.render(200).join('') ?? ''
+  const waitForLine = (pattern: RegExp) => new Promise<string>((resolveWait, rejectWait) => {
+    const check = () => {
+      const current = lineText()
+      if (pattern.test(current)) {
+        clearTimeout(timeout)
+        onRender = undefined
+        resolveWait(current)
+      }
+    }
+    const timeout = setTimeout(() => {
+      onRender = undefined
+      rejectWait(new Error(`Timed out waiting for ${pattern}; got: ${lineText()}`))
+    }, 3000)
+    onRender = check
+    check()
+  })
+
+  vargus(api, {})
+  handlers.get('session_start')?.({}, ctx)
+  try {
+    // Default mode (includeSubagents: false): zero task-store reads; st_00000003 is already excluded by receipt,
+    // while queued st_00000002 remains pending in main-only view (🤖2, no skills).
+    const offLine = lineText()
+    assert.equal(getSessionIdCalls, 0)
+    assert.match(offLine, /🤖2|A:2/)
+    assert.doesNotMatch(offLine, /⚡|S:/)
+
+    // Enable includeSubagents: store scan confirms st_00000002's run-0 refusal and reconciles it and `audit` away -> 🤖1, no skill.
+    let now = 400_000
+    t.mock.method(Date, 'now', () => now)
+    await command!.handler('config {"includeSubagents":true}', ctx)
+    const reconciledLine = await waitForLine(/(?:🤖1|A:1)(?!.*(?:⚡|S:))/)
+    assert.doesNotMatch(reconciledLine, /⚡|S:/)
+
+    // 2. Other OmO 5.1.61 provisional receipt shapes reconciled against store refusals:
+    //    - queued task whose fallback chain exhausted at admission (run_epoch 0 -> 1, run_start_epoch 0)
+    //    - foreground batch recordOutput() (`status:'error'` without `failure_kind`)
+    //    - slow background launch >250ms (`status:'running'` without `effective_model`)
+    //    - held admission (`status:'paused'` without `run_epoch`)
+    for (const [taskId, record] of [
+      ['st_00000004', {
+        task_id: 'st_00000004', parent_session_id: 'sess-queue', root_session_id: 'sess-queue',
+        status: 'error', failure_kind: 'model_chain_exhausted', failure_reason: 'model_not_in_child_profile',
+        notification: { run_epoch: 1, notified_epoch: -1 }, run_start_epoch: 0,
+      }],
+      ['st_00000007', {
+        task_id: 'st_00000007', parent_session_id: 'sess-queue', root_session_id: 'sess-queue',
+        status: 'error', failure_kind: 'model_unavailable', failure_reason: 'model_not_in_child_profile',
+        notification: { run_epoch: 0, notified_epoch: -1 }, run_start_epoch: 0,
+      }],
+      ['st_00000008', {
+        task_id: 'st_00000008', parent_session_id: 'sess-queue', root_session_id: 'sess-queue',
+        status: 'error', failure_kind: 'model_unavailable', failure_reason: 'catalog_probe_failed',
+        notification: { run_epoch: 0, notified_epoch: -1 }, run_start_epoch: 0,
+      }],
+      ['st_00000009', {
+        task_id: 'st_00000009', parent_session_id: 'sess-queue', root_session_id: 'sess-queue',
+        status: 'error', failure_kind: 'session_unavailable',
+        notification: { run_epoch: 0, notified_epoch: -1 }, run_start_epoch: 0,
+      }],
+    ] as const) {
+      await writeFile(join(stateDir, 'tasks', `${taskId}.json`), JSON.stringify(record))
+    }
+    entries.push(
+      {
+        id: 'r4', type: 'message', timestamp: '', message: {
+          role: 'toolResult', toolCallId: 'c4', toolName: 'task',
+          details: {
+            mode: 'spawn', task_id: 'st_00000004', run_epoch: 0, status: 'pending', queue_position: 1,
+            skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+          },
+        },
+      },
+      {
+        id: 'r4-batch-and-slow', type: 'message', timestamp: '', message: {
+          role: 'toolResult', toolCallId: 'c4b', toolName: 'task',
+          details: {
+            mode: 'spawn', status: 'error',
+            items: [
+              {
+                task_id: 'st_00000007', run_epoch: 0, status: 'error', error_message: 'model unavailable',
+                skills: { requested: ['batch-audit'], resolved: ['batch-audit'], missing: [] },
+              },
+              {
+                task_id: 'st_00000008', run_epoch: 0, status: 'running',
+                skills: { requested: ['slow-audit'], resolved: ['slow-audit'], missing: [] },
+              },
+              { task_id: 'st_00000009', status: 'paused' },
+            ],
+          },
+        },
+      },
+    )
+    now += 2000
+    handlers.get('tool_execution_end')?.({}, ctx)
+    await waitForLine(/(?:🤖1|A:1)(?!.*(?:⚡|S:))/)
+
+    // 3. Control: mid-turn chain exhaustion (child started, child_session_id stored, failure_kind:'model_chain_exhausted',
+    //    no failure_reason) keeps BOTH the agent and its resolved skill (`audit`) -> 🤖2 ⚡1.
+    await writeFile(join(stateDir, 'tasks', 'st_00000005.json'), JSON.stringify({
+      task_id: 'st_00000005',
+      parent_session_id: 'sess-queue',
+      root_session_id: 'sess-queue',
+      child_session_id: 'child-5',
+      status: 'error',
+      failure_kind: 'model_chain_exhausted',
+      notification: { run_epoch: 1, notified_epoch: 1 },
+      run_start_epoch: 0,
+    }))
+    entries.push({
+      id: 'r5', type: 'message', timestamp: '', message: {
+        role: 'toolResult', toolCallId: 'c5', toolName: 'task',
+        details: {
+          mode: 'spawn', task_id: 'st_00000005', run_epoch: 1, status: 'error',
+          failure_kind: 'model_chain_exhausted',
+          skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+        },
+      },
+    })
+    now += 2000
+    handlers.get('tool_execution_end')?.({}, ctx)
+    await waitForLine(/🤖2 ⚡1|A:2 S:1/)
+
+    // 4. Reused task_id: previously launched run 0 (completed or run_epoch 0) MUST stay counted even when
+    //    a later run 1 on the same task_id is refused in the store -> 🤖3 ⚡2 (retaining `kept`, dropping `refused`).
+    await writeFile(join(stateDir, 'tasks', 'st_00000006.json'), JSON.stringify({
+      task_id: 'st_00000006',
+      parent_session_id: 'sess-queue',
+      root_session_id: 'sess-queue',
+      status: 'error',
+      failure_kind: 'model_unavailable',
+      failure_reason: 'model_not_in_child_profile',
+      notification: { run_epoch: 1, notified_epoch: -1 },
+      run_start_epoch: 1,
+    }))
+    entries.push(
+      {
+        id: 'r6-run0', type: 'message', timestamp: '', message: {
+          role: 'toolResult', toolCallId: 'c6a', toolName: 'task',
+          details: {
+            mode: 'spawn', task_id: 'st_00000006', run_epoch: 0, status: 'pending', queue_position: 1,
+            skills: { requested: ['kept'], resolved: ['kept'], missing: [] },
+          },
+        },
+      },
+      {
+        id: 'r6-run1', type: 'message', timestamp: '', message: {
+          role: 'toolResult', toolCallId: 'c6b', toolName: 'task',
+          details: {
+            mode: 'spawn', task_id: 'st_00000006', run_epoch: 1, status: 'pending', queue_position: 1,
+            skills: { requested: ['refused'], resolved: ['refused'], missing: [] },
+          },
+        },
+      },
+    )
+    now += 2000
+    handlers.get('tool_execution_end')?.({}, ctx)
+    await waitForLine(/🤖3 ⚡2|A:3 S:2/)
+
+    // 5. Failed update after appending a new provisional skill onto existing st_00000006 must keep committed snapshot atomic.
+    entries.push({
+      id: 'r6-extra', type: 'message', timestamp: '', message: {
+        role: 'toolResult', toolCallId: 'c6c', toolName: 'task',
+        details: {
+          mode: 'spawn', task_id: 'st_00000006', run_epoch: 0, status: 'pending', queue_position: 1,
+          skills: { requested: ['extra'], resolved: ['extra'], missing: [] },
+        },
+      },
+    })
+    const savedGetSessionId = ctx.sessionManager.getSessionId
+    ctx.sessionManager.getSessionId = () => { throw new Error('session id unavailable') }
+    handlers.get('thinking_level_select')?.({}, ctx)
+    assert.match(lineText(), /🤖3 ⚡2|A:3 S:2/)
+    ctx.sessionManager.getSessionId = savedGetSessionId
+    handlers.get('thinking_level_select')?.({}, ctx)
+    assert.match(lineText(), /🤖3 ⚡3|A:3 S:3/)
+  } finally {
+    handlers.get('session_shutdown')?.({}, ctx)
+  }
+
+  // 6. Single-task session whose ONLY task was queued and then refused in the store (0 sub tokens, 0 tools, 0 taskIds):
+  //    reconciliation MUST still apply and drop the row from 🤖1 ⚡1 down to zero agents and zero skills.
+  const soleProject = join(dir, 'sole-project')
+  await mkdir(soleProject, { recursive: true })
+  const soleStateDir = join(agentDir, 'projects', projectStateKey(soleProject), 'senpi-task')
+  await mkdir(join(soleStateDir, 'tasks'), { recursive: true })
+  await writeFile(join(soleStateDir, 'tasks', 'st_0000000a.json'), JSON.stringify({
+    task_id: 'st_0000000a',
+    parent_session_id: 'sess-sole',
+    root_session_id: 'sess-sole',
+    status: 'error',
+    failure_kind: 'model_unavailable',
+    failure_reason: 'model_not_in_child_profile',
+    notification: { run_epoch: 0, notified_epoch: -1 },
+    run_start_epoch: 0,
+  }))
+  const soleEntries: SessionEntry[] = [
+    { id: 's', type: 'custom', timestamp: '', customType: 'vargus-settings',
+      data: { enabled: true, options: { repo: false, branch: false, status: false, includeSubagents: true } } },
+    { id: 'r1', type: 'message', timestamp: '', message: {
+      role: 'toolResult', toolCallId: 'c1', toolName: 'task',
+      details: {
+        mode: 'spawn', task_id: 'st_0000000a', run_epoch: 0, status: 'pending', queue_position: 1,
+        skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+      },
+    } },
+  ]
+  const soleHandlers = new Map<string, (event: unknown, ctx: Context) => void>()
+  let soleRow: { render(width: number): string[]; invalidate(): void } | undefined
+  let soleOnRender: (() => void) | undefined
+  const soleCtx: Context = {
+    modelRegistry: { getProviderAuth: async () => undefined },
+    mode: 'tui', cwd: soleProject, model: { id: 'gpt-6.1-sol', provider: 'test' }, thinkingLevel: 'high',
+    getContextUsage: () => ({ tokens: 100, contextWindow: 1000, percent: 10 }),
+    sessionManager: {
+      getSessionId: () => 'sess-sole',
+      getEntry: id => soleEntries.find(entry => entry.id === id),
+      getHeader: () => ({ timestamp: '2026-11-14T00:00:00Z' }),
+      reduceHistory: reducer => soleEntries.reduce((state, entry) => reducer.add(state, entry), reducer.initial()),
+    },
+    ui: {
+      setFooter() {},
+      setWidget(_key, factory) { soleRow = factory?.({ requestRender() { soleOnRender?.() } }) },
+      notify() {},
+    },
+  }
+  const soleApi: OmoApi = {
+    on(name, handler) { soleHandlers.set(name, handler); return () => soleHandlers.delete(name) },
+    getSubscriptionLimits: () => [],
+    onSubscriptionLimits: () => () => {},
+    appendEntry() {},
+    registerCommand() {},
+  }
+  vargus(soleApi, {})
+  soleHandlers.get('session_start')?.({}, soleCtx)
+  try {
+    await new Promise<void>((resolveWait, rejectWait) => {
+      const check = () => {
+        const current = soleRow?.render(200).join('') ?? ''
+        if (!/(?:🤖|⚡|A:|S:)/.test(current)) {
+          clearTimeout(timeout)
+          soleOnRender = undefined
+          resolveWait()
+        }
+      }
+      const timeout = setTimeout(() => {
+        soleOnRender = undefined
+        rejectWait(new Error(`Timed out waiting for sole refused task to clear; got: ${soleRow?.render(200).join('')}`))
+      }, 3000)
+      soleOnRender = check
+      check()
+    })
+    assert.doesNotMatch(soleRow?.render(200).join('') ?? '', /🤖|⚡|A:|S:/)
+  } finally {
+    soleHandlers.get('session_shutdown')?.({}, soleCtx)
+  }
+})

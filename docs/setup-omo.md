@@ -149,8 +149,11 @@ activity only with no extra disk I/O (skills stay omitted). Enable
 `/vargus config {"includeSubagents":true}`) to asynchronously read OmO's on-disk
 `senpi-task` store and fold subagent tokens, tools, deduplicated agent counts and
 explicitly resolved child task skills (`skills.resolved` on accepted spawn receipts,
-excluding missing skills and pre-launch refusals) across direct children, nested
-descendants, revived runs and DAG/team/workpool tasks. Cache-hit percentage, output
+excluding missing skills) across direct children, nested
+descendants, revived runs and DAG/team/workpool tasks, excluding confirmed
+pre-launch refusals (including fallback-chain admission refusals and provisional
+spawn receipts whose store record later confirms refusal for that run) from both
+agent and skill counts. Cache-hit percentage, output
 speed (`t/s`), context, model, effort, session time, quotas and VCS always remain on
 the main session. Other skill-loading paths (such as `SKILL.md` reads) remain
 uncounted, expunged tasks' tokens, tools and nested child skill receipts drop once

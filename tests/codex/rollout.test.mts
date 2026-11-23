@@ -867,16 +867,126 @@ test('RolloutReader replays .jsonl.zst with stat caching, paginated boundaries a
     await assert.rejects(badJson.poll(false), /invalid JSON/)
     assert.equal(badJson.attributable, false)
 
-    // 4. Non-paginated mixed history inside .jsonl.zst drops attribution and avoids re-decompressing unchanged file.
+    // 4. Non-paginated mixed history inside .jsonl.zst drops attribution, preserves remaining viewed records
+    //    for poll 2 (matching plain JSONL), avoids re-decompressing unchanged file, and latches trailing errors/replacement.
+    const mixedBytes = Buffer.from(jsonl([meta, { ...meta, payload: { ...meta.payload, id: 'parent' } }, count]))
+    const mixedPlain = join(sessions, 'rollout-mixed.jsonl')
     const mixedZst = join(sessions, 'rollout-mixed.jsonl.zst')
-    await writeFile(mixedZst, zlib.zstdCompressSync(Buffer.from(jsonl([meta, { ...meta, payload: { ...meta.payload, id: 'parent' } }, count]))))
+    await writeFile(mixedPlain, mixedBytes)
+    await writeFile(mixedZst, zlib.zstdCompressSync(mixedBytes))
+    const mixedOpts = resolveCodexOptions({ session: false, repo: false, branch: false, status: false })
+    const mixedTheme = makeTheme('graphite', true)
+
+    const plainMixed = new RolloutReader(mixedPlain, 'thread-a', '/repo', dir)
+    await assert.rejects(plainMixed.poll(false), /another Codex thread/)
+    assert.equal(plainMixed.attributable, false)
+    assert.equal(plainMixed.collector.snapshot()!.session.counts.tokens, 0)
+    await plainMixed.poll(false)
+    assert.equal(plainMixed.attributable, false)
+    assert.equal(plainMixed.collector.snapshot()!.session.counts.tokens, 3201)
+    assert.match(await codexLine(plainMixed.collector, mixedOpts, mixedTheme)(200), /token:3\.2k\(94\.3%\)/)
+
     const mixed = new RolloutReader(mixedZst, 'thread-a', '/repo', dir)
     const callsBeforeMixed = decompressCalls
     await assert.rejects(mixed.poll(false), /another Codex thread/)
     assert.equal(mixed.attributable, false)
+    assert.equal(mixed.collector.snapshot()!.session.counts.tokens, 0)
     await mixed.poll(false)
     assert.equal(mixed.attributable, false)
+    assert.equal(mixed.collector.snapshot()!.session.counts.tokens, 3201)
+    assert.match(await codexLine(mixed.collector, mixedOpts, mixedTheme)(200), /token:3\.2k\(94\.3%\)/)
+    await mixed.poll(false)
     assert.equal(decompressCalls, callsBeforeMixed + 1, 'unchanged mixed .jsonl.zst must not re-decompress')
+
+    // Multi-frame mixed .jsonl.zst with split UTF-8 and no trailing newline drains all remaining records on poll 2.
+    const mixedUtf8Tail = Buffer.from(jsonl([utf8Ctx]))
+    const mixedUtf8Split = mixedUtf8Tail.indexOf(Buffer.from('中文')) + 1
+    const mixedNoTrailingNl = Buffer.from(JSON.stringify(count))
+    const mixedMultiFrameZst = join(sessions, 'rollout-mixed-multiframe.jsonl.zst')
+    await writeFile(mixedMultiFrameZst, Buffer.concat([
+      zlib.zstdCompressSync(Buffer.concat([
+        Buffer.from(jsonl([meta, { ...meta, payload: { ...meta.payload, id: 'parent' } }])),
+        mixedUtf8Tail.subarray(0, mixedUtf8Split),
+      ])),
+      zlib.zstdCompressSync(Buffer.concat([mixedUtf8Tail.subarray(mixedUtf8Split), mixedNoTrailingNl])),
+    ]))
+    const mixedMf = new RolloutReader(mixedMultiFrameZst, 'thread-a', '/repo', dir)
+    const callsBeforeMixedMf = decompressCalls
+    await assert.rejects(mixedMf.poll(false), /another Codex thread/)
+    assert.equal(mixedMf.attributable, false)
+    assert.equal(mixedMf.collector.snapshot()!.session.counts.tokens, 0)
+    await mixedMf.poll(false)
+    assert.equal(mixedMf.attributable, false)
+    assert.equal(mixedMf.collector.snapshot()!.core.cwd, '/repo/中文')
+    assert.equal(mixedMf.collector.snapshot()!.session.counts.tokens, 3201)
+    assert.equal(decompressCalls, callsBeforeMixedMf + 2, 'multi-frame mixed .jsonl.zst must not re-decompress on poll 2')
+
+    // Trailing invalid JSON after foreign session_meta inside .jsonl.zst latches on poll 2 without re-decompressing.
+    const mixedCorruptZst = join(sessions, 'rollout-mixed-corrupt.jsonl.zst')
+    await writeFile(mixedCorruptZst, zlib.zstdCompressSync(Buffer.from(
+      jsonl([meta, { ...meta, payload: { ...meta.payload, id: 'parent' } }]) + '{broken\n' + jsonl([count]),
+    )))
+    const mixedCorrupt = new RolloutReader(mixedCorruptZst, 'thread-a', '/repo', dir)
+    const callsBeforeMixedCorrupt = decompressCalls
+    await assert.rejects(mixedCorrupt.poll(false), /another Codex thread/)
+    await assert.rejects(mixedCorrupt.poll(false), /invalid JSON/)
+    await assert.rejects(mixedCorrupt.poll(false), /invalid JSON/)
+    assert.equal(mixedCorrupt.attributable, false)
+    assert.equal(decompressCalls, callsBeforeMixedCorrupt + 1)
+
+    // Replacing a mixed .jsonl.zst before poll 2 latches /replaced/ without draining buffered records.
+    const mixedReplacedZst = join(sessions, 'rollout-mixed-replaced.jsonl.zst')
+    await writeFile(mixedReplacedZst, zlib.zstdCompressSync(mixedBytes))
+    const mixedReplaced = new RolloutReader(mixedReplacedZst, 'thread-a', '/repo', dir)
+    await assert.rejects(mixedReplaced.poll(false), /another Codex thread/)
+    assert.equal(mixedReplaced.collector.snapshot()!.session.counts.tokens, 0)
+    await writeFile(mixedReplacedZst, zlib.zstdCompressSync(Buffer.from(jsonl([meta, count, count]))))
+    await assert.rejects(mixedReplaced.poll(false), /replaced/)
+    assert.equal(mixedReplaced.collector.snapshot()!.session.counts.tokens, 0)
+
+    // Foreign session_meta in Frame 1 followed by a bad zstd checksum in Frame 2 must still latch /decompressed/
+    // on poll 1 and stay latched on poll 2 without re-decompressing.
+    const mixedBadFrame2 = Buffer.from(zlib.zstdCompressSync(Buffer.from(jsonl([count])), {
+      params: { [zlib.constants.ZSTD_c_checksumFlag]: 1 },
+    }))
+    mixedBadFrame2[mixedBadFrame2.length - 1]! ^= 0xff
+    const mixedBadChecksumZst = join(sessions, 'rollout-mixed-bad-f2.jsonl.zst')
+    await writeFile(mixedBadChecksumZst, Buffer.concat([
+      zlib.zstdCompressSync(Buffer.from(jsonl([meta, { ...meta, payload: { ...meta.payload, id: 'parent' } }]))),
+      mixedBadFrame2,
+    ]))
+    const mixedBadChecksum = new RolloutReader(mixedBadChecksumZst, 'thread-a', '/repo', dir)
+    const callsBeforeMixedBadChecksum = decompressCalls
+    await assert.rejects(mixedBadChecksum.poll(false), /decompressed/)
+    assert.equal(mixedBadChecksum.attributable, false)
+    assert.equal(mixedBadChecksum.collector.snapshot()!.session.counts.tokens, 0)
+    await assert.rejects(mixedBadChecksum.poll(false), /decompressed/)
+    assert.equal(decompressCalls, callsBeforeMixedBadChecksum + 2)
+
+    // Multiple foreign session_meta lines drain across polls 2 and 3 and resolve modelDefault once drained, with 1 decompression.
+    const multiForeignZst = join(sessions, 'rollout-multi-foreign.jsonl.zst')
+    await writeFile(multiForeignZst, zlib.zstdCompressSync(Buffer.from(jsonl([
+      first,
+      { ...meta, payload: { ...meta.payload, id: 'parent-1' } },
+      { ...meta, payload: { ...meta.payload, id: 'parent-2' } },
+      settings,
+      count,
+    ]))))
+    let mfDefaultLookups = 0
+    const multiForeign = new RolloutReader(multiForeignZst, 'thread-a', '/repo', dir, async () => { mfDefaultLookups++; return 'high' })
+    const callsBeforeMultiForeign = decompressCalls
+    await assert.rejects(multiForeign.poll(true), /another Codex thread/)
+    assert.equal(multiForeign.collector.snapshot()!.session.counts.tokens, 0)
+    assert.equal(mfDefaultLookups, 0)
+    await assert.rejects(multiForeign.poll(true), /another Codex thread/)
+    assert.equal(multiForeign.collector.snapshot()!.session.counts.tokens, 0)
+    assert.equal(mfDefaultLookups, 0)
+    await multiForeign.poll(true)
+    assert.equal(multiForeign.attributable, false)
+    assert.equal(multiForeign.collector.snapshot()!.session.counts.tokens, 3201)
+    assert.equal(multiForeign.collector.snapshot()!.session.defaultEffort, 'high')
+    assert.equal(mfDefaultLookups, 1)
+    assert.equal(decompressCalls, callsBeforeMultiForeign + 1)
 
     // 5. Multi-frame and skippable-frame .jsonl.zst: replays every data frame (including split UTF-8/lines),
     //    skips skippable frames, rejects corrupt Frame 2+ payloads/JSON/skippable-only, and honours RFC 8878 FHD bits.

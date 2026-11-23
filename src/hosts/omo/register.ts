@@ -1,11 +1,13 @@
 import { homedir, release } from 'node:os'
 import {
   collectOmo,
-  collectOmoAgents,
-  collectOmoSubagentSkills,
+  collectOmoSpawns,
   omoSettingsReducer,
   OMO_CONFIG_ENTRY,
   OMO_EDIT_ENTRY,
+  reconcileOmoSpawns,
+  type OmoSpawnReceipt,
+  type OmoSpawnReceiptMap,
   type OmoSubagentSkillMap,
 } from './collect.ts'
 import { omoDisplay } from './display.ts'
@@ -90,13 +92,20 @@ function unionSkillCount(a: OmoSubagentSkillMap, b: OmoSubagentSkillMap): number
   return count
 }
 
-function snapshotAgents(agents: ReadonlySet<string>): ReadonlySet<string> {
-  return new Set(agents)
-}
-
-function snapshotSkills(skills: OmoSubagentSkillMap): OmoSubagentSkillMap {
-  const copy = new Map<string, ReadonlySet<string>>()
-  for (const [taskId, names] of skills) copy.set(taskId, new Set(names))
+function snapshotSpawns(spawns: OmoSpawnReceiptMap): OmoSpawnReceiptMap {
+  const copy = new Map<string, OmoSpawnReceipt>()
+  for (const [taskId, receipt] of spawns) {
+    const provisionalRuns = new Map<number | undefined, ReadonlySet<string>>()
+    for (const [epoch, names] of receipt.provisionalRuns) {
+      provisionalRuns.set(epoch, new Set(names))
+    }
+    copy.set(taskId, {
+      confirmed: receipt.confirmed,
+      confirmedEpochs: new Set(receipt.confirmedEpochs),
+      confirmedSkills: new Set(receipt.confirmedSkills),
+      provisionalRuns,
+    })
+  }
   return copy
 }
 
@@ -136,8 +145,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     let tokensPerSecond: number | undefined
     let lastModelKey = modelKey(ctx.model)
     let values = collectOmo(ctx, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
-    let mainAgents: ReadonlySet<string> = subagents ? snapshotAgents(collectOmoAgents(ctx)) : new Set()
-    let mainSubagentSkills: OmoSubagentSkillMap = subagents ? snapshotSkills(collectOmoSubagentSkills(ctx)) : new Map()
+    let mainSpawns: OmoSpawnReceiptMap = subagents ? snapshotSpawns(collectOmoSpawns(ctx)) : new Map()
     let checkedAt = Date.now()
     const instance = {
       ctx,
@@ -200,12 +208,10 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         try {
           const nextValues = collectOmo(current, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
           const nextSessionId = subagents ? current.sessionManager.getSessionId() : ''
-          const nextAgents = subagents ? snapshotAgents(collectOmoAgents(current)) : mainAgents
-          const nextSubagentSkills = subagents ? snapshotSkills(collectOmoSubagentSkills(current)) : mainSubagentSkills
+          const nextSpawns = subagents ? snapshotSpawns(collectOmoSpawns(current)) : mainSpawns
           nextValues.session.tokensPerSecond = tokensPerSecond
           values = nextValues
-          mainAgents = nextAgents
-          mainSubagentSkills = nextSubagentSkills
+          mainSpawns = nextSpawns
           sessionId = nextSessionId
           checkedAt = Date.now()
         } catch {
@@ -250,18 +256,23 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
       const limits = options.rateLimits && instance.ctx.model?.provider === 'kimi-coding'
         ? kimi.readings(now, labels) : values.limits
       const sub = subagents?.snapshot
-      const foldedSkills = sub ? unionSkillCount(mainSubagentSkills, sub.skills) : 0
-      const effectiveSession = sub && (sub.tokens > 0 || sub.tools > 0 || sub.taskIds.size > 0 || foldedSkills > 0)
-        ? {
+      let effectiveSession = values.session
+      if (sub) {
+        const reconciled = reconcileOmoSpawns(mainSpawns, sub.refusedTasks)
+        const agents = unionSize(reconciled.agents, sub.taskIds)
+        const foldedSkills = unionSkillCount(reconciled.skills, sub.skills)
+        if (sub.tokens > 0 || sub.tools > 0 || agents !== values.session.counts.agents || foldedSkills > 0) {
+          effectiveSession = {
             ...values.session,
             counts: {
               tokens: values.session.counts.tokens + sub.tokens,
               tools: values.session.counts.tools + sub.tools,
-              agents: unionSize(mainAgents, sub.taskIds),
+              agents,
               skills: values.session.counts.skills + foldedSkills,
             },
           }
-        : values.session
+        }
+      }
       const line = render({
         v: { ...values, session: effectiveSession, limits, core: { ...values.core, columns: width, isWsl } },
         display: omoDisplay(effectiveSession),

@@ -846,3 +846,145 @@ test('OmoSubagents folds and deduplicates explicitly resolved grandchild skills 
   assert.equal(snap2.skills.size, 0)
   assert.equal(snap2.taskIds.size, 0)
 })
+
+test('OmoSubagents excludes admission-exhausted chains, carries refused run fences, and reconciles queued grandchild receipts', async t => {
+  const root = await makeTempRoot(t)
+  const home = join(root, 'home')
+  const agentDir = join(root, 'agent')
+  const project = join(root, 'proj')
+  await mkdir(home, { recursive: true })
+  await mkdir(project, { recursive: true })
+
+  const stateDir = join(agentDir, 'projects', projectStateKey(project), 'senpi-task')
+  const reader = new OmoSubagents({ env: { HOME: home, OMO_CODING_AGENT_DIR: agentDir }, accountHomeDir: home })
+
+  // 1. Two-model fallback chain exhausted at admission (no child_session_id, explicit admission reason):
+  //    must be excluded from taskIds and exposed in refusedTasks with [run_start_epoch, run_epoch].
+  await writeTask(stateDir, 'st_00000001', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    status: 'error',
+    failure_kind: 'model_chain_exhausted',
+    failure_reason: 'model_not_in_child_profile',
+    notification: { run_epoch: 1, notified_epoch: -1 },
+    run_start_epoch: 0,
+  })
+
+  // 2. Control: child started, stored child_session_id, and exhausted model chain mid-turn (no failure_reason):
+  //    MUST stay in taskIds and NOT appear in refusedTasks.
+  await writeTask(stateDir, 'st_00000002', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    child_session_id: 'child-mid-turn',
+    status: 'error',
+    failure_kind: 'model_chain_exhausted',
+    notification: { run_epoch: 1, notified_epoch: 1 },
+    run_start_epoch: 0,
+  })
+  await writeChildJsonl(stateDir, 'st_00000002', '001.jsonl', [
+    assistantLine({ id: 'c2-a1', input: 100, output: 20, tools: [{ name: 'task' }] }),
+    // Child 2 queued grandchild st_00000003 (pending, run_epoch 0) with resolved skill `audit`,
+    // plus grandchild st_00000004 (earlier run 0 pending + later run 1 refused in store).
+    JSON.stringify({
+      id: 'c2-r1',
+      type: 'message',
+      timestamp: '2026-11-23T00:00:01Z',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'call-1',
+        toolName: 'task',
+        details: {
+          mode: 'spawn',
+          items: [
+            {
+              task_id: 'st_00000003',
+              run_epoch: 0,
+              status: 'pending',
+              queue_position: 1,
+              skills: { requested: ['audit'], resolved: ['audit'], missing: [] },
+            },
+            {
+              task_id: 'st_00000004',
+              run_epoch: 0,
+              status: 'pending',
+              queue_position: 1,
+              skills: { requested: ['kept'], resolved: ['kept'], missing: [] },
+            },
+            {
+              task_id: 'st_00000004',
+              run_epoch: 1,
+              status: 'pending',
+              queue_position: 1,
+              skills: { requested: ['dropped'], resolved: ['dropped'], missing: [] },
+            },
+          ],
+        },
+      },
+    }) + '\n',
+  ].join(''))
+
+  // 3. Queued grandchild st_00000003 refused at admission (run 0).
+  await writeTask(stateDir, 'st_00000003', {
+    parent_session_id: 'child-mid-turn',
+    root_session_id: 'root',
+    status: 'error',
+    failure_kind: 'model_unavailable',
+    failure_reason: 'model_not_in_child_profile',
+    notification: { run_epoch: 0, notified_epoch: -1 },
+    run_start_epoch: 0,
+  })
+
+  // 4. Reused grandchild st_00000004 whose revived run 1 (run_start_epoch 1) was refused at admission:
+  //    run 0 (`kept`) must survive, while run 1 (`dropped`) is reconciled away.
+  await writeTask(stateDir, 'st_00000004', {
+    parent_session_id: 'child-mid-turn',
+    root_session_id: 'root',
+    status: 'error',
+    failure_kind: 'model_unavailable',
+    failure_reason: 'model_not_in_child_profile',
+    notification: { run_epoch: 1, notified_epoch: -1 },
+    run_start_epoch: 1,
+  })
+
+  // 5. Legacy store refusal (notification.run_epoch without run_start_epoch) uses exact-epoch fence,
+  //    and prior_runs_cost_usd > 0 marks a previously launched task (never a pre-launch refusal).
+  await writeTask(stateDir, 'st_00000005', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    status: 'error',
+    failure_kind: 'model_unavailable',
+    notification: { run_epoch: 2 },
+  })
+  await writeTask(stateDir, 'st_00000006', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    status: 'error',
+    failure_kind: 'model_unavailable',
+    prior_runs_cost_usd: 0.05,
+    notification: { run_epoch: 1 },
+    run_start_epoch: 1,
+  })
+  // Malformed notification / inverted epoch fence must fail closed (never emit a bogus refusal fence).
+  await writeTask(stateDir, 'st_00000007', {
+    parent_session_id: 'root',
+    root_session_id: 'root',
+    status: 'error',
+    failure_kind: 'model_unavailable',
+    notification: { run_epoch: 1 },
+    run_start_epoch: 3,
+  })
+
+  const snap = await reader.refresh(project, 'root', 10_000)
+  assert.deepEqual([...snap.taskIds].sort(), ['st_00000002', 'st_00000004', 'st_00000006'])
+  assert.equal(snap.tokens, 120)
+  assert.equal(snap.tools, 1)
+  assert.deepEqual([...snap.skills.keys()], ['st_00000004'])
+  assert.deepEqual([...snap.skills.get('st_00000004')!], ['kept'])
+  assert.deepEqual(snap.refusedTasks.get('st_00000001'), { runStartEpoch: 0, runEpoch: 1 })
+  assert.equal(snap.refusedTasks.has('st_00000002'), false)
+  assert.deepEqual(snap.refusedTasks.get('st_00000003'), { runStartEpoch: 0, runEpoch: 0 })
+  assert.deepEqual(snap.refusedTasks.get('st_00000004'), { runStartEpoch: 1, runEpoch: 1 })
+  assert.deepEqual(snap.refusedTasks.get('st_00000005'), { runStartEpoch: 2, runEpoch: 2 })
+  assert.equal(snap.refusedTasks.has('st_00000006'), false)
+  assert.equal(snap.refusedTasks.has('st_00000007'), false)
+})

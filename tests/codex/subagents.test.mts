@@ -298,6 +298,11 @@ test('Codex descendant folding survives .jsonl.zst compression on fresh discover
       { ...tokenCount(1000, 0, 0), ordinal: 3 },
     ]))))
     await writeFile(join(sessions, 'rollout-corrupt.jsonl.zst'), Buffer.from('not zstd\n'))
+    await writeFile(join(sessions, 'rollout-mixed.jsonl.zst'), zlib.zstdCompressSync(Buffer.from(jsonl([
+      sessionMeta('mixedZst', '/repo', 'parent', '/root/mixedZst'),
+      sessionMeta('parent', '/repo'),
+      tokenCount(9000, 0, 0),
+    ]))))
     await writeFile(join(sessions, 'rollout-amb-a.jsonl.zst'), zlib.zstdCompressSync(Buffer.from(jsonl([
       sessionMeta('amb', '/repo', 'parent', '/root/amb'), tokenCount(3333, 0, 0),
     ]))))
@@ -311,8 +316,14 @@ test('Codex descendant folding survives .jsonl.zst compression on fresh discover
     const freshRoot = freshReaders.get(freshViews.known.get('parent')!)
     await freshRoot.poll(false)
     const freshExtra = await foldDescendantCounts(freshViews.descendants('parent'), v => freshReaders.get(v))
-    // parent (2000) + child (7000) + paginated (1000) = 10000; corrupt and ambiguous skipped.
+    // parent (2000) + child (7000) + paginated (1000) = 10000; corrupt, mixed and ambiguous skipped.
     assert.equal(freshRoot.collector.snapshot()!.session.counts.tokens + (freshExtra?.tokens ?? 0), 10000)
+    // Second poll drains mixedZst's buffered records for direct viewing while keeping it ineligible for ancestor totals.
+    const freshExtra2 = await foldDescendantCounts(freshViews.descendants('parent'), v => freshReaders.get(v))
+    assert.equal(freshRoot.collector.snapshot()!.session.counts.tokens + (freshExtra2?.tokens ?? 0), 10000)
+    const mixedChildReader = freshReaders.get(freshViews.known.get('mixedZst')!)
+    assert.equal(mixedChildReader.attributable, false)
+    assert.equal(mixedChildReader.collector.snapshot()!.session.counts.tokens, 9000)
 
     // 5. With folding off (refresh(false), no foldDescendantCounts): parent stays 2,000 with zero decompressions.
     const callsBeforeOff = decompressCalls

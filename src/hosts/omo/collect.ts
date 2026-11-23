@@ -18,12 +18,36 @@ type AssistantUsage = { tokens: number; cacheHitPercent: number | undefined }
 
 export type OmoSubagentSkillMap = ReadonlyMap<string, ReadonlySet<string>>
 
+export type OmoRefusedRun = {
+  readonly runStartEpoch: number
+  readonly runEpoch: number
+}
+
+export type OmoRefusedTaskMap = ReadonlyMap<string, OmoRefusedRun>
+
+export type OmoSpawnReceipt = {
+  readonly confirmed: boolean
+  readonly confirmedEpochs: ReadonlySet<number | undefined>
+  readonly confirmedSkills: ReadonlySet<string>
+  readonly provisionalRuns: ReadonlyMap<number | undefined, ReadonlySet<string>>
+}
+
+export type OmoSpawnReceiptMap = ReadonlyMap<string, OmoSpawnReceipt>
+
+type MutableSpawnReceipt = {
+  confirmed: boolean
+  confirmedEpochs: Set<number | undefined>
+  confirmedSkills: Set<string>
+  provisionalRuns: Map<number | undefined, Set<string>>
+}
+
 export type OmoHistory = {
   counts: Counts
   entries: Set<string>
   calls: Set<string>
   agents: Set<string>
   subagentSkills: Map<string, Set<string>>
+  spawnReceipts: Map<string, MutableSpawnReceipt>
   usage: Map<string, AssistantUsage>
   latestUsage?: AssistantUsage
   edits: Set<string>
@@ -41,11 +65,16 @@ function nonnegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
+export function parseOmoRunEpoch(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
 // Failure kinds raised strictly before a child session runs in OmO 5.1.61
 // (`packages/senpi-task/src/state/start-failure.ts` enum; emitted by
 // `src/manager/start-failure.ts` and `src/manager/manager.ts`).
-// Excludes post-launch error kinds (`child-unresponsive`, `model_chain_exhausted`,
-// `suspended_unresumable`, `child-turn-failed`, `child-prompt-failed`) and bare `status: "error"`.
+// Excludes post-launch error kinds (`child-unresponsive`, `suspended_unresumable`,
+// `child-turn-failed`, `child-prompt-failed`), bare `status: "error"`, and
+// `model_chain_exhausted` without an explicit model-admission `failure_reason`.
 const PRE_LAUNCH_REFUSAL_KINDS = new Set([
   'model_unavailable',
   'tools_unavailable',
@@ -56,32 +85,105 @@ const PRE_LAUNCH_REFUSAL_KINDS = new Set([
   'isolation_unavailable',
 ])
 
+// Explicit model-admission reasons from OmO 5.1.61 `MODEL_START_FAILURE_REASONS`
+// (`packages/senpi-task/src/state/start-failure.ts`). When every model in a
+// fallback chain is refused at admission (`#describeStartFailure`), OmO rewrites
+// `failure_kind` to `model_chain_exhausted` while preserving `failure_reason`.
+// Runtime/mid-turn chain exhaustion (`terminalFailureFields`) never sets `failure_reason`.
+const MODEL_ADMISSION_REFUSAL_REASONS = new Set([
+  'model_not_in_child_profile',
+  'catalog_probe_timed_out',
+  'catalog_probe_failed',
+])
+
+function hasLaunchFacts(item: Record<string, unknown>): boolean {
+  if (typeof item.child_session_id === 'string' && item.child_session_id !== '') return true
+  if (typeof item.effective_model === 'string' && item.effective_model !== '') return true
+  if (isRecord(item.run_stats) || isRecord(item.effective_model) || isRecord(item.host_session)) return true
+  if (typeof item.pid === 'number' && Number.isFinite(item.pid)) return true
+  if (typeof item.prior_runs_cost_usd === 'number' && Number.isFinite(item.prior_runs_cost_usd) && item.prior_runs_cost_usd > 0) return true
+  return false
+}
+
 export function isPreLaunchTaskRefusal(value: unknown): boolean {
   const item = record(value)
   if (!item || item.status !== 'error') return false
-  if (typeof item.failure_kind !== 'string' || !PRE_LAUNCH_REFUSAL_KINDS.has(item.failure_kind)) return false
-  // A task carrying launch/runtime facts already ran before failing (e.g. paused resume failure).
-  if (typeof item.child_session_id === 'string' && item.child_session_id !== '') return false
-  if (typeof item.effective_model === 'string' && item.effective_model !== '') return false
-  if (isRecord(item.run_stats) || isRecord(item.effective_model) || isRecord(item.host_session)) return false
-  if (typeof item.pid === 'number' && Number.isFinite(item.pid)) return false
-  return true
+  const isPreLaunchKind = typeof item.failure_kind === 'string' && PRE_LAUNCH_REFUSAL_KINDS.has(item.failure_kind)
+  const isExhaustedAdmission = item.failure_kind === 'model_chain_exhausted'
+    && typeof item.failure_reason === 'string'
+    && MODEL_ADMISSION_REFUSAL_REASONS.has(item.failure_reason)
+  if (!isPreLaunchKind && !isExhaustedAdmission) return false
+  // A task carrying launch/runtime facts already ran before failing (e.g. paused resume or mid-turn failure).
+  return !hasLaunchFacts(item)
 }
 
-function addResolvedSkills(target: Map<string, Set<string>>, taskId: string, item: Record<string, unknown>): void {
+const PROVISIONAL_SPAWN_STATUSES = new Set(['pending', 'running', 'paused'])
+
+function isProvisionalSpawnReceipt(item: Record<string, unknown>): boolean {
+  if (hasLaunchFacts(item)) return false
+  if (typeof item.status === 'string' && PROVISIONAL_SPAWN_STATUSES.has(item.status)) return true
+  return item.status === 'error' && item.failure_kind === undefined
+}
+
+export function isRefusedProvisionalRun(epoch: number | undefined, refusal: OmoRefusedRun): boolean {
+  if (refusal.runStartEpoch > refusal.runEpoch) return false
+  if (epoch === undefined) return refusal.runStartEpoch === 0
+  return epoch >= refusal.runStartEpoch && epoch <= refusal.runEpoch
+}
+
+export function reconcileOmoSpawns(
+  spawns: OmoSpawnReceiptMap,
+  refusedTasks: OmoRefusedTaskMap,
+): { agents: Set<string>; skills: Map<string, Set<string>> } {
+  const agents = new Set<string>()
+  const skills = new Map<string, Set<string>>()
+  for (const [taskId, receipt] of spawns) {
+    const refusal = refusedTasks.get(taskId)
+    let kept = receipt.confirmed
+    let taskSkills: Set<string> | undefined
+    const addAll = (names: ReadonlySet<string>) => {
+      for (const name of names) {
+        if (!taskSkills) {
+          taskSkills = new Set()
+          skills.set(taskId, taskSkills)
+        }
+        taskSkills.add(name)
+      }
+    }
+    if (receipt.confirmed) addAll(receipt.confirmedSkills)
+    for (const [epoch, runSkills] of receipt.provisionalRuns) {
+      if (refusal && isRefusedProvisionalRun(epoch, refusal)) continue
+      kept = true
+      addAll(runSkills)
+    }
+    if (kept) agents.add(taskId)
+  }
+  return { agents, skills }
+}
+
+function forEachResolvedSkill(item: Record<string, unknown>, visit: (name: string) => void): void {
   const skills = record(item.skills)
   if (!skills || !Array.isArray(skills.resolved)) return
-  let names = target.get(taskId)
   for (const entry of skills.resolved) {
     if (typeof entry !== 'string') continue
     const name = entry.trim()
-    if (!name) continue
+    if (name) visit(name)
+  }
+}
+
+function addSkillNames(target: Set<string>, item: Record<string, unknown>): void {
+  forEachResolvedSkill(item, name => { target.add(name) })
+}
+
+function addResolvedSkills(target: Map<string, Set<string>>, taskId: string, item: Record<string, unknown>): void {
+  let names = target.get(taskId)
+  forEachResolvedSkill(item, name => {
     if (!names) {
       names = new Set()
       target.set(taskId, names)
     }
     names.add(name)
-  }
+  })
 }
 
 function agent(state: OmoHistory, value: unknown): void {
@@ -90,6 +192,40 @@ function agent(state: OmoHistory, value: unknown): void {
   if (isPreLaunchTaskRefusal(item)) return
   state.agents.add(item.task_id)
   addResolvedSkills(state.subagentSkills, item.task_id, item)
+  let receipt = state.spawnReceipts.get(item.task_id)
+  if (!receipt) {
+    receipt = { confirmed: false, confirmedEpochs: new Set(), confirmedSkills: new Set(), provisionalRuns: new Map() }
+    state.spawnReceipts.set(item.task_id, receipt)
+  }
+  const hasEpoch = Object.hasOwn(item, 'run_epoch') && item.run_epoch !== undefined
+  const epoch = hasEpoch ? parseOmoRunEpoch(item.run_epoch) : undefined
+  // A malformed run_epoch fails closed (retained as confirmed without polluting confirmedEpochs).
+  if (hasEpoch && epoch === undefined) {
+    receipt.confirmed = true
+    addSkillNames(receipt.confirmedSkills, item)
+    return
+  }
+  if (isProvisionalSpawnReceipt(item)) {
+    if (receipt.confirmedEpochs.has(epoch)) {
+      addSkillNames(receipt.confirmedSkills, item)
+    } else {
+      let runSkills = receipt.provisionalRuns.get(epoch)
+      if (!runSkills) {
+        runSkills = new Set()
+        receipt.provisionalRuns.set(epoch, runSkills)
+      }
+      addSkillNames(runSkills, item)
+    }
+  } else {
+    receipt.confirmed = true
+    receipt.confirmedEpochs.add(epoch)
+    addSkillNames(receipt.confirmedSkills, item)
+    const promoted = receipt.provisionalRuns.get(epoch)
+    if (promoted) {
+      for (const name of promoted) receipt.confirmedSkills.add(name)
+      receipt.provisionalRuns.delete(epoch)
+    }
+  }
 }
 
 export const omoSettingsReducer: HistoryReducer<OmoSettings> = {
@@ -115,7 +251,7 @@ export type OmoEntryInput = {
 export function createOmoHistory(): OmoHistory {
   return {
     counts: initialCounts(), entries: new Set(), calls: new Set(),
-    agents: new Set(), subagentSkills: new Map(), usage: new Map(), edits: new Set(),
+    agents: new Set(), subagentSkills: new Map(), spawnReceipts: new Map(), usage: new Map(), edits: new Set(),
   }
 }
 
@@ -183,8 +319,8 @@ export function foldOmoEntry(state: OmoHistory, entry: OmoEntryInput, fallbackId
   state.counts.agents = state.agents.size
   // Main-session skill loads lack a canonical receipt (reading SKILL.md does not
   // establish one). Explicitly resolved child task skills (`skills.resolved` on
-  // accepted spawn receipts) are stored in `subagentSkills` and folded only when
-  // `includeSubagents` is enabled.
+  // accepted spawn receipts) are stored in `subagentSkills` and `spawnReceipts`,
+  // and folded only when `includeSubagents` is enabled.
   return state
 }
 
@@ -201,6 +337,10 @@ export function collectOmoAgents(ctx: NativeContext): ReadonlySet<string> {
 
 export function collectOmoSubagentSkills(ctx: NativeContext): OmoSubagentSkillMap {
   return ctx.sessionManager.reduceHistory(omoHistoryReducer).subagentSkills
+}
+
+export function collectOmoSpawns(ctx: NativeContext): OmoSpawnReceiptMap {
+  return ctx.sessionManager.reduceHistory(omoHistoryReducer).spawnReceipts
 }
 
 export function collectOmo(

@@ -468,6 +468,7 @@ export class RolloutReader {
       const info = await file.stat()
       if (this.zstReplay) {
         if (this.zstReplay.ino === info.ino && this.zstReplay.mtimeMs === info.mtimeMs && this.zstReplay.size === info.size) {
+          this.drainPending()
           return
         }
         this.failHistory('The Codex transcript was replaced; turn VArgus off and on again.')
@@ -478,6 +479,23 @@ export class RolloutReader {
         this.failHistory('The compressed Codex transcript could not be decompressed.')
       }
       let decompressedBytes = 0
+      let foreignError: Error | undefined
+      const tryDrain = (flushTrailing = false): void => {
+        if (foreignError) return
+        try {
+          this.drainPending()
+          if (flushTrailing && this.pending.trim()) {
+            this.pending += '\n'
+            this.drainPending()
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message === FOREIGN_THREAD_ERROR) {
+            foreignError = error
+            return
+          }
+          throw error
+        }
+      }
       try {
         for (const frame of frames) {
           const source = Readable.from(readHandleSpan(file, frame.start, frame.end))
@@ -489,7 +507,7 @@ export class RolloutReader {
               const buf = chunk as Buffer
               decompressedBytes += buf.length
               this.pending += this.decoder.decode(buf, { stream: true })
-              this.drainPending()
+              tryDrain()
             }
           } finally {
             source.on('error', () => {})
@@ -500,21 +518,15 @@ export class RolloutReader {
           }
         }
         this.pending += this.decoder.decode()
-        this.drainPending()
-        if (this.pending.trim()) {
+        tryDrain(true)
+        if (foreignError && this.pending.trim() && !this.pending.endsWith('\n')) {
           this.pending += '\n'
-          this.drainPending()
         }
         if (decompressedBytes === 0) {
           this.failHistory('The compressed Codex transcript could not be decompressed.')
         }
         this.zstReplay = { ino: info.ino, mtimeMs: info.mtimeMs, size: info.size }
       } catch (error) {
-        if (error instanceof Error && error.message === FOREIGN_THREAD_ERROR) {
-          this.pending = ''
-          this.zstReplay = { ino: info.ino, mtimeMs: info.mtimeMs, size: info.size }
-          throw error
-        }
         if (this.historyError !== undefined) throw error
         const code = String((error as NodeJS.ErrnoException | undefined)?.code ?? '')
         if (code.startsWith('ZSTD_') || decompressedBytes > 0) {
@@ -524,6 +536,7 @@ export class RolloutReader {
         this.decoder = new TextDecoder()
         throw error
       }
+      if (foreignError) throw foreignError
     } finally { await file.close() }
   }
 

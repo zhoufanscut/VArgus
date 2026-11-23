@@ -7,7 +7,11 @@ import {
   createOmoHistory,
   foldOmoEntry,
   isPreLaunchTaskRefusal,
+  parseOmoRunEpoch,
+  reconcileOmoSpawns,
   type OmoHistory,
+  type OmoRefusedRun,
+  type OmoRefusedTaskMap,
   type OmoSubagentSkillMap,
 } from './collect.ts'
 
@@ -23,9 +27,12 @@ export type SubagentSnapshot = {
   readonly tools: number
   readonly taskIds: ReadonlySet<string>
   readonly skills: OmoSubagentSkillMap
+  readonly refusedTasks: OmoRefusedTaskMap
 }
 
-const EMPTY_SNAPSHOT: SubagentSnapshot = { tokens: 0, tools: 0, taskIds: new Set(), skills: new Map() }
+const EMPTY_SNAPSHOT: SubagentSnapshot = {
+  tokens: 0, tools: 0, taskIds: new Set(), skills: new Map(), refusedTasks: new Map(),
+}
 
 const ACTIVE_POLL_MS = 1000
 const IDLE_POLL_MS = 5000
@@ -398,6 +405,7 @@ type ParsedTask = {
   readonly childSessionId: string | undefined
   readonly active: boolean
   readonly refusedPreLaunch: boolean
+  readonly refusedRun: OmoRefusedRun | undefined
 }
 
 type CachedTask = {
@@ -416,6 +424,24 @@ type JsonlFileState = {
   state: OmoHistory
 }
 
+function parseRefusedRun(raw: Record<string, unknown>): OmoRefusedRun | undefined {
+  const hasNotification = Object.hasOwn(raw, 'notification') && raw.notification !== undefined
+  if (hasNotification && !isPlainObject(raw.notification)) return undefined
+  const notification = hasNotification ? raw.notification as Record<string, unknown> : undefined
+  const hasRunEpoch = notification !== undefined && Object.hasOwn(notification, 'run_epoch') && notification.run_epoch !== undefined
+  const hasRunStart = Object.hasOwn(raw, 'run_start_epoch') && raw.run_start_epoch !== undefined
+  if (!hasRunEpoch) {
+    if (hasRunStart) return raw.run_start_epoch === 0 ? { runStartEpoch: 0, runEpoch: 0 } : undefined
+    return { runStartEpoch: 0, runEpoch: 0 }
+  }
+  const runEpoch = parseOmoRunEpoch(notification.run_epoch)
+  if (runEpoch === undefined) return undefined
+  if (!hasRunStart) return { runStartEpoch: runEpoch, runEpoch }
+  const runStartEpoch = parseOmoRunEpoch(raw.run_start_epoch)
+  if (runStartEpoch === undefined || runStartEpoch > runEpoch) return undefined
+  return { runStartEpoch, runEpoch }
+}
+
 function parseTaskRecord(raw: unknown): ParsedTask | null {
   if (!isPlainObject(raw)) return null
   if (typeof raw.task_id !== 'string' || !TASK_ID_PATTERN.test(raw.task_id)) return null
@@ -425,7 +451,8 @@ function parseTaskRecord(raw: unknown): ParsedTask | null {
     ? raw.child_session_id : undefined
   const active = typeof raw.status === 'string' && NON_TERMINAL_STATUSES.has(raw.status)
   const refusedPreLaunch = isPreLaunchTaskRefusal(raw)
-  return { taskId: raw.task_id, parentSessionId, rootSessionId, childSessionId, active, refusedPreLaunch }
+  const refusedRun = refusedPreLaunch ? parseRefusedRun(raw) : undefined
+  return { taskId: raw.task_id, parentSessionId, rootSessionId, childSessionId, active, refusedPreLaunch, refusedRun }
 }
 
 function consumeJsonlLine(file: JsonlFileState, lineBuf: Buffer): void {
@@ -567,6 +594,8 @@ export class OmoSubagents {
       let tools = 0
       const taskIds = new Set<string>()
       const skills = new Map<string, Set<string>>()
+      const refusedTasks = new Map<string, OmoRefusedRun>()
+      const childHistories: OmoHistory[] = []
       let hasActive = false
 
       for (const task of matched.values()) {
@@ -589,17 +618,26 @@ export class OmoSubagents {
           if (history.counts.tokens > 0 || history.counts.tools > 0 || history.agents.size > 0) taskHasWork = true
           tokens += history.counts.tokens
           tools += history.counts.tools
-          for (const agentId of history.agents) taskIds.add(agentId)
-          for (const [childTaskId, names] of history.subagentSkills) {
-            let dest = skills.get(childTaskId)
-            if (!dest) {
-              dest = new Set()
-              skills.set(childTaskId, dest)
-            }
-            for (const name of names) dest.add(name)
-          }
+          childHistories.push(history)
         }
-        if (!task.refusedPreLaunch || taskHasWork) taskIds.add(task.taskId)
+        if (!task.refusedPreLaunch || taskHasWork) {
+          taskIds.add(task.taskId)
+        } else if (task.refusedRun !== undefined) {
+          refusedTasks.set(task.taskId, task.refusedRun)
+        }
+      }
+
+      for (const history of childHistories) {
+        const reconciled = reconcileOmoSpawns(history.spawnReceipts, refusedTasks)
+        for (const agentId of reconciled.agents) taskIds.add(agentId)
+        for (const [childTaskId, names] of reconciled.skills) {
+          let dest = skills.get(childTaskId)
+          if (!dest) {
+            dest = new Set()
+            skills.set(childTaskId, dest)
+          }
+          for (const name of names) dest.add(name)
+        }
       }
 
       for (const cachedPath of this.fileCache.keys()) {
@@ -610,7 +648,7 @@ export class OmoSubagents {
       const duration = Math.max(0, Date.now() - start)
       this.timing = { start: now, end: now + duration, duration }
       this.hasActive = hasActive
-      this.current = { tokens, tools, taskIds, skills }
+      this.current = { tokens, tools, taskIds, skills, refusedTasks }
     } catch {
       if (this.isStale(generation)) return
       const duration = Math.max(0, Date.now() - start)
