@@ -7,7 +7,7 @@ import { makeTheme } from '../../src/theme'
 // PromptHint viewport; NO_COLOR, the theme option and WSL as the line shows
 // them; the model re-read on each tick.
 
-type World = { lines: string[]; model: string }
+type World = { lines: string[]; model: string; stepUsage: typeof SENTINEL.step.usage }
 
 // The bottoms answer with sentinels: values no mod would make up, so a hook
 // that rebuilt or replaced the answer is seen.
@@ -25,7 +25,7 @@ const SENTINEL = {
 }
 
 function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '/home/u', NO_COLOR: '1' }, mockProcess = true): World {
-  const w: World = { lines: [], model: 'claude-opus-5-5[1m]' }
+  const w: World = { lines: [], model: 'claude-opus-5-5[1m]', stepUsage: SENTINEL.step.usage }
   mock.env(on, env)
   on('session.start', async () => SENTINEL.start)
   on('session.id', async () => ({ value: 'S1' }))
@@ -42,7 +42,7 @@ function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '
     value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
   }))
   on('turn.step', async function* ($, e) {
-    return { ...SENTINEL.step, turnId: e.turnId, index: e.index } as never
+    return { ...SENTINEL.step, usage: w.stepUsage, turnId: e.turnId, index: e.index } as never
   })
   on('ui.render', async () => ({ type: 'Text', children: ['sentinel hint'] }) as never)
   on('tool.call', async () => SENTINEL.tool as never)
@@ -398,5 +398,40 @@ describe('register: the line as the host sets it up', () => {
     await command('reload-plugins')
     await command('config')
     expect(row.value).toBe(false)
+  })
+
+  test('token alert threshold flips from 1M to 4M when includeSubagents is enabled', NO_VCS, async ($, on) => {
+    const { clock, w, rows, state, command } = sharedPicker($, on)
+    const provider = { plugin: 'vargus@vargus', tier: 'user' } as const
+    rows.push({
+      key: 'vargus.includeSubagents', label: 'Include subagents', kind: 'boolean', value: false,
+      provider, isLocked: false,
+    })
+    const theme = makeTheme('graphite', false)
+    const tokenText = (tone: 'calm' | 'alert', value: string) =>
+      theme.paint('label', 'token:') + theme.paint(tone, value)
+
+    await $.session.start(start)
+    w.stepUsage = { input_tokens: 1_500_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'm' }
+    await step($)
+    expect(await line(clock, w)).toContain(tokenText('alert', '1.50M'))
+
+    // Enabling includeSubagents expands the alert threshold to 4.00M (3,995,000) immediately.
+    state.file = '{"includeSubagents":true}\n'
+    await command('reload-plugins')
+    expect(await line(clock, w)).toContain(tokenText('calm', '1.50M'))
+
+    w.stepUsage = { input_tokens: 2_494_999, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'm' }
+    await step($, { agentId: 'a1' })
+    expect(await line(clock, w)).toContain(tokenText('calm', '3.99M'))
+
+    w.stepUsage = { input_tokens: 1, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'm' }
+    await step($, { agentId: 'a1' })
+    expect(await line(clock, w)).toContain(tokenText('alert', '4.00M'))
+
+    // Disabling includeSubagents returns to main-only counts and the 1.00M alert threshold.
+    state.file = '{"includeSubagents":false}\n'
+    await command('reload-plugins')
+    expect(await line(clock, w)).toContain(tokenText('alert', '1.50M'))
   })
 })

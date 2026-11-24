@@ -5,9 +5,13 @@ import type { Fragment } from '../../core/types.ts'
 // (DESIGN, "Fragments").
 
 // Raw under 1k, one decimal of k under 1M, two decimals of M beyond. The k/M
-// switch (and calm -> alert flip) is at 999,950, where one decimal of k would
-// round to `1000.0k` and switches to `1.00M` (VantageHUD's formatTokenCount).
+// switch (and default `includeSubagents: false` calm -> alert flip) is at
+// 999,950, where one decimal of k would round to `1000.0k` and switches to
+// `1.00M` (VantageHUD's formatTokenCount).
 const MILLION_THRESHOLD = 999_950
+// Subagents mode (`includeSubagents: true`) expands the calm -> alert flip to
+// 3,995,000, where two-decimal M rounds from `3.99M` to `4.00M`.
+const SUBAGENT_ALERT_THRESHOLD = 3_995_000
 
 export function formatTokenCount(tokens: number): string {
   if (tokens < 1000) return `${tokens}`
@@ -28,7 +32,7 @@ export function formatTokenRate(rate: number): string | null {
   return value > 0 ? `${value}` : null
 }
 
-export const tokens: Fragment = ({ v, l, t }) => {
+export const tokens: Fragment = ({ v, o, l, t }) => {
   const total = v.session.counts.tokens
   if (!(total > 0)) return null
   const details: string[] = []
@@ -36,5 +40,6 @@ export const tokens: Fragment = ({ v, l, t }) => {
   const rate = v.session.tokensPerSecond === undefined ? null : formatTokenRate(v.session.tokensPerSecond)
   if (rate !== null) details.push(`${rate}${l.tokensPerSecond}`)
   const suffix = details.length ? t.paint('faint', `(${details.join(', ')})`) : ''
-  return t.paint('label', `${l.tokens}:`) + t.paint(total >= MILLION_THRESHOLD ? 'alert' : 'calm', formatTokenCount(total)) + suffix
+  const alertThreshold = o.includeSubagents ? SUBAGENT_ALERT_THRESHOLD : MILLION_THRESHOLD
+  return t.paint('label', `${l.tokens}:`) + t.paint(total >= alertThreshold ? 'alert' : 'calm', formatTokenCount(total)) + suffix
 }

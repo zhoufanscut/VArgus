@@ -186,7 +186,9 @@ expanding content from paths or branches.
   token cache/speed details, `(wt:x)`) use `faint`.
 - Readings with a threshold use two flat tiers (`calm` / `alert`): `ctx` and
   rate-limit percentages flip at 80%, `tokens` flips at `1.00M` (999,950
-  tokens, matching its `k`/`M` switch), and `session` age flips at 12 hours.
+  tokens, matching its `k`/`M` switch) by default and at `4.00M` (3,995,000
+  tokens, matching two-decimal `M` rounding from `3.99M` to `4.00M`) when
+  `includeSubagents` is `true`, and `session` age flips at 12 hours.
   Effort uses `calm` at or above the model's default and `alert` below it. An
   absent default uses `high`. An exact match to the baseline is `calm` even for
   an unfamiliar named level. Unranked or numeric values that cannot be compared

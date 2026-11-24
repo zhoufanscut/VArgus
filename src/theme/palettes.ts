@@ -7,9 +7,9 @@ import type { TokenName } from '../core/types.ts'
 //   faint     secondary parentheticals (`(fast)`, reset times, cache/speed, `(wt:x)`)
 //   sep       the ` | ` separator (including before the stale marker)
 //   calm      under-threshold readings (effort at/above default, <80% context/limits,
-//             <1M tokens, <12h session)
+//             <1M tokens or <4M with includeSubagents, <12h session)
 //   alert     over-threshold/error states (low effort, >=80% context/limits, >=1M
-//             tokens, >=12h session, `[API 429]`/`[API auth]`/`[API err]`, git in-progress ops)
+//             tokens or >=4M with includeSubagents, >=12h session, `[API 429]`/`[API auth]`/`[API err]`, git in-progress ops)
 //   add / del / track   git/svn: staged and ahead / conflicts, modified and behind / untracked
 export const PALETTES: Record<string, Record<TokenName, string>> = {
   // cool slate with cyan-teal accents (Nord / Tokyo Night family)

@@ -2322,3 +2322,69 @@ test('Antigravity includeSubagents resolves isolated worktree and multi-root chi
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('Antigravity token alert threshold switches from 1M to 4M under includeSubagents without row-cache bleed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vargus-agy-token-alert-'))
+  try {
+    const home = join(root, 'home')
+    const appDataDir = join(root, 'app')
+    const cacheDir = join(root, 'cache')
+    const convDir = join(appDataDir, 'brain', 'conv-alert', '.system_generated', 'logs')
+    await mkdir(convDir, { recursive: true })
+    const transcriptPath = join(convDir, 'transcript.jsonl')
+    await writeFile(transcriptPath, [
+      JSON.stringify({ step_index: 0, type: 'USER_INPUT', created_at: '2026-11-24T00:00:00Z' }),
+      JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-24T00:00:01Z', input_tokens: 1_500_000, output_tokens: 0 }),
+    ].join('\n') + '\n')
+
+    const colored = makeTheme('graphite', false)
+    const baseOpts = { folder: false, model: false, rateLimits: false, context: false, session: false, callCounts: false, repo: false, branch: false, status: false }
+    const payload: AntigravityPayload = { conversation_id: 'conv-alert', transcript_path: transcriptPath, cwd: root }
+
+    const mainRow = await renderAntigravityStatusLine(payload, {
+      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: false },
+    })
+    assert.equal(mainRow, '  ' + colored.paint('label', 'token:') + colored.paint('alert', '1.50M'))
+
+    const subCalmRow = await renderAntigravityStatusLine(payload, {
+      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: true },
+    })
+    assert.equal(subCalmRow, '  ' + colored.paint('label', 'token:') + colored.paint('calm', '1.50M'))
+
+    // Corrupt the transcript cache and force an incremental read failure: each mode must
+    // fall back to its own cached row (alert vs calm) without row-cache bleed.
+    const transcriptCache = cachePath(cacheDir, 'transcript', transcriptPath)
+    const savedTranscriptCache = await readFile(transcriptCache, 'utf8')
+    await writeFile(transcriptCache, JSON.stringify({ ...JSON.parse(savedTranscriptCache), seenSkillsInTurn: 42 }))
+    await appendFile(transcriptPath, '{}\n')
+    const staleSuffix = colored.paint('sep', ' | ') + '⌛' + colored.paint('label', 'stale')
+    const subStaleRow = await renderAntigravityStatusLine(payload, {
+      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: true },
+    })
+    assert.equal(subStaleRow, subCalmRow + staleSuffix)
+    const mainStaleRow = await renderAntigravityStatusLine(payload, {
+      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: false },
+    })
+    assert.equal(mainStaleRow, mainRow + staleSuffix)
+
+    // Restore the valid transcript cache and check the exact 3,994,999 -> 3,995,000 flip.
+    await writeFile(transcriptCache, savedTranscriptCache)
+    await appendFile(transcriptPath, JSON.stringify({
+      step_index: 2, type: 'PLANNER_RESPONSE', created_at: '2026-11-24T00:00:02Z', input_tokens: 2_494_999, output_tokens: 0,
+    }) + '\n')
+    const subBorderCalmRow = await renderAntigravityStatusLine(payload, {
+      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: true },
+    })
+    assert.equal(subBorderCalmRow, '  ' + colored.paint('label', 'token:') + colored.paint('calm', '3.99M'))
+
+    await appendFile(transcriptPath, JSON.stringify({
+      step_index: 3, type: 'PLANNER_RESPONSE', created_at: '2026-11-24T00:00:03Z', input_tokens: 1, output_tokens: 0,
+    }) + '\n')
+    const subAlertRow = await renderAntigravityStatusLine(payload, {
+      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: true },
+    })
+    assert.equal(subAlertRow, '  ' + colored.paint('label', 'token:') + colored.paint('alert', '4.00M'))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

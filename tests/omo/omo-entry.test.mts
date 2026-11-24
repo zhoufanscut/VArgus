@@ -12,7 +12,7 @@ import { OmoSubagents, projectStateKey } from '../../src/hosts/omo/subagents.ts'
 import type { HistoryReducer, SessionEntry } from '../../src/hosts/omo/contracts.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 
-function host(mode = 'tui') {
+function host(mode = 'tui', cwd = '/repo') {
   const entries: SessionEntry[] = []
   const handlers = new Map<string, (event: unknown, ctx: Context) => void>()
   type Context = Parameters<Parameters<OmoApi['on']>[1]>[1]
@@ -22,7 +22,7 @@ function host(mode = 'tui') {
   let listeners = 0
   const ctx: Context = {
     modelRegistry: { getProviderAuth: async () => undefined },
-    mode, cwd: '/repo', model: { id: 'gpt-6.1-sol', provider: 'test' }, thinkingLevel: 'high',
+    mode, cwd, model: { id: 'gpt-6.1-sol', provider: 'test' }, thinkingLevel: 'high',
     getContextUsage: () => ({ tokens: 250, contextWindow: 1000, percent: 25 }),
     sessionManager: {
       getSessionId: () => 'test-session',
@@ -1484,5 +1484,62 @@ test('OmO reconciles queued pending receipts against store refusals, excludes ad
     assert.doesNotMatch(soleRow?.render(200).join('') ?? '', /🤖|⚡|A:|S:/)
   } finally {
     soleHandlers.get('session_shutdown')?.({}, soleCtx)
+  }
+})
+
+test('OmO token alert threshold switches from 1M to 4M when toggling includeSubagents', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-token-alert-'))
+  const savedNoColor = process.env.NO_COLOR
+  const savedAgentDir = process.env.OMO_CODING_AGENT_DIR
+  const savedHome = process.env.HOME
+  const h = host('tui', dir)
+  try {
+    delete process.env.NO_COLOR
+    process.env.HOME = dir
+    process.env.OMO_CODING_AGENT_DIR = join(dir, 'agent')
+    h.append({
+      id: 'm1', type: 'message', timestamp: '2026-11-24T00:00:01Z',
+      message: { role: 'assistant', usage: { input: 1_500_000, output: 0, cacheRead: 0, cacheWrite: 0 } },
+    })
+    h.load()
+    h.event('session_start')
+
+    const colored = makeTheme('graphite', false)
+    const tokenText = (tone: 'calm' | 'alert', value: string) =>
+      colored.paint('label', 'token:') + colored.paint(tone, value)
+
+    assert.ok((h.row?.render(200).join('') ?? '').includes(tokenText('alert', '1.50M')))
+
+    await h.command('config {"includeSubagents":true}')
+    assert.ok((h.row?.render(200).join('') ?? '').includes(tokenText('calm', '1.50M')))
+
+    h.append({
+      id: 'm2', type: 'message', timestamp: '2026-11-24T00:00:02Z',
+      message: { role: 'assistant', usage: { input: 2_494_999, output: 0, cacheRead: 0, cacheWrite: 0 } },
+    })
+    h.event('message_end', { message: { role: 'assistant' } })
+    assert.ok((h.row?.render(200).join('') ?? '').includes(tokenText('calm', '3.99M')))
+
+    await h.command('config {"includeSubagents":false}')
+    assert.ok((h.row?.render(200).join('') ?? '').includes(tokenText('alert', '3.99M')))
+
+    await h.command('config {"includeSubagents":true}')
+    assert.ok((h.row?.render(200).join('') ?? '').includes(tokenText('calm', '3.99M')))
+
+    h.append({
+      id: 'm3', type: 'message', timestamp: '2026-11-24T00:00:03Z',
+      message: { role: 'assistant', usage: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 } },
+    })
+    h.event('message_end', { message: { role: 'assistant' } })
+    assert.ok((h.row?.render(200).join('') ?? '').includes(tokenText('alert', '4.00M')))
+  } finally {
+    h.event('session_shutdown')
+    if (savedNoColor === undefined) delete process.env.NO_COLOR
+    else process.env.NO_COLOR = savedNoColor
+    if (savedAgentDir === undefined) delete process.env.OMO_CODING_AGENT_DIR
+    else process.env.OMO_CODING_AGENT_DIR = savedAgentDir
+    if (savedHome === undefined) delete process.env.HOME
+    else process.env.HOME = savedHome
+    await rm(dir, { recursive: true, force: true })
   }
 })
