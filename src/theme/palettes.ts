@@ -1,5 +1,7 @@
 import type { TokenName } from '../core/types.ts'
 
+export type PalettePolarity = 'dark' | 'light'
+
 // Five bundled palettes using one 3-group data-first OKLCH structure, 9 hex tokens each:
 //   - 5-step data-first tonal ramp (`text > calm > label > detail > sep`) in one theme hue family:
 //       text    location anchors (bold folder; plain repo and branch/ref names)
@@ -44,4 +46,12 @@ export const PALETTES: Record<string, Record<TokenName, string>> = {
     calm: '#253a4e', alert: '#bb1423',
     add: '#3f764c', del: '#945451', track: '#676099',
   },
+}
+
+export const PALETTE_POLARITY: Record<string, PalettePolarity> = {
+  aurora: 'dark',
+  ember: 'dark',
+  nebula: 'dark',
+  graphite: 'dark',
+  daylight: 'light',
 }

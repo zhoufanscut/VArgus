@@ -1,5 +1,5 @@
 import type { Rgb, Theme, TokenName } from '../core/types.ts'
-import { PALETTES } from './palettes.ts'
+import { PALETTES, PALETTE_POLARITY, type PalettePolarity } from './palettes.ts'
 
 // Palettes, resolvePalette and the ANSI codes (DESIGN, "Colours", "Rules
 // carried over from VantageHUD", Themes). 24-bit SGR only: no 256/16-colour
@@ -13,6 +13,7 @@ const RESET = `${ESC}0m`
 // A null prototype and own-property lookups, so a name such as `constructor`
 // or `toString` finds nothing and falls back (VantageHUD's registry rule).
 const registry: Record<string, Record<TokenName, string>> = Object.assign(Object.create(null), PALETTES)
+const polarities: Record<string, PalettePolarity> = Object.assign(Object.create(null), PALETTE_POLARITY)
 
 function hexToRgb(hex: string): Rgb {
   return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]
@@ -20,12 +21,12 @@ function hexToRgb(hex: string): Rgb {
 
 // Names match case- and space-insensitively, as VantageHUD's did; an unknown
 // name gives the default palette.
-export function resolvePalette(name: string): { name: string; rgb: Record<TokenName, Rgb> } {
+export function resolvePalette(name: string): { name: string; polarity: PalettePolarity; rgb: Record<TokenName, Rgb> } {
   const key = name.trim().toLowerCase()
   const found = Object.prototype.hasOwnProperty.call(registry, key) ? key : DEFAULT_THEME
   const hex = registry[found]!
   const rgb = Object.fromEntries(Object.entries(hex).map(([k, v]) => [k, hexToRgb(v)])) as Record<TokenName, Rgb>
-  return { name: found, rgb }
+  return { name: found, polarity: polarities[found]!, rgb }
 }
 
 export function makeTheme(name: string, noColor: boolean): Theme {

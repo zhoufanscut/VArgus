@@ -1,24 +1,38 @@
 import { release } from 'node:os'
-import type { TokenName, Values } from '../core/types.ts'
+import type { Rgb, TokenName, Values } from '../core/types.ts'
 import { initialSession } from '../core/session.ts'
 import { resolveLabels } from '../i18n/index.ts'
 import { DEFAULTS } from '../options.ts'
 import { staleLine } from '../render/freshness.ts'
 import { render } from '../render/index.ts'
 import { displaySession, shortModelName } from '../render/session.ts'
-import { DEFAULT_THEME, makeTheme } from '../theme/index.ts'
-import { PALETTES } from '../theme/palettes.ts'
+import { stringWidth } from '../render/width.ts'
+import { DEFAULT_THEME, makeTheme, resolvePalette } from '../theme/index.ts'
+import { PALETTES, PALETTE_POLARITY, type PalettePolarity } from '../theme/palettes.ts'
 
 const TOKEN_ORDER: readonly TokenName[] = [
   'text', 'calm', 'label', 'detail', 'sep', 'alert', 'add', 'del', 'track',
 ]
 const THEME_NAMES = Object.keys(PALETTES)
+const POLARITY_ORDER: readonly PalettePolarity[] = ['dark', 'light']
+const SECTION_TITLE: Record<PalettePolarity, string> = {
+  dark: 'Dark themes',
+  light: 'Light themes',
+}
+const PREVIEW_BG: Record<PalettePolarity, { hex: string; rgb: Rgb }> = {
+  dark: { hex: '#181818', rgb: [0x18, 0x18, 0x18] },
+  light: { hex: '#ffffff', rgb: [0xff, 0xff, 0xff] },
+}
+const DARK_THEMES = THEME_NAMES.filter(name => PALETTE_POLARITY[name] === 'dark')
+const LIGHT_THEMES = THEME_NAMES.filter(name => PALETTE_POLARITY[name] === 'light')
+const RESET = '\x1b[0m'
 
 const USAGE = `Usage:
   vargus themes [NAME]
 
-Preview all bundled themes (or one named theme) in the terminal.
-Available themes: ${THEME_NAMES.join(', ')}.
+Preview all bundled themes (or one named theme) on a dark (#181818) or light (#ffffff) background.
+Dark themes: ${DARK_THEMES.join(', ')}.
+Light themes: ${LIGHT_THEMES.join(', ')}.
 Respects NO_COLOR.`
 
 function detectWsl(env: NodeJS.ProcessEnv): boolean {
@@ -86,9 +100,15 @@ function sampleValues(isWsl: boolean): { calm: Values; alert: Values } {
   }
 }
 
+function applyBackground(line: string, bg: Rgb, padWidth: number): string {
+  const bgSgr = `\x1b[48;2;${bg[0]};${bg[1]};${bg[2]}m`
+  const pad = ' '.repeat(Math.max(0, padWidth - stringWidth(line)))
+  return `${bgSgr}${line.replaceAll(RESET, `${RESET}${bgSgr}`)}${pad}${RESET}`
+}
+
 export function formatThemesPreview(
   names: readonly string[],
-  opts: { noColor?: boolean; isWsl?: boolean } = {},
+  opts: { noColor?: boolean; isWsl?: boolean; columns?: number } = {},
 ): string {
   if (names.length === 0) return ''
   const l = resolveLabels('en')
@@ -96,43 +116,75 @@ export function formatThemesPreview(
   const isWsl = opts.isWsl ?? false
   const now = 0
   const samples = sampleValues(isWsl)
-  const blocks = names.map(name => {
-    const t = makeTheme(name, noColor)
-    const header = name === DEFAULT_THEME ? `${name} (default)` : name
-    const swatches = TOKEN_ORDER.map(token => t.paint(token, token)).join('  ')
-    const calmRow = render({
-      v: samples.calm,
-      display: displaySession(samples.calm.session, shortModelName),
-      o: DEFAULTS,
-      l,
-      t,
-      now,
-    })
-    const alertRow = staleLine(
-      render({
-        v: samples.alert,
-        display: displaySession(samples.alert.session, shortModelName),
+  const validCols =
+    typeof opts.columns === 'number' && Number.isFinite(opts.columns) && opts.columns > 0
+      ? opts.columns
+      : undefined
+
+  const byPolarity = new Map<PalettePolarity, string[]>(POLARITY_ORDER.map(p => [p, []]))
+  for (const name of names) {
+    byPolarity.get(resolvePalette(name).polarity)!.push(name)
+  }
+
+  const sections: string[] = []
+  for (const polarity of POLARITY_ORDER) {
+    const group = byPolarity.get(polarity)!
+    if (group.length === 0) continue
+
+    const sectionHeader = noColor
+      ? SECTION_TITLE[polarity]
+      : `\x1b[1m${SECTION_TITLE[polarity]} (${PREVIEW_BG[polarity].hex})\x1b[22m`
+    const bg = PREVIEW_BG[polarity].rgb
+
+    const blocks = group.map(name => {
+      const t = makeTheme(name, noColor)
+      const header = name === DEFAULT_THEME ? `${name} (default)` : name
+      const swatches = TOKEN_ORDER.map(token => t.paint(token, token)).join('  ')
+      const calmRow = render({
+        v: samples.calm,
+        display: displaySession(samples.calm.session, shortModelName),
         o: DEFAULTS,
         l,
         t,
         now,
-      }),
-      undefined,
-      { t, l, isWsl },
-    )
-    return [
-      header,
-      `  tokens  ${swatches}`,
-      `  calm    ${calmRow}`,
-      `  alert   ${alertRow}`,
-    ].join('\n')
-  })
-  return blocks.join('\n\n') + '\n'
+      })
+      const alertRow = staleLine(
+        render({
+          v: samples.alert,
+          display: displaySession(samples.alert.session, shortModelName),
+          o: DEFAULTS,
+          l,
+          t,
+          now,
+        }),
+        undefined,
+        { t, l, isWsl },
+      )
+      const previewRows = [
+        `  ${t.paint('detail', 'tokens')}  ${swatches}`,
+        `  ${t.paint('detail', 'calm')}    ${calmRow}`,
+        `  ${t.paint('detail', 'alert')}   ${alertRow}`,
+      ]
+      let styledRows = previewRows
+      if (!noColor) {
+        const maxWidth = Math.max(...previewRows.map(stringWidth))
+        const padToBlock = validCols === undefined || maxWidth + 2 <= validCols
+        styledRows = previewRows.map(row =>
+          applyBackground(row, bg, padToBlock ? maxWidth + 2 : stringWidth(row) + 2),
+        )
+      }
+      return [header, ...styledRows].join('\n')
+    })
+
+    sections.push([sectionHeader, ...blocks].join('\n\n'))
+  }
+
+  return sections.join('\n\n\n') + '\n'
 }
 
 export function themes(
   args: string[],
-  io?: { write?: (chunk: string) => void; noColor?: boolean; isWsl?: boolean },
+  io?: { write?: (chunk: string) => void; noColor?: boolean; isWsl?: boolean; columns?: number },
 ): number {
   const write = io?.write ?? (chunk => { process.stdout.write(chunk) })
   if (args.length === 1 && args[0] === '--help') {
@@ -155,6 +207,7 @@ export function themes(
   }
   const noColor = io?.noColor ?? Boolean(process.env.NO_COLOR)
   const isWsl = io?.isWsl ?? detectWsl(process.env)
-  write(formatThemesPreview(selected, { noColor, isWsl }))
+  const columns = io?.columns ?? (process.stdout.isTTY ? process.stdout.columns : undefined)
+  write(formatThemesPreview(selected, { noColor, isWsl, columns }))
   return 0
 }

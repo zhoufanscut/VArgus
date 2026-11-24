@@ -199,7 +199,9 @@ The row uses one compact layout across all four hosts:
 
 [Themes](src/theme/index.ts) use 24-bit SGR styles and default to `graphite`.
 Each palette in [palettes.ts](src/theme/palettes.ts) defines 9 tokens: `text`,
-`label`, `detail`, `sep`, `calm`, `alert`, `add`, `del` and `track`.
+`label`, `detail`, `sep`, `calm`, `alert`, `add`, `del` and `track`, and
+`PALETTE_POLARITY` (surfaced via `resolvePalette`) tags each bundled palette as
+`dark` or `light`.
 Every bundled palette follows the same 3-group data-first OKLCH rules, checked in
 [theme.test.mts](tests/shared/theme.test.mts) across dark (`#181818`–`#282828`)
 and light (`#ffffff`–`#f6f8fa`) background ranges:
@@ -229,7 +231,10 @@ and light (`#ffffff`–`#f6f8fa`) background ranges:
 The palette registry uses own-property lookup and falls back for unknown
 names. When a host sees a non-empty `NO_COLOR`, the theme returns plain text. Run
 `vargus themes [NAME]` ([themes.ts](src/cli/themes.ts)) to preview bundled palettes
-in the terminal through the shared renderer, respecting `NO_COLOR`. External
+in the terminal through the shared renderer; it separates palettes into dark and
+light sections, forces each polarity's typical reference background (`#181818` for
+dark, `#ffffff` for light) on swatch and sample rows with per-line SGR resets
+when colour is enabled, and omits all escapes and padding under `NO_COLOR`. External
 text passes through [control-character sanitization](src/render/text.ts) before
 styling. The tmux output translates the renderer's styles without recursively
 expanding content from paths or branches.

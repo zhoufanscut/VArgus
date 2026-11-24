@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import type { Rgb, TokenName } from '../../src/core/types.ts'
 import { DEFAULT_THEME, makeTheme, resolvePalette } from '../../src/theme/index.ts'
-import { PALETTES } from '../../src/theme/palettes.ts'
+import { PALETTES, PALETTE_POLARITY } from '../../src/theme/palettes.ts'
 
 // Themes (DESIGN, "Colours", "Rules carried over from VantageHUD", Themes).
 
@@ -70,14 +70,23 @@ function oklabDist(x: Rgb, y: Rgb): number {
 }
 
 describe('theme', () => {
-  test('five bundled palettes of the same 9 tokens; graphite is the default', () => {
+  test('five bundled palettes of the same 9 tokens with explicit polarity; graphite is the default', () => {
     assert.deepEqual(Object.keys(PALETTES), ['aurora', 'ember', 'nebula', 'graphite', 'daylight'])
+    assert.deepEqual(PALETTE_POLARITY, {
+      aurora: 'dark',
+      ember: 'dark',
+      nebula: 'dark',
+      graphite: 'dark',
+      daylight: 'light',
+    })
     const tokens = ['text', 'label', 'detail', 'sep', 'calm', 'alert', 'add', 'del', 'track']
     for (const p of Object.values(PALETTES)) {
       assert.deepEqual(Object.keys(p), tokens)
       for (const hex of Object.values(p)) assert.match(hex, /^#[0-9a-f]{6}$/)
     }
     assert.equal(DEFAULT_THEME, 'graphite')
+    assert.equal(resolvePalette('ember').polarity, 'dark')
+    assert.equal(resolvePalette('daylight').polarity, 'light')
     assert.deepEqual(resolvePalette('ember').rgb.alert, [0xfe, 0x77, 0x68])
   })
 
@@ -116,7 +125,7 @@ describe('theme', () => {
       const rgb = Object.fromEntries(
         Object.entries(p).map(([k, hex]) => [k, hexToRgb(hex)]),
       ) as Record<TokenName, Rgb>
-      const isLight = name === 'daylight'
+      const isLight = PALETTE_POLARITY[name] === 'light'
       const bgTyp: Rgb = isLight ? [0xff, 0xff, 0xff] : [0x18, 0x18, 0x18]
       const bgWst: Rgb = isLight ? [0xf6, 0xf8, 0xfa] : [0x28, 0x28, 0x28]
       const bgWstLum = relLum(bgWst)
@@ -216,7 +225,9 @@ describe('theme', () => {
 
   test('an unknown name, constructor and toString included, falls back to graphite; names ignore case', () => {
     for (const name of ['nope', 'constructor', 'toString', '__proto__', '']) {
-      assert.equal(resolvePalette(name).name, 'graphite')
+      const resolved = resolvePalette(name)
+      assert.equal(resolved.name, 'graphite')
+      assert.equal(resolved.polarity, 'dark')
     }
     assert.equal(resolvePalette(' Ember ').name, 'ember')
     assert.deepEqual(makeTheme('constructor', false).rgb.text, [0xed, 0xed, 0xed])
