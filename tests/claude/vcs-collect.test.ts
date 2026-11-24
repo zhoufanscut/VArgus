@@ -104,7 +104,7 @@ describe('vcs collector', () => {
     w.files[`${w.gitDir}/commondir`] = '../..\n'
     await $.session.start(start)
     await clock.advance(1000)
-    expect(line(w)).toContain('branch:main (wt:wt1)')
+    expect(line(w)).toContain('branch:main(wt:wt1)')
   })
 
   test('Windows: folding a commondir keeps the drive', async () => {
@@ -198,7 +198,7 @@ describe('vcs collector', () => {
     w.files['/r/.git/worktrees/w/logs/HEAD'] = `c4ef ${SHA} t <t@t> 1 +0800\tcheckout: moving from main to origin/main\n`
     w.files['/r/.git/refs/remotes/origin/main'] = `${SHA}\n`
     await clock.advance(5000)
-    expect(line(w)).toContain('branch:@origin/main (wt:w)')
+    expect(line(w)).toContain('branch:@origin/main(wt:w)')
   })
 
   test('mid-rebase: the branch from head-name with the step; am when rebase-apply has no rebasing', async ($, on) => {
@@ -214,7 +214,7 @@ describe('vcs collector', () => {
     w.dirs.add(`${GIT_DIR}/rebase-merge`)
     await $.session.start(start)
     await clock.advance(1000)
-    expect(line(w)).toContain('branch:feat (rebase 2/3) | ✗1')
+    expect(line(w)).toContain('branch:feat(rebase 2/3) | ✗1')
     w.dirs.delete(`${GIT_DIR}/rebase-merge`)
     w.dirs.add(`${GIT_DIR}/rebase-apply`)
     w.files[`${GIT_DIR}/rebase-apply/next`] = '1\n'
@@ -222,10 +222,10 @@ describe('vcs collector', () => {
     w.files[`${GIT_DIR}/rebase-apply/head-name`] = 'refs/heads/feat\n'
     w.files[`${GIT_DIR}/rebase-apply/rebasing`] = ''
     await clock.advance(5000)
-    expect(line(w)).toContain('branch:feat (rebase 1/4)')
+    expect(line(w)).toContain('branch:feat(rebase 1/4)')
     delete w.files[`${GIT_DIR}/rebase-apply/rebasing`]
     await clock.advance(5000)
-    expect(line(w)).toContain('branch:feat (am 1/4)')
+    expect(line(w)).toContain('branch:feat(am 1/4)')
   })
 
   test('bisect on a detached sha: no ref name, the operation shown', async ($, on) => {
@@ -238,7 +238,7 @@ describe('vcs collector', () => {
     w.dirs.add(`${GIT_DIR}/refs/tags/v1.0`)
     await $.session.start(start)
     await clock.advance(1000)
-    expect(line(w)).toContain('branch:@18f67cd (bisect)')
+    expect(line(w)).toContain('branch:@18f67cd(bisect)')
   })
 
   test('a reftable HEAD asks git for the short sha', async ($, on) => {

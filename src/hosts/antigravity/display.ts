@@ -23,6 +23,14 @@ export function shortAntigravityModelName(model: string): string | null {
   return id.replace(/\s+/g, '-')
 }
 
+const ORCHESTRATOR_LABEL = /^orchestrator\(([a-z0-9.-]+)\)$/
+
 export function antigravityDisplay(session: SessionValues) {
-  return displaySession(session, shortAntigravityModelName)
+  const display = displaySession(session, shortAntigravityModelName)
+  const variant = display.modelName ? ORCHESTRATOR_LABEL.exec(display.modelName)?.[1] : undefined
+  if (variant) {
+    display.modelName = 'orchestrator'
+    display.modelVariant = variant
+  }
+  return display
 }

@@ -246,15 +246,15 @@ describe('limits collector', () => {
     w.answer = () => reply(401)
     await $.session.start(start)
     await clock.advance(SEC)
-    expect(line(w)).toBe('5h:4% [API auth]')
+    expect(line(w)).toBe('5h:4% [API AUTH]')
     w.answer = () => reply(403)
     await clock.advance(120 * SEC)
     expect(w.fetches).toHaveLength(2)
-    expect(line(w)).toBe('5h:4% [API err]')
+    expect(line(w)).toBe('5h:4% [API ERR]')
     w.answer = () => 'throw'
     await clock.advance(120 * SEC)
     expect(w.fetches).toHaveLength(3)
-    expect(line(w)).toBe('5h:4% [API err]')
+    expect(line(w)).toBe('5h:4% [API ERR]')
   })
 
   test('after a 401 the next read waits the 2 min retry pace', opts, async ($, on) => {
@@ -281,7 +281,7 @@ describe('limits collector', () => {
     await clock.advance(15 * MIN - 91 * SEC)
     expect(line(w)).toBe('5h:4% 1mo:11%(30d23h)')
     await clock.advance(SEC)
-    expect(line(w)).toBe('5h:4% [API auth]')
+    expect(line(w)).toBe('5h:4% [API AUTH]')
   })
 
   test('429 honours a numeric Retry-After; the badge only when there is no data', opts, async ($, on) => {

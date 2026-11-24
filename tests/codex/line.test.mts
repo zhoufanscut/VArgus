@@ -89,7 +89,7 @@ test('Codex renders a detached tag and linked worktree by default and with a leg
       await ready(collector, 'main')
       const row = await line(500)
       assert.match(row, /repo:main.*\?1/)
-      assert.match(row, /branch:@v1 \(wt:linked\)/)
+      assert.match(row, /branch:@v1\(wt:linked\)/)
     }
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

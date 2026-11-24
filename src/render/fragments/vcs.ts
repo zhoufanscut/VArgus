@@ -10,15 +10,15 @@ import { cleanText } from '../text.ts'
 export const repo: Fragment = ({ v, l, t }) =>
   v.vcs.kind && v.vcs.repo ? t.paint('label', `${l.repo}:`) + t.paint('text', cleanText(v.vcs.repo)) : null
 
-// git: branch:main, branch:main (wt:x), or a detached HEAD:
-// branch:@v1.0, branch:@a1b2c3d (bisect), branch:feat (rebase 2/3).
+// git: branch:main, branch:main(wt:x), or a detached HEAD:
+// branch:@v1.0, branch:@a1b2c3d(bisect), branch:feat(rebase 2/3).
 // svn: branch:trunk.
 export const branch: Fragment = f => {
   const { v, l, t } = f
   const head = branchName(f)
   if (!head) return null
   const wt = v.vcs.kind === 'git' && v.vcs.worktree
-    ? ` ${t.paint('faint', `${l.worktree}${cleanText(v.vcs.worktree)})`)}`
+    ? t.paint('faint', `${l.worktree}${cleanText(v.vcs.worktree)})`)
     : ''
   return `${t.paint('label', `${l.branch}:`)}${head}${wt}`
 }
@@ -32,7 +32,7 @@ function branchName({ v, l, t }: FragmentInput): string | null {
   const head = d.onBranch ? name : t.paint('label', l.detachedAt) + name
   if (!d.operation) return head
   const step = d.progress ? ` ${d.progress}` : ''
-  return `${head} ${t.paint('alert', `(${cleanText(l[d.operation])}${step})`)}`
+  return `${head}${t.paint('alert', `(${cleanText(l[d.operation])}${step})`)}`
 }
 
 // ✗1 +2 !3 ?1 ⇡1 ⇣2, each only when non-zero; conflicts first, since an

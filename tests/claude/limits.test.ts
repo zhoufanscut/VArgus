@@ -88,8 +88,8 @@ describe('limits fragment', () => {
   test('past 15 min after the last good read: the error instead of the numbers', async () => {
     const expired = (error: ClaudeLimits['error']) =>
       draw({ engine: engine.slice(0, 1), api: api({ monthly: { percent: 12, resetsAt: null } }), lastSuccessAt: NOW - 15 * MIN - 1, error })
-    expect(expired('network')).toBe('5h:4%(4h37m) [API err]')
-    expect(expired('auth')).toBe('5h:4%(4h37m) [API auth]')
+    expect(expired('network')).toBe('5h:4%(4h37m) [API ERR]')
+    expect(expired('auth')).toBe('5h:4%(4h37m) [API AUTH]')
     expect(expired('rate_limited')).toBe('5h:4%(4h37m) [API 429]')
     // at 15 min still shown cleanly
     expect(draw({ api: api({ monthly: { percent: 12, resetsAt: null } }), lastSuccessAt: NOW - 15 * MIN, error: 'auth' }))
@@ -113,8 +113,8 @@ describe('limits fragment', () => {
     expect(draw({ engine: [{ kind: 'five_hour', percentUsed: 79.4 }, { kind: 'seven_day', percentUsed: 79.5 }] }, { t }))
       .toBe('<label>5h:<calm>79% <label>7d:<alert>80%')
     expect(draw({ error: 'rate_limited' }, { t })).toBe('<alert>[API 429]')
-    expect(draw({ error: 'auth' }, { t })).toBe('<alert>[API auth]')
-    expect(draw({ error: 'network' }, { t })).toBe('<alert>[API err]')
+    expect(draw({ error: 'auth' }, { t })).toBe('<alert>[API AUTH]')
+    expect(draw({ error: 'network' }, { t })).toBe('<alert>[API ERR]')
   })
 
   test('every word comes from the labels table', async () => {

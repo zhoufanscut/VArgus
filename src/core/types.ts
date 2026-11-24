@@ -39,6 +39,7 @@ export type Values = {
 
 export type SessionDisplay = {
   modelName: string | null
+  modelVariant?: string
   speed: 'fast' | 'ultrafast' | undefined
   contextPercent: number
   counts: Counts

@@ -31,8 +31,8 @@ export const en = {
   monthly: '1mo',
   detachedAt: '@',
   apiRateLimited: '[API 429]',
-  apiAuth: '[API auth]',
-  apiError: '[API err]',
+  apiAuth: '[API AUTH]',
+  apiError: '[API ERR]',
 }
 
 export type Labels = Record<keyof typeof en, string>

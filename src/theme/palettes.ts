@@ -4,12 +4,12 @@ import type { TokenName } from '../core/types.ts'
 // hex tokens each (two tiers: calm and alert). What each token paints:
 //   text      location anchors (bold folder; plain repo and branch/ref names)
 //   label     `xxx:` prefixes, model name, detached `@`, call counts and stale text
-//   faint     secondary parentheticals (`(fast)`, reset times, cache/speed, `(wt:x)`)
+//   faint     secondary parentheticals (`(carbon)`, `(fast)`, reset times, cache/speed, `(wt:x)`)
 //   sep       the ` | ` separator (including before the stale marker)
 //   calm      under-threshold readings (effort at/above default, <80% context/limits,
 //             <1M tokens or <4M with includeSubagents, <12h session)
 //   alert     over-threshold/error states (low effort, >=80% context/limits, >=1M
-//             tokens or >=4M with includeSubagents, >=12h session, `[API 429]`/`[API auth]`/`[API err]`, git in-progress ops)
+//             tokens or >=4M with includeSubagents, >=12h session, `[API 429]`/`[API AUTH]`/`[API ERR]`, git in-progress ops)
 //   add / del / track   git/svn: staged (svn: added) and ahead / conflicts, modified and behind / untracked
 export const PALETTES: Record<string, Record<TokenName, string>> = {
   // cool slate with cyan-teal accents (Nord / Tokyo Night family)

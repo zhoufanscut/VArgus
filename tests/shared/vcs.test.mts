@@ -108,7 +108,7 @@ describe('vcs fragments', () => {
   test('repo, branch with worktree suffix, status: VantageHUD shapes', () => {
     const f = input({ kind: 'git', repo: 'VArgus', branch: 'main', worktree: 'wt1', counts: counts({ untracked: 4 }) })
     assert.equal(repo(f), 'repo:VArgus')
-    assert.equal(branch(f), 'branch:main (wt:wt1)')
+    assert.equal(branch(f), 'branch:main(wt:wt1)')
     assert.equal(status(f), '?4')
     assert.equal(branch(input({ kind: 'git', branch: 'main' })), 'branch:main')
   })
@@ -124,9 +124,9 @@ describe('vcs fragments', () => {
     const at = { kind: 'git' as const, detached: { name: 'v1.0', onBranch: false, operation: null, progress: '' } }
     assert.equal(branch(input(at)), 'branch:@v1.0')
     const sha = { kind: 'git' as const, detached: { name: 'a1b2c3d', onBranch: false, operation: 'gitBisect' as const, progress: '' } }
-    assert.equal(branch(input(sha)), 'branch:@a1b2c3d (bisect)')
+    assert.equal(branch(input(sha)), 'branch:@a1b2c3d(bisect)')
     const rebase = { kind: 'git' as const, worktree: 'w', detached: { name: 'feat', onBranch: true, operation: 'gitRebase' as const, progress: '2/3' } }
-    assert.equal(branch(input(rebase)), 'branch:feat (rebase 2/3) (wt:w)')
+    assert.equal(branch(input(rebase)), 'branch:feat(rebase 2/3)(wt:w)')
   })
 
   test('SVN shows the branch name alone, ignoring worktree', () => {
@@ -141,7 +141,7 @@ describe('vcs fragments', () => {
   test('outside text is cleaned of control characters', () => {
     const f = input({ kind: 'git', repo: 'r\x1b[31m', branch: 'b\nx', worktree: 'w\x07' })
     assert.equal(repo(f), 'repo:r?[31m')
-    assert.equal(branch(f), 'branch:b?x (wt:w?)')
+    assert.equal(branch(f), 'branch:b?x(wt:w?)')
   })
 
   test('every word and mark comes from the labels', () => {
@@ -149,11 +149,11 @@ describe('vcs fragments', () => {
     const all = counts({ staged: 1, modified: 1, untracked: 1, conflicted: 1, ahead: 1, behind: 1 })
     const g = input({ kind: 'git', repo: 'R', branch: 'B', worktree: 'W', counts: all }, marked)
     assert.equal(repo(g), '⟦repo⟧:R')
-    assert.equal(branch(g), '⟦branch⟧:B ⟦worktree⟧W)')
+    assert.equal(branch(g), '⟦branch⟧:B⟦worktree⟧W)')
     assert.equal(status(g), '⟦conflict⟧1 ⟦staged⟧1 ⟦modified⟧1 ⟦untracked⟧1 ⟦ahead⟧1 ⟦behind⟧1')
     const d = input({ kind: 'git', detached: { name: 'N', onBranch: false, operation: 'gitCherryPick', progress: '' } },
       marked)
-    assert.equal(branch(d), '⟦branch⟧:⟦detachedAt⟧N (⟦gitCherryPick⟧)')
+    assert.equal(branch(d), '⟦branch⟧:⟦detachedAt⟧N(⟦gitCherryPick⟧)')
     assert.equal(branch(input({ kind: 'svn', branch: 'T' }, marked)), '⟦branch⟧:T')
   })
 
@@ -167,11 +167,14 @@ describe('vcs fragments', () => {
     const f = input({ kind: 'git', repo: 'R', branch: 'B', worktree: 'W', counts: all }, en, tag)
     assert.equal(folder(f), '<b><text>/w</></b>')
     assert.equal(repo(f), '<label>repo:</><text>R</>')
-    assert.equal(branch(f), '<label>branch:</><text>B</> <faint>(wt:W)</>')
+    assert.equal(branch(f), '<label>branch:</><text>B</><faint>(wt:W)</>')
     assert.equal(status(f), '<del>✗1</> <add>+1</> <del>!1</> <track>?1</> <add>⇡1</> <del>⇣1</>')
     const d = input({ kind: 'git', detached: { name: 'N', onBranch: false, operation: 'gitMerge', progress: '' } },
       en, tag)
-    assert.equal(branch(d), '<label>branch:</><label>@</><text>N</> <alert>(merge)</>')
+    assert.equal(branch(d), '<label>branch:</><label>@</><text>N</><alert>(merge)</>')
+    const combined = input({ kind: 'git', worktree: 'w', detached: { name: 'feat', onBranch: true, operation: 'gitRebase', progress: '2/3' } },
+      en, tag)
+    assert.equal(branch(combined), '<label>branch:</><text>feat</><alert>(rebase 2/3)</><faint>(wt:w)</>')
   })
 })
 

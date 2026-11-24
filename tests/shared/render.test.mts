@@ -125,8 +125,8 @@ test('quota windows retain labels, clamp percents, format reset times, and paint
     limits(styled),
     [
       styled.t.paint('alert', '[API 429]'),
-      styled.t.paint('alert', '[API auth]'),
-      styled.t.paint('alert', '[API err]'),
+      styled.t.paint('alert', '[API AUTH]'),
+      styled.t.paint('alert', '[API ERR]'),
     ].join(' '),
   )
 })

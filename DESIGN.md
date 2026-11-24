@@ -100,6 +100,10 @@ and colours percentages, formats reset times, skips expired
 windows, and keeps windows without a known reset. Each host decides which
 readings are current or absent.
 
+The [context fragment](src/render/fragments/context.ts) rounds the percentage
+with no text suffixes and defaults unknown context readings to `ctx:0%` across
+all hosts.
+
 A whole-row freshness warning appends ` | ⌛stale` (` | !:stale` on WSL) to the
 last available readings, using `sep` for the divider and `label` for the text
 (leaving `⌛` unstyled). The [formatter](src/render/freshness.ts) drops trailing
@@ -161,10 +165,36 @@ a second plugin rewrote a shared Ember request to Daylight. The picker and row
 used Daylight through a reload. VArgus remembers a rewrite with the shared value
 that requested it and retires that association when the file value changes.
 
-The displayed context percentage is rounded and uses `calm` below 80% and `alert`
-from 80%, with no text suffixes. Unknown context readings default to `ctx:0%`
-across all hosts. WSL uses text call-count and stale marks
-(`T:`, `A:`, `S:`, `!:stale`) painted in `label`.
+### Visual grammar
+
+The row uses one compact layout across all four hosts:
+
+```
+~/proj/VArgus | opus:high(fast) | 5h:4%(4h37m) 7d:39%(5d6h) | ctx:20% | token:69.5k(99.4%, 48t/s) | session:24m | 🔧73 🤖2 ⚡1 | repo:VArgus | branch:main(wt:x) | ✗1 +2 !3 ?4 ⇡1 ⇣2 | ⌛stale
+```
+
+- **Dividers and spacing**: ` | ` (`sep`) separates fragments; a single space
+  separates peer items inside one fragment (`5h:… 7d:…`, `🔧73 🤖2 ⚡1`,
+  `+2 !3 ?4`).
+- **Weight**: only `folder` is bold (`bold text`); every other fragment is
+  regular weight.
+- **Parentheticals**: attach directly to their value with no leading space
+  (`opus:high(fast)`, `orchestrator(carbon)`, `5h:4%(4h37m)`,
+  `token:69.5k(99.4%, 48t/s)`, `branch:main(wt:x)`,
+  `branch:feat(rebase 2/3)(wt:w)`). Multiple `faint` items in one suffix join
+  with `, ` (`(99.4%, 48t/s)`, `(carbon, fast)`).
+
+| Pattern | Form | Tokens | Examples |
+|---|---|---|---|
+| Location anchor | path | bold `text` | `~/proj/VArgus`, `.../parent/leaf` |
+| Key : identity | `key:value` | `label` prefix + plain `text` (detached `@` in `label`) | `repo:VArgus`, `branch:main`, `branch:@v1.0` |
+| Key : reading | `key:value` | `label` prefix + `calm` or `alert` | `opus:high`, `5h:4%`, `ctx:20%`, `token:69.5k`, `session:24m` |
+| Model without effort | `name` | `label` | `opus`, `orchestrator` |
+| Secondary parenthetical | `(info)` attached | `faint` | `(carbon)`, `(argon)`, `(fast)`, `(ultrafast)`, `(4h37m)`, `(99.4%, 48t/s)`, `(wt:x)` |
+| Git operation parenthetical | `(op)` attached | `alert` | `(rebase 2/3)`, `(merge)`, `(bisect)` |
+| Icon prefix | `<icon><text>` (WSL `<char>:<text>`) | unstyled icon + `label` (WSL all `label`) | `🔧73 🤖2 ⚡1` / `T:73 A:2 S:1`, `⌛stale` / `!:stale` |
+| API error badge | `[API CODE]` | `alert` (in the rate-limit slot) | `[API 429]`, `[API AUTH]`, `[API ERR]` |
+| VCS status | `<mark><count>` | `add` (`+`, `⇡`), `del` (`✗`, `!`, `⇣`), `track` (`?`) | `✗1 +2 !3 ?4 ⇡1 ⇣2` |
 
 ### Colours
 
@@ -177,27 +207,19 @@ text passes through [control-character sanitization](src/render/text.ts) before
 styling. The tmux output translates the renderer's styles without recursively
 expanding content from paths or branches.
 
-- Location anchors use `text`: bold for `folder`, plain for `repo` name and
-  `branch` / detached ref name.
-- Prefixes (`xxx:`), the model name (with or without effort), detached `@`,
-  call-count numbers, and stale text (`⌛stale` with unstyled `⌛`, or WSL
-  `T:`/`A:`/`S:`/`!:stale`) use `label`.
-- Secondary parentheticals (`(fast)`/`(ultrafast)`, rate-limit reset countdowns,
-  token cache/speed details, `(wt:x)`) use `faint`.
-- Readings with a threshold use two flat tiers (`calm` / `alert`): `ctx` and
-  rate-limit percentages flip at 80%, `tokens` flips at `1.00M` (999,950
-  tokens, matching its `k`/`M` switch) by default and at `4.00M` (3,995,000
-  tokens, matching two-decimal `M` rounding from `3.99M` to `4.00M`) when
-  `includeSubagents` is `true`, and `session` age flips at 12 hours.
-  Effort uses `calm` at or above the model's default and `alert` below it. An
+Element-to-token mappings follow the [visual grammar](#visual-grammar).
+Readings with a threshold use two flat tiers (`calm` / `alert`):
+
+- `ctx` and rate-limit percentages flip at 80%.
+- `tokens` flips at `1.00M` (999,950 tokens, matching its `k`/`M` switch) by
+  default and at `4.00M` (3,995,000 tokens, matching two-decimal `M` rounding
+  from `3.99M` to `4.00M`) when `includeSubagents` is `true`.
+- `session` age flips at 12 hours.
+- Effort uses `calm` at or above the model's default and `alert` below it. An
   absent default uses `high`. An exact match to the baseline is `calm` even for
   an unfamiliar named level. Unranked or numeric values that cannot be compared
   use `alert`. The host supplies the baseline separately from the model's
   display name. [Model fragment and comparison](src/render/fragments/model.ts)
-- `[API 429]`, `[API auth]`, `[API err]` and in-progress Git operations (`(rebase …)`,
-  `(merge)`, etc.) use `alert`.
-- Working-tree counts use `add` (`+`, `⇡`), `del` (`✗`, `!`, `⇣`) and `track`
-  (`?`).
 
 ### Languages
 
@@ -816,7 +838,7 @@ the fixed HTTPS destination, independently of
 cache. The collector checks the store every 15 seconds and refreshes after 90
 seconds on success. Failures back off and honour bounded numeric `Retry-After`
 on 429. Recent cached windows stay displayed without a stale mark on failure,
-then switch to an error badge (`[API 429]`, `[API auth]`, or `[API err]`) after
+then switch to an error badge (`[API 429]`, `[API AUTH]`, or `[API ERR]`) after
 15 minutes without a successful reading.
 
 ### When the line is written

@@ -138,6 +138,23 @@ test('Antigravity colour follows the published default or the high cutoff', () =
     assert.equal(model({ v, display, o: DEFAULTS, l: en, t: theme, now: 0 }),
       theme.paint('label', `${name}:`) + theme.paint(color, effort))
   }
+
+  for (const [displayName, variant] of [
+    ['Orchestrator (Carbon)', 'carbon'],
+    ['Orchestrator (Argon)', 'argon'],
+  ] as const) {
+    const v = collectAntigravityPayload({ model: { display_name: displayName } })
+    assert.equal(
+      model({ v, display: antigravityDisplay(v.session), o: DEFAULTS, l: en, t: theme, now: 0 }),
+      theme.paint('label', 'orchestrator') + theme.paint('faint', `(${variant})`),
+    )
+  }
+  const fastOrch = collectAntigravityPayload({ model: { display_name: 'Orchestrator (Carbon)' } })
+  fastOrch.session.fast = true
+  assert.equal(
+    model({ v: fastOrch, display: antigravityDisplay(fastOrch.session), o: DEFAULTS, l: en, t: theme, now: 0 }),
+    theme.paint('label', 'orchestrator') + theme.paint('faint', '(carbon, fast)'),
+  )
 })
 
 test('Antigravity quota maps active model group and skips disabled or expired windows', () => {
