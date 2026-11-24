@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, delimiter, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -10,6 +10,7 @@ import { CodexCollector } from '../../src/hosts/codex/collect.ts'
 import { codexLine } from '../../src/cli/codex/line.ts'
 import { initialVcs } from '../../src/core/vcs.ts'
 import { resolveCodexOptions } from '../../src/hosts/codex/options.ts'
+import { stringWidth } from '../../src/render/width.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 
 const exec = promisify(execFile)
@@ -220,4 +221,48 @@ test('codexLine uses the 4M alert threshold by default and 1M with includeSubage
   const mainRow = await mainLine(200)
   assert.ok(mainRow.includes(colored.paint('label', 'token:') + colored.paint('alert', '1.50M')))
   assert.equal(mainLine.paused(200), mainRow)
+})
+
+test('codexLine preserves whole fragments containing ` | ` when fitting stale rows under NO_COLOR', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-line-pipe-'))
+  try {
+    const repoDir = await repository(dir, 'main-base')
+    await exec('git', ['add', 'changed.txt'], { cwd: repoDir })
+    await exec('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com',
+      'commit', '--no-gpg-sign', '-m', 'initial'], { cwd: repoDir })
+    const wtDir = join(dir, 'alpha | beta_long_suffix')
+    await exec('git', ['worktree', 'add', '-b', 'main', wtDir], { cwd: repoDir })
+    const newAdmin = join(repoDir, '.git', 'worktrees', 'alpha | beta_long_suffix')
+    await rename(join(repoDir, '.git', 'worktrees', 'alpha-|-beta_long_suffix'), newAdmin)
+    await writeFile(join(wtDir, '.git'), `gitdir: ${newAdmin}\n`)
+
+    const collector = new CodexCollector(wtDir, undefined)
+    collector.start(wtDir, 0)
+    collector.snapshot()!.session.model = 'gpt-6.1-sol'
+    collector.snapshot()!.session.effort = 'high'
+    const opts = resolveCodexOptions({ session: false, callCounts: false, tokens: false, rateLimits: false })
+    const line = codexLine(collector, opts, theme)
+    await line(500)
+    await ready(collector, 'main-base')
+
+    const liveParts = await line.parts(500)
+    assert.ok(liveParts.some(part => part.includes('wt:alpha | beta_long_suffix')))
+    const beforeBranch = liveParts.slice(0, -1).join(' | ')
+    const budget = stringWidth(liveParts.join(' | '))
+    const staleHeld = line.paused(budget, true)
+    assert.equal(staleHeld, `${beforeBranch} | ⌛stale`)
+    assert.equal(staleHeld.includes('(wt:alpha'), false)
+
+    // Folder path containing ` | ` is also dropped as a whole fragment under NO_COLOR.
+    const pipeFolderCollector = new CodexCollector('/a | b', undefined)
+    pipeFolderCollector.start('/a | b', 0)
+    pipeFolderCollector.snapshot()!.core.home = '/'
+    const folderLine = codexLine(pipeFolderCollector, resolveCodexOptions({
+      model: false, rateLimits: false, context: false, tokens: false, session: false,
+      callCounts: false, repo: false, branch: false, status: false,
+    }), theme)
+    assert.deepEqual(await folderLine.parts(20), ['/a | b'])
+    assert.deepEqual(folderLine.pausedParts(20), ['/a | b'])
+    assert.equal(folderLine.paused(14, true), '⌛stale')
+  } finally { await rm(dir, { recursive: true, force: true }) }
 })

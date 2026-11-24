@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { processIsRunning } from '../../node/process.ts'
 import { tmuxLine, TMUX_PADDING } from './format.ts'
 import { ansiRuns } from '../ansi.ts'
-import { REFRESH_GRACE_MS, staleLine, type StaleStyle } from '../../render/freshness.ts'
+import { REFRESH_GRACE_MS, staleLine, staleParts, type StaleStyle } from '../../render/freshness.ts'
 import { stringWidth } from '../../render/width.ts'
 
 const exec = promisify(execFile)
@@ -600,14 +600,14 @@ export class TmuxOutput {
     return Math.max(0, Number(await this.command('display-message', '-p', '-t', this.pane, '#{window_width}')) - TMUX_PADDING.length)
   }
 
-  async update(ansi: string, availableWidth?: number, staleStyle?: StaleStyle): Promise<void> {
+  async update(ansi: string, availableWidth?: number, staleStyle?: StaleStyle, parts?: readonly string[]): Promise<void> {
     const changes: { pane?: string; option: string; value: string }[] = []
     // NativeBase is immutable for an attachment and captured under its lock.
     // A render must not read the shared JSON while another owner saves it.
     if (this.nativeBase?.sharedMark && await this.command('show-options', '-v', '@vargus_native_layout') !== this.nativeBase.sharedMark) this.nativeBase = undefined
     if (this.nativeBase && await this.nativeAppendRequired(this.nativeBase.left)) await this.nativeAppendFallback()
     const columns = availableWidth ?? await this.width()
-    const stale = staleLine(ansi, columns, staleStyle)
+    const stale = parts ? staleParts(parts, columns, staleStyle) : staleLine(ansi, columns, staleStyle)
     if (this.nativeBase) {
       const base = this.nativeBase
       const width = columns + TMUX_PADDING.length

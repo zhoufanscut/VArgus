@@ -60,6 +60,7 @@ function world(
   })
   on('session.id', async () => ({ value: w.id }))
   on('session.cwd', async () => ({ value: w.cwd() }))
+  on('ui.render', async () => ({ type: 'Text', children: ['sentinel hint'] }) as never)
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   const key = (path: string) => fixtureFsPath(path, pathStyle)
   on('fs.write', async ($, e) => {
@@ -201,6 +202,49 @@ describe('line file', () => {
     await writeLine(stub, writer, '~/proj/x', undefined, { t: ember, isWsl: true })
     expect(liveWrites).toHaveLength(2)
     expect(liveWrites[1]).toBe(`6\n~/proj/x${ember.paint('sep', ' | ')}${ember.paint('label', '!:stale')}\n`)
+  })
+
+  test('NO_COLOR preserves whole fragments containing ` | ` in line.live and across coalesced writeLine retries', FOLDER_ONLY, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock, { HOME: '/home/u', NO_COLOR: '1' })
+    w.cwd = () => '/home/u/a | b'
+    await $.session.start(start)
+    await clock.settle()
+    await $.ui.render({
+      surface: 'terminal', component: 'PromptHint', requestId: 'r1',
+      viewport: { columns: 15, rows: 40 }, props: { isDraft: false, isWorking: false, hint: '' },
+    } as never)
+    await clock.advance(1000)
+    expect(w.checkIns.at(-1)).toBe('6\n⌛stale\n')
+
+    const plain = makeTheme('graphite', true)
+    const liveWrites: string[] = []
+    let releaseFirst!: () => void
+    const firstWriteBlocked = new Promise<void>(resolve => { releaseFirst = resolve })
+    let writesCount = 0
+    const stub = {
+      session: { id: async () => 'S1' },
+      clock: { now: async () => 1000 },
+      fs: {
+        write: async (path: string, text: string) => {
+          if (path.endsWith('/line.live')) liveWrites.push(text)
+          else if (++writesCount === 1) {
+            await firstWriteBlocked
+            throw new Error('transient')
+          }
+        },
+      },
+      process: {
+        run: async () => ({ exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }),
+      },
+    } as unknown as EngineInterface
+    const writer: Writer = { dir: '/cfg/data', tools: 'posix', tmpName: 'line.1.tmp', last: null, running: null, pending: null, ended: null }
+    const first = writeLine(stub, writer, '~/first', undefined, { t: plain, isWsl: false }, ['~/first'])
+    const second = writeLine(stub, writer, '~/a | b | ctx:7%', 15, { t: plain, isWsl: false }, ['~/a | b', 'ctx:7%'])
+    releaseFirst()
+    await expect(Promise.all([first, second])).rejects.toThrow('transient')
+    await writer.running
+    expect(liveWrites).toEqual(['6\n⌛stale\n'])
   })
 
   test('a relative CLAUDE_CONFIG_DIR: nothing written', FOLDER_ONLY, async ($, on) => {

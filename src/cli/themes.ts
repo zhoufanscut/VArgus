@@ -3,8 +3,8 @@ import type { Rgb, TokenName, Values } from '../core/types.ts'
 import { initialSession } from '../core/session.ts'
 import { resolveLabels } from '../i18n/index.ts'
 import { DEFAULTS } from '../options.ts'
-import { staleLine } from '../render/freshness.ts'
-import { render } from '../render/index.ts'
+import { staleParts } from '../render/freshness.ts'
+import { render, renderParts } from '../render/index.ts'
 import { displaySession, shortModelName } from '../render/session.ts'
 import { stringWidth } from '../render/width.ts'
 import { DEFAULT_THEME, makeTheme, resolvePalette } from '../theme/index.ts'
@@ -148,8 +148,8 @@ export function formatThemesPreview(
         t,
         now,
       })
-      const alertRow = staleLine(
-        render({
+      const alertRow = staleParts(
+        renderParts({
           v: samples.alert,
           display: displaySession(samples.alert.session, shortModelName),
           o: DEFAULTS,

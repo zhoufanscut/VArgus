@@ -10,7 +10,7 @@ import { initialVcs, startVcs, stopVcs, toolCalledVcs } from './collect/vcs'
 import type { Theme, Values } from '../../core/types'
 import { resolveLabels } from '../../i18n'
 import { resolveOptions, type Options } from '../../options'
-import { render } from '../../render'
+import { joinParts, renderParts } from '../../render'
 import { claudeDisplay } from './display'
 import { claudeOptions, registerConfig } from './config'
 import { makeTheme } from '../../theme'
@@ -42,8 +42,9 @@ async function refresh($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
   values.limits = options.rateLimits ? claudeQuotaReadings(quota, labels, now) : []
   const session = { ...values.session, counts: effectiveCounts(values.session, options.includeSubagents) }
-  const text = render({ v: { ...values, session }, display: claudeDisplay(session), o: options, l: labels, t: theme, now })
-  await writeLine($, writer, text, values.core.columns, { t: theme, l: labels, isWsl: values.core.isWsl })
+  const parts = renderParts({ v: { ...values, session }, display: claudeDisplay(session), o: options, l: labels, t: theme, now })
+  const text = joinParts(parts, theme)
+  await writeLine($, writer, text, values.core.columns, { t: theme, l: labels, isWsl: values.core.isWsl }, parts)
 }
 
 async function isWsl($: EngineInterface): Promise<boolean> {

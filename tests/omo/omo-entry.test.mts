@@ -156,6 +156,28 @@ test('OmO honours NO_COLOR only when non-empty, matching the other hosts', () =>
   }
 })
 
+test('OmO stale trimming preserves whole fragments containing ` | ` under NO_COLOR', t => {
+  let now = 1000
+  t.mock.method(Date, 'now', () => now)
+  const hadNoColor = 'NO_COLOR' in process.env
+  const savedNoColor = process.env.NO_COLOR
+  process.env.NO_COLOR = '1'
+  const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
+  const staleMark = isWsl ? '!:stale' : '⌛stale'
+  const h = host('tui', '/a | b')
+  h.load(); h.event('session_start')
+  try {
+    h.ctx.getContextUsage = () => { throw new Error('collection failed') }
+    h.event('message_end')
+    now += 6000
+    assert.deepEqual(h.row?.render(17), [`  ${staleMark}`])
+  } finally {
+    h.event('session_shutdown')
+    if (hadNoColor) process.env.NO_COLOR = savedNoColor
+    else delete process.env.NO_COLOR
+  }
+})
+
 test('OmO configuration changes rendering and keeps a disabled session disabled', async () => {
   const h = host()
   h.load(); h.event('session_start')

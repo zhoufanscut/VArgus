@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises'
 import { fixtureCheckout } from '../checkout.mts'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -36,6 +36,7 @@ import { POLL_MS, readCachedVcs } from '../../src/hosts/antigravity/vcs.ts'
 import { en } from '../../src/i18n/en.ts'
 import { DEFAULTS } from '../../src/options.ts'
 import { limits } from '../../src/render/fragments/limits.ts'
+import { stringWidth } from '../../src/render/width.ts'
 import { antigravityDisplay, shortAntigravityModelName } from '../../src/hosts/antigravity/display.ts'
 import { model } from '../../src/render/fragments/model.ts'
 import { makeTheme } from '../../src/theme/index.ts'
@@ -75,6 +76,103 @@ test('a failed Antigravity refresh retains the same conversation’s last row un
       await renderAntigravityStatusLine(payload, wslRuntime),
       healthyWsl + theme.paint('sep', ' | ') + theme.paint('label', '!:stale'),
     )
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('Antigravity row cache v2 preserves whole fragments containing ` | ` under NO_COLOR, falls back on v1 strings, and rejects empty caches', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-agy-pipe-'))
+  try {
+    const cacheDir = join(dir, 'cache')
+    const home = join(dir, 'home')
+    const folderCwd = join(home, 'a | b')
+    const folderTranscript = join(home, '.gemini', 'antigravity-cli', 'brain', 'folder', '.system_generated', 'logs', 'transcript.jsonl')
+    await mkdir(folderCwd, { recursive: true })
+    await mkdir(join(folderTranscript, '..'), { recursive: true })
+    await writeFile(folderTranscript, '{}\n')
+
+    const folderOptions = { rateLimits: false, tokens: false, session: true, callCounts: false, repo: false, branch: false, status: false }
+    const folderRuntime = { cacheDir, home, noColor: true, isWsl: false, givenOptions: folderOptions }
+    const folderPayload: AntigravityPayload = {
+      conversation_id: 'folder',
+      model: 'claude-opus-5-5',
+      cwd: folderCwd,
+      transcript_path: folderTranscript,
+      terminal_width: 17,
+    }
+    const healthyFolder = await renderAntigravityStatusLine(folderPayload, folderRuntime)
+    assert.equal(healthyFolder, '  ~/a | b | opus')
+
+    const folderKey = JSON.stringify([process.env.ANTIGRAVITY_APP_DATA_DIR, home, 'folder', folderCwd, { ...DEFAULTS, ...folderOptions }, true, false])
+    const folderRowCache = cachePath(cacheDir, 'row', folderKey)
+    assert.deepEqual(JSON.parse(await readFile(folderRowCache, 'utf8')), { version: 2, parts: ['~/a | b', 'opus'] })
+
+    const folderTranscriptCache = cachePath(cacheDir, 'transcript', folderTranscript)
+    const savedFolderTranscript = await readFile(folderTranscriptCache, 'utf8')
+    await writeFile(folderTranscriptCache, JSON.stringify({ ...JSON.parse(savedFolderTranscript), seenSkillsInTurn: 42 }))
+    await appendFile(folderTranscript, '{}\n')
+    assert.equal(await renderAntigravityStatusLine(folderPayload, folderRuntime), '  ⌛stale')
+
+    // Linked worktree containing ` | ` drops the whole branch fragment instead of leaving an unclosed parenthesis.
+    const repoBase = join(dir, 'repo-base')
+    const wtDir = join(home, 'alpha | beta_long_suffix')
+    const git = (cwd: string, args: string[]) => exec('git', args, {
+      cwd,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Test',
+        GIT_AUTHOR_EMAIL: 'test@example.com',
+        GIT_COMMITTER_NAME: 'Test',
+        GIT_COMMITTER_EMAIL: 'test@example.com',
+      },
+    })
+    await mkdir(repoBase, { recursive: true })
+    await git(repoBase, ['init', '-b', 'init'])
+    await git(repoBase, ['remote', 'add', 'origin', 'https://example.invalid/R.git'])
+    await writeFile(join(repoBase, 'f.txt'), 'x\n')
+    await git(repoBase, ['add', 'f.txt'])
+    await git(repoBase, ['commit', '-m', 'init'])
+    await git(repoBase, ['worktree', 'add', '-b', 'main', wtDir])
+    const newAdmin = join(repoBase, '.git', 'worktrees', 'alpha | beta_long_suffix')
+    await rename(join(repoBase, '.git', 'worktrees', 'alpha-|-beta_long_suffix'), newAdmin)
+    await writeFile(join(wtDir, '.git'), `gitdir: ${newAdmin}\n`)
+
+    const wtTranscript = join(home, '.gemini', 'antigravity-cli', 'brain', 'wt', '.system_generated', 'logs', 'transcript.jsonl')
+    await mkdir(join(wtTranscript, '..'), { recursive: true })
+    await writeFile(wtTranscript, '{}\n')
+    const wtOptions = { rateLimits: false, tokens: false, session: false, callCounts: false, status: false }
+    const wtRuntime = { cacheDir, home, noColor: true, isWsl: false, givenOptions: wtOptions }
+    const wtPayload: AntigravityPayload = {
+      conversation_id: 'wt',
+      model: { display_name: 'Claude Opus 5.5 (High)', effort: 'high' },
+      cwd: wtDir,
+      transcript_path: wtTranscript,
+      terminal_width: 120,
+    }
+    const healthyWt = await renderAntigravityStatusLine(wtPayload, wtRuntime)
+    assert.equal(healthyWt, '  ~/alpha | beta_long_suffix | opus:high | ctx:0% | repo:R | branch:main(wt:alpha | beta_long_suffix)')
+
+    const wtTranscriptCache = cachePath(cacheDir, 'transcript', wtTranscript)
+    await writeFile(wtTranscriptCache, JSON.stringify({ ...JSON.parse(await readFile(wtTranscriptCache, 'utf8')), seenSkillsInTurn: 42 }))
+    await appendFile(wtTranscript, '{}\n')
+    const prefixBeforeBranch = '~/alpha | beta_long_suffix | opus:high | ctx:0% | repo:R'
+    const narrowWidth = stringWidth(`${prefixBeforeBranch} | ⌛stale`) + 2
+    assert.equal(
+      await renderAntigravityStatusLine({ ...wtPayload, terminal_width: narrowWidth }, wtRuntime),
+      `  ${prefixBeforeBranch} | ⌛stale`,
+    )
+
+    // Legacy v1 string row cache falls back on error and upgrades to v2 on recovery.
+    await writeFile(folderRowCache, JSON.stringify('  ~/x | opus'))
+    assert.equal(await renderAntigravityStatusLine(folderPayload, folderRuntime), '  ~/x | ⌛stale')
+    await writeFile(folderTranscriptCache, savedFolderTranscript)
+    assert.equal(await renderAntigravityStatusLine(folderPayload, folderRuntime), healthyFolder)
+    assert.deepEqual(JSON.parse(await readFile(folderRowCache, 'utf8')), { version: 2, parts: ['~/a | b', 'opus'] })
+
+    // Empty v2 cache rethrows on failure instead of returning blank padding.
+    await writeFile(folderRowCache, JSON.stringify({ version: 2, parts: [] }))
+    await writeFile(folderTranscriptCache, JSON.stringify({ ...JSON.parse(savedFolderTranscript), seenSkillsInTurn: 42 }))
+    await appendFile(folderTranscript, '{}\n')
+    await assert.rejects(() => renderAntigravityStatusLine(folderPayload, folderRuntime))
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 

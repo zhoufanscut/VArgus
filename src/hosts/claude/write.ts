@@ -2,7 +2,7 @@ import { dataDir, homeDir, DRIVE_PATH } from './paths'
 export { DATA_FOLDER, dataDir, homeDir } from './paths'
 import type { EngineInterface } from 'claude-code'
 
-import { REFRESH_GRACE_MS, staleLine, type StaleStyle } from '../../render/freshness'
+import { REFRESH_GRACE_MS, staleLine, staleParts, type StaleStyle } from '../../render/freshness'
 
 export type Writer = {
   // <data>, absolute, with `/` separators; null when the config folder is
@@ -20,7 +20,7 @@ export type Writer = {
   last: { id: string; text: string; checkedAt: number; columns?: number; stale?: string } | null
   // the write loop while it runs
   running: Promise<void> | null
-  pending: { text: string; columns?: number; style?: StaleStyle } | null
+  pending: { text: string; columns?: number; style?: StaleStyle; parts?: readonly string[] } | null
   // the id of the session that ended, written no more while $.session.id()
   // still gives it (0.75 s after the one resume measured), until another
   // session ends in this process; a resume back to it ends the session in
@@ -53,14 +53,21 @@ export async function createWriter($: EngineInterface): Promise<Writer> {
 // One write runs at a time; a newer text waiting
 // replaces an older one. The id is read on every write: /clear and a resume
 // change it with no session.start.
-export function writeLine($: EngineInterface, w: Writer, text: string, columns?: number, style?: StaleStyle): Promise<void> {
-  w.pending = { text, columns, style }
+export function writeLine(
+  $: EngineInterface,
+  w: Writer,
+  text: string,
+  columns?: number,
+  style?: StaleStyle,
+  parts?: readonly string[],
+): Promise<void> {
+  w.pending = { text, columns, style, parts }
   if (!w.running) {
     w.running = drain($, w).finally(() => {
       w.running = null
       // a text still waiting when the loop ended: it came in after the last
       // check, or its write failed (tried once more)
-      if (w.pending !== null) writeLine($, w, w.pending.text, w.pending.columns, w.pending.style).catch(() => {})
+      if (w.pending !== null) writeLine($, w, w.pending.text, w.pending.columns, w.pending.style, w.pending.parts).catch(() => {})
     })
   }
   return w.running
@@ -133,7 +140,7 @@ function backslash(path: string): string {
 
 async function drain($: EngineInterface, w: Writer): Promise<void> {
   while (w.pending !== null) {
-    const { text, columns, style } = w.pending
+    const { text, columns, style, parts } = w.pending
     w.pending = null
     const id = await $.session.id()
     if (!w.dir || !id || id === w.ended) continue
@@ -141,7 +148,7 @@ async function drain($: EngineInterface, w: Writer): Promise<void> {
     const line = `${folder}/line`
     let checkedAt = await $.clock.now()
     const last = w.last
-    const stale = staleLine(text, columns, style)
+    const stale = parts ? staleParts(parts, columns, style) : staleLine(text, columns, style)
     const unchanged = last?.id === id && last.text === text
     if (unchanged && last.columns === columns && last.stale === stale && checkedAt >= last.checkedAt && checkedAt - last.checkedAt < 2000) continue
     if (!unchanged) {

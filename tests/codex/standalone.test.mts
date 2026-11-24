@@ -343,8 +343,8 @@ trust_level = "trusted"
       const entryPath = join(replacement, 'src/cli.ts')
       const sourcePath = join(replacement, 'src/cli/codex/worker.ts')
       const source = await readFile(sourcePath, 'utf8'), entrySource = await readFile(entryPath, 'utf8')
-      assert.equal(source.split('await output.update(line, width, staleStyle)').length, 2)
-      const changed = source.replace('await output.update(line, width, staleStyle)', 'await output.update(line + " RELOAD_SOURCE_B", width, staleStyle)')
+      assert.equal(source.split('await output.update(line, width, staleStyle, parts)').length, 2)
+      const changed = source.replace('await output.update(line, width, staleStyle, parts)', 'await output.update(line + " RELOAD_SOURCE_B", width, staleStyle, parts)')
       await writeFile(sourcePath, changed)
       const control = (action: string, flags: string[] = []) => exec(process.execPath, [entryPath, action, ...flags], {
         cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1', CODEX_THREAD_ID: first.thread },

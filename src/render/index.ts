@@ -1,4 +1,4 @@
-import type { Fragment, FragmentInput } from '../core/types.ts'
+import type { Fragment, FragmentInput, Theme } from '../core/types.ts'
 import type { Options } from '../options.ts'
 import { calls } from './fragments/calls.ts'
 import { context } from './fragments/context.ts'
@@ -26,10 +26,14 @@ export const ORDER: readonly (readonly [keyof Options, Fragment])[] = [
 
 const SEPARATOR = ' | '
 
-// Pure: values + options + width → the line's text. A fragment that throws is
-// left out, never the line; when the row is too narrow, whole fragments are
-// dropped from the end (DESIGN, "When the line is written").
-export function render(f: FragmentInput, order: typeof ORDER = ORDER): string {
+export function joinParts(parts: readonly string[], t?: Theme): string {
+  return parts.join(t ? t.paint('sep', SEPARATOR) : SEPARATOR)
+}
+
+// Pure: values + options + width → the line's fragments. A fragment that throws
+// is left out, never the line; when the row is too narrow, whole fragments are
+// dropped from the end (DESIGN, "Fragments").
+export function renderParts(f: FragmentInput, order: typeof ORDER = ORDER): string[] {
   const parts: string[] = []
   for (const [option, fragment] of order) {
     if (!f.o[option]) continue
@@ -45,5 +49,9 @@ export function render(f: FragmentInput, order: typeof ORDER = ORDER): string {
   while (columns !== undefined && parts.length > 1 && stringWidth(parts.join(separator)) > columns) {
     parts.pop()
   }
-  return parts.join(separator)
+  return parts
+}
+
+export function render(f: FragmentInput, order: typeof ORDER = ORDER): string {
+  return joinParts(renderParts(f, order), f.t)
 }

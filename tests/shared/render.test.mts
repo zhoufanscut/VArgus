@@ -1,4 +1,4 @@
-import { staleLine } from '../../src/render/freshness.ts'
+import { staleLine, staleParts } from '../../src/render/freshness.ts'
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -6,7 +6,7 @@ import type { Fragment, FragmentInput, Values } from '../../src/core/types.ts'
 import { resolveLabels } from '../../src/i18n/index.ts'
 import { en } from '../../src/i18n/en.ts'
 import { DEFAULTS, resolveOptions, type Options } from '../../src/options.ts'
-import { ORDER, render } from '../../src/render/index.ts'
+import { joinParts, ORDER, render, renderParts } from '../../src/render/index.ts'
 import { limits } from '../../src/render/fragments/limits.ts'
 import { initialSession } from '../../src/core/session.ts'
 import { displaySession, shortModelName } from '../../src/render/session.ts'
@@ -195,4 +195,53 @@ test('stale rows style the separator and marker, fit complete readings, handle W
   assert.equal(staleLine(t.paint('label', '⌛stale'), 20, { t }), t.paint('label', '⌛stale'))
   const wslStale = staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 22, { t, isWsl: true })
   assert.equal(staleLine(wslStale, 22, { t, isWsl: true }), wslStale)
+})
+
+test('staleParts fits whole fragments under both coloured and NO_COLOR themes without splitting literal ` | `', () => {
+  const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
+  const styled = makeTheme('graphite', false)
+  const plain = makeTheme('graphite', true)
+
+  assert.equal(staleParts([]), '')
+  assert.equal(staleParts(['', '']), '')
+  assert.equal(staleParts(['sol', 'ctx:7%', 'token:3.2k']), 'sol | ctx:7% | token:3.2k | ⌛stale')
+  assert.equal(staleParts(['sol', 'ctx:7%', 'token:3.2k'], 22), 'sol | ctx:7% | ⌛stale')
+  assert.equal(staleParts(['sol', 'ctx:7%', 'token:3.2k'], 8), '⌛stale')
+  assert.equal(staleParts(['sol', 'ctx:7%', 'token:3.2k'], 8, { isWsl: true }), '!:stale')
+  // A literal fragment equal to the stale marker is a reading, not stripped as a prior suffix.
+  assert.equal(staleParts(['⌛stale'], 20), '⌛stale | ⌛stale')
+  assert.equal(staleParts(['⌛stale'], 8), '⌛stale')
+
+  const makeCaseInput = (theme: ReturnType<typeof makeTheme>, cwd: string, vcs: Partial<Values['vcs']>) => {
+    const f = input()
+    f.t = theme
+    f.v.core.cwd = cwd
+    f.v.session.model = 'claude-opus-5-5'
+    f.v.session.effort = 'high'
+    f.display = displaySession(f.v.session, shortModelName)
+    f.v.vcs = { ...initialVcs(), ...vcs }
+    return f
+  }
+
+  const cases = [
+    ['folder', '/home/u/a | b', {}, 15, '⌛stale'],
+    ['repo', '/home/u/x', { kind: 'git', repo: ' | foo', branch: 'main' }, 43, '~/x | opus:high | ctx:0% | ⌛stale'],
+    ['worktree', '/home/u/x', { kind: 'git', repo: 'R', branch: 'main', worktree: 'alpha | beta_long_suffix' }, 67, '~/x | opus:high | ctx:0% | repo:R | ⌛stale'],
+    ['wt2', '/home/u/x', { kind: 'git', repo: 'R', branch: 'main', worktree: 'wt | 2' }, 64, '~/x | opus:high | ctx:0% | repo:R | ⌛stale'],
+  ] as const
+
+  for (const [name, cwd, vcs, cols, expectedPlain] of cases) {
+    const styledParts = renderParts(makeCaseInput(styled, cwd, vcs))
+    const plainParts = renderParts(makeCaseInput(plain, cwd, vcs))
+    assert.equal(stripAnsi(joinParts(styledParts, styled)), joinParts(plainParts, plain), `${name} healthy parity`)
+    const styledStale = staleParts(styledParts, cols, { t: styled })
+    const plainStale = staleParts(plainParts, cols, { t: plain })
+    assert.equal(plainStale, expectedPlain, `${name} NO_COLOR stale`)
+    assert.equal(stripAnsi(styledStale), plainStale, `${name} styled/NO_COLOR stale parity`)
+
+    const styledWsl = staleParts(styledParts, cols, { t: styled, isWsl: true })
+    const plainWsl = staleParts(plainParts, cols, { t: plain, isWsl: true })
+    assert.equal(plainWsl, expectedPlain.replace('⌛stale', '!:stale'), `${name} NO_COLOR WSL stale`)
+    assert.equal(stripAnsi(styledWsl), plainWsl, `${name} styled/NO_COLOR WSL stale parity`)
+  }
 })

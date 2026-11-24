@@ -1,5 +1,5 @@
 import { homedir, release } from 'node:os'
-import { staleLine } from '../render/freshness.ts'
+import { staleLine, staleParts } from '../render/freshness.ts'
 import { cachePath, defaultCacheDir, readCache, writeCache } from '../hosts/antigravity/cache.ts'
 import { collectAntigravityPayload, type AntigravityPayload } from '../hosts/antigravity/collect.ts'
 import { antigravityDisplay } from '../hosts/antigravity/display.ts'
@@ -10,10 +10,23 @@ import { readCachedVcs } from '../hosts/antigravity/vcs.ts'
 import { resolveLabels } from '../i18n/index.ts'
 import { readCheckoutOptions, readOptionsFile } from '../node/options.ts'
 import { resolveOptions } from '../options.ts'
-import { render } from '../render/index.ts'
+import { joinParts, renderParts } from '../render/index.ts'
 import { makeTheme } from '../theme/index.ts'
 
 export const STATUSLINE_PADDING = '  '
+
+type CachedRow = { version: 2; parts: string[] }
+
+function isCachedRow(value: unknown): value is CachedRow {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    && (value as { version?: unknown }).version === 2
+    && Array.isArray((value as { parts?: unknown }).parts)
+    && (value as { parts: unknown[] }).parts.every(part => typeof part === 'string')
+}
+
+function sameParts(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((part, i) => part === b[i])
+}
 
 export type StatuslineRuntime = {
   givenOptions?: Record<string, unknown>
@@ -36,7 +49,7 @@ export async function renderAntigravityStatusLine(
   runtime: StatuslineRuntime = {},
 ): Promise<string> {
   const id = resolveConversationId(payload)
-  if (!id) return collectLine(payload, runtime)
+  if (!id) return (await collectLine(payload, runtime)).line
   const dir = runtime.cacheDir ?? defaultCacheDir()
   const isWsl = runtime.isWsl ?? detectWsl(process.env)
   const noColor = runtime.noColor ?? Boolean(process.env.NO_COLOR)
@@ -45,24 +58,31 @@ export async function renderAntigravityStatusLine(
     id, payload.workspace?.current_dir ?? payload.cwd ?? runtime.fallbackCwd ?? process.cwd(),
     options, noColor, isWsl])
   const file = cachePath(dir, 'row', key)
-  const previous = await readCache<string>(file)
-  let line: string
+  const previous = await readCache<CachedRow | string>(file)
+  let current: { parts: string[]; line: string }
   try {
-    line = await collectLine(payload, runtime)
+    current = await collectLine(payload, runtime)
   } catch (error) {
-    if (!previous || typeof previous !== 'string') throw error
     const width = payload.terminal_width
-    return STATUSLINE_PADDING + staleLine(
-      previous.slice(STATUSLINE_PADDING.length),
-      width && width > 0 ? width - STATUSLINE_PADDING.length : undefined,
-      { t: makeTheme(options.theme, noColor), l: resolveLabels('en'), isWsl },
-    )
+    const columns = width && width > 0 ? Math.max(0, width - STATUSLINE_PADDING.length) : undefined
+    const style = { t: makeTheme(options.theme, noColor), l: resolveLabels('en'), isWsl }
+    if (isCachedRow(previous)) {
+      const stale = staleParts(previous.parts, columns, style)
+      if (stale) return STATUSLINE_PADDING + stale
+    } else if (typeof previous === 'string' && previous.length > 0) {
+      const body = previous.startsWith(STATUSLINE_PADDING) ? previous.slice(STATUSLINE_PADDING.length) : previous
+      const stale = staleLine(body, columns, style)
+      if (stale) return STATUSLINE_PADDING + stale
+    }
+    throw error
   }
-  if (line !== previous) await writeCache(dir, file, line).catch(() => {})
-  return line
+  if (!isCachedRow(previous) || !sameParts(previous.parts, current.parts)) {
+    await writeCache(dir, file, { version: 2, parts: current.parts } satisfies CachedRow).catch(() => {})
+  }
+  return current.line
 }
 
-async function collectLine(payload: AntigravityPayload, runtime: StatuslineRuntime): Promise<string> {
+async function collectLine(payload: AntigravityPayload, runtime: StatuslineRuntime): Promise<{ parts: string[]; line: string }> {
   const now = runtime.now ?? Date.now()
   const home = runtime.home ?? homedir()
   const appDataDir = runtime.appDataDir ?? process.env.ANTIGRAVITY_APP_DATA_DIR
@@ -140,7 +160,7 @@ async function collectLine(payload: AntigravityPayload, runtime: StatuslineRunti
     )
   }
 
-  const rendered = render({
+  const parts = renderParts({
     v: values,
     display: antigravityDisplay(values.session),
     o: options,
@@ -148,7 +168,8 @@ async function collectLine(payload: AntigravityPayload, runtime: StatuslineRunti
     t: theme,
     now,
   })
-  return rendered ? `${STATUSLINE_PADDING}${rendered}` : ''
+  const rendered = joinParts(parts, theme)
+  return { parts, line: rendered ? `${STATUSLINE_PADDING}${rendered}` : '' }
 }
 
 export async function statusline(args: string[]): Promise<number> {

@@ -14,13 +14,32 @@ function staleLabel({ t, l = en, isWsl = false }: StaleStyle): string {
   return t ? t.paint('label', text) : text
 }
 
+function staleSep(style: StaleStyle): string {
+  return style.t ? style.t.paint('sep', SEPARATOR) : SEPARATOR
+}
+
+// Fit whole non-stale fragments before appending the stale marker so literal ` | `
+// inside external names is never split under NO_COLOR.
+export function staleParts(parts: readonly string[], columns?: number, style: StaleStyle = {}): string {
+  const items = parts.filter(Boolean)
+  if (items.length === 0) return ''
+  const label = staleLabel(style)
+  const sep = staleSep(style)
+  const suffix = sep + label
+  for (let count = items.length; count >= 1; count--) {
+    const candidate = items.slice(0, count).join(sep) + suffix
+    if (columns === undefined || stringWidth(candidate) <= columns) return candidate
+  }
+  return label
+}
+
 // Keep whole readings when the extra fragment would overflow the terminal.
 // Idempotent when given a row that already ends with the stale marker.
 export function staleLine(line: string, columns?: number, style: StaleStyle = {}): string {
   if (!line) return ''
   const label = staleLabel(style)
   if (line === label) return label
-  const sep = style.t ? style.t.paint('sep', SEPARATOR) : SEPARATOR
+  const sep = staleSep(style)
   const suffix = sep + label
   const base = line.endsWith(suffix) ? line.slice(0, -suffix.length) : line
   if (!base) return label

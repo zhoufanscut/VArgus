@@ -21,8 +21,8 @@ import { mountOmo, type OmoUi } from '../../outputs/omo.ts'
 import { parseOptions, resolveOptions } from '../../options.ts'
 import { resolveLabels } from '../../i18n/index.ts'
 import { makeTheme } from '../../theme/index.ts'
-import { REFRESH_GRACE_MS, staleLine } from '../../render/freshness.ts'
-import { render } from '../../render/index.ts'
+import { REFRESH_GRACE_MS, staleParts } from '../../render/freshness.ts'
+import { joinParts, renderParts } from '../../render/index.ts'
 
 const STREAM_START_EVENTS = new Set([
   'thinking_start', 'thinking_delta', 'text_start', 'text_delta', 'toolcall_start', 'toolcall_delta',
@@ -273,12 +273,12 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
           }
         }
       }
-      const line = render({
+      const parts = renderParts({
         v: { ...values, session: effectiveSession, limits, core: { ...values.core, columns: width, isWsl } },
         display: omoDisplay(effectiveSession),
         o: options, l: labels, t: theme, now,
       })
-      return stale ? staleLine(line, width, { t: theme, l: labels, isWsl }) : line
+      return stale ? staleParts(parts, width, { t: theme, l: labels, isWsl }) : joinParts(parts, theme)
     })
     const unsubscribe = options.rateLimits ? pi.onSubscriptionLimits(() => instance.update()) : () => {}
     const timer = setInterval(() => instance.update(), 1000)

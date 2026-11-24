@@ -10,7 +10,7 @@ import { DEFAULTS } from '../../src/options.ts'
 import { calls } from '../../src/render/fragments/calls.ts'
 import { context } from '../../src/render/fragments/context.ts'
 import { folder } from '../../src/render/fragments/folder.ts'
-import { staleLine } from '../../src/render/freshness.ts'
+import { staleLine, staleParts } from '../../src/render/freshness.ts'
 import { model } from '../../src/render/fragments/model.ts'
 import { session } from '../../src/render/fragments/session.ts'
 import { tokens } from '../../src/render/fragments/tokens.ts'
@@ -54,6 +54,8 @@ const cases: [string, Fragment, FragmentInput, string[], string[]][] = [
   ['calls text', calls, input({ counts }, true), [], ['tool', 'agent', 'skill']],
   ['stale emoji', f => staleLine('a', undefined, { t: f.t, l: f.l, isWsl: false }), input({}), ['a'], ['stale']],
   ['stale text', f => staleLine('a', undefined, { t: f.t, l: f.l, isWsl: true }), input({}, true), ['a'], ['staleMark', 'stale']],
+  ['staleParts emoji', f => staleParts(['a'], undefined, { t: f.t, l: f.l, isWsl: false }), input({}), ['a'], ['stale']],
+  ['staleParts text', f => staleParts(['a'], undefined, { t: f.t, l: f.l, isWsl: true }), input({}, true), ['a'], ['staleMark', 'stale']],
 ]
 
 describe('labels', () => {

@@ -106,7 +106,7 @@ all hosts.
 
 A whole-row freshness warning appends ` | ⌛stale` (` | !:stale` on WSL) to the
 last available readings, using `sep` for the divider and `label` for the marker and text. The [formatter](src/render/freshness.ts) drops trailing
-readings when needed to fit the warning. Missing individual metrics retain their
+readings when needed to fit the warning; its structured entry (`renderParts` / `staleParts`) operates directly on rendered fragments so literal ` | ` inside external names is never split even under `NO_COLOR`. Missing individual metrics retain their
 own display rules.
 
 ### Config
@@ -661,8 +661,8 @@ one-second timer. A blocked UI needs a later host redraw to show the marker.
 The [command](src/cli/antigravity.ts) runs once per host refresh. It reads
 stdin JSON and emits one ANSI line with two leading spaces, included in the
 width budget. Empty or invalid input can exit successfully with no row.
-Successful rows for identified conversations are cached alongside the transcript
-and VCS caches. A collection exception can reuse that conversation’s row for
+Successful rendered fragment parts (cache version 2, with legacy string fallback) for identified conversations are cached alongside the transcript
+and VCS caches so stale trimming on collection failure preserves whole fragments under `NO_COLOR`. A collection exception can reuse that conversation’s row for
 the same workspace, profile, options and colour mode. With no further invocation
 there is no observer to draw a warning. Lazy dispatch keeps this path
 independent of the Codex and tmux modules.

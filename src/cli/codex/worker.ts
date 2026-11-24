@@ -11,6 +11,8 @@ import { en } from '../../i18n/en.ts'
 import { TmuxOutput } from '../../outputs/tmux/client.ts'
 import { PaneInput } from '../../outputs/tmux/input.ts'
 import { applicationTarget } from '../../outputs/tmux/target.ts'
+import { staleParts } from '../../render/freshness.ts'
+import { joinParts } from '../../render/index.ts'
 import { cleanText } from '../../render/text.ts'
 import { makeTheme } from '../../theme/index.ts'
 import { codexLine } from './line.ts'
@@ -140,6 +142,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
     if (mode === 'on' && (changed || Date.now() >= renderAt || !!hold !== !!paused)) {
       renderAt = Date.now() + 1000
       let line = ''
+      let parts: string[] | undefined
       let width: number | undefined
       paused = undefined
       if (view) {
@@ -156,7 +159,8 @@ export async function rowWorker(spec: Spec): Promise<number> {
             ? await foldDescendantCounts(views.descendants(view.thread), getReader)
             : undefined
           width = await output.width()
-          line = await viewLine(width, extraCounts)
+          parts = await viewLine.parts(width, extraCounts)
+          line = joinParts(parts, theme)
           if (line) lastReadings = { thread: view.thread, label: cleanText(view.path ?? 'main'), line: viewLine, readFailed: false }
         } catch (e) {
           readingError = (e as Error).message
@@ -164,9 +168,12 @@ export async function rowWorker(spec: Spec): Promise<number> {
         }
       } else if (hold && lastReadings) {
         width = await output.width()
-        const frozen = lastReadings.line.paused(width, hold === 'side' || lastReadings.readFailed)
-        if (frozen) {
-          line = frozen
+        const frozenParts = lastReadings.line.pausedParts(width)
+        if (frozenParts.length) {
+          parts = frozenParts
+          line = hold === 'side' || lastReadings.readFailed
+            ? staleParts(frozenParts, width, staleStyle)
+            : joinParts(frozenParts, theme)
           paused = { thread: lastReadings.thread, label: lastReadings.label }
         }
       }
@@ -175,7 +182,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
       const keepFailedReading = attached && readingError && view && lastReadings?.thread === view.thread
       if (line) {
         if (!attached) { await output.attach(); attached = true }
-        await output.update(line, width, staleStyle)
+        await output.update(line, width, staleStyle, parts)
       } else if (attached && !keepFailedReading && codexComposer(screen, '')) {
         await output.detach(); attached = false; lastReadings = undefined
       } else if (attached && !keepFailedReading) await output.update('')
