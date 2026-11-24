@@ -194,6 +194,32 @@ describe('shared svn parsers and Node VCS fallback', () => {
     assert.deepEqual(parseSvnStatusXml(statusXml), { staged: 1, modified: 1, untracked: 1, conflicted: 1, ahead: 0, behind: 0 })
   })
 
+  test('parseSvnStatusXml maps all SVN <wc-status> buckets across the 4 local marks', () => {
+    const statusXml = `<status><target path=".">`
+      + `<entry path="add"><wc-status item="added" props="none"></wc-status></entry>`
+      + `<entry path="del"><wc-status item="deleted" props="none"></wc-status></entry>`
+      + `<entry path="rep"><wc-status item="replaced" props="none"></wc-status></entry>`
+      + `<entry path="mod"><wc-status item="modified" props="none"></wc-status></entry>`
+      + `<entry path="mod-prop"><wc-status item="modified" props="modified"></wc-status></entry>`
+      + `<entry path="prop"><wc-status item="normal" props="modified"></wc-status></entry>`
+      + `<entry path="mrg"><wc-status item="merged" props="none"></wc-status></entry>`
+      + `<entry path="mis"><wc-status item="missing" props="none"></wc-status></entry>`
+      + `<entry path="inc"><wc-status item="incomplete" props="none"></wc-status></entry>`
+      + `<entry path="conf"><wc-status item="conflicted" props="none"></wc-status></entry>`
+      + `<entry path="obs"><wc-status item="obstructed" props="none"></wc-status></entry>`
+      + `<entry path="pconf"><wc-status item="normal" props="conflicted"></wc-status></entry>`
+      + `<entry path="tconf"><wc-status item="normal" props="none" tree-conflicted="true"></wc-status></entry>`
+      + `<entry path="unv"><wc-status item="unversioned" props="none"></wc-status></entry>`
+      + `<entry path="norm"><wc-status item="normal" props="none"></wc-status></entry>`
+      + `<entry path="none"><wc-status item="none" props="normal"></wc-status></entry>`
+      + `<entry path="ign"><wc-status item="ignored" props="none"></wc-status></entry>`
+      + `<entry path="ext"><wc-status item="external" props="none"></wc-status></entry>`
+      + `</target></status>`
+    const parsed = parseSvnStatusXml(statusXml)
+    assert.deepEqual(parsed, { staged: 1, modified: 8, untracked: 1, conflicted: 4, ahead: 0, behind: 0 })
+    assert.equal(status(input({ kind: 'svn', counts: parsed })), '✗4 +1 !8 ?1')
+  })
+
   test('findSvnRoot walks up from nested and symlinked folders', async t => {
     const dir = await mkdtemp(join(tmpdir(), 'vargus-svn-root-'))
     t.after(() => rm(dir, { recursive: true, force: true }))

@@ -10,7 +10,7 @@ import type { TokenName } from '../core/types.ts'
 //             <1M tokens or <4M with includeSubagents, <12h session)
 //   alert     over-threshold/error states (low effort, >=80% context/limits, >=1M
 //             tokens or >=4M with includeSubagents, >=12h session, `[API 429]`/`[API auth]`/`[API err]`, git in-progress ops)
-//   add / del / track   git/svn: staged and ahead / conflicts, modified and behind / untracked
+//   add / del / track   git/svn: staged (svn: added) and ahead / conflicts, modified and behind / untracked
 export const PALETTES: Record<string, Record<TokenName, string>> = {
   // cool slate with cyan-teal accents (Nord / Tokyo Night family)
   aurora: {

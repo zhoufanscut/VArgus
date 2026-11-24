@@ -12,6 +12,7 @@ const SVN_STATUS = `<?xml version="1.0" encoding="UTF-8"?>
 ${svnEntry('added.c', 'item="added"\n   props="none"')}${svnEntry('del.c', 'item="deleted"\n   props="none"')}${
   svnEntry('mod.c', 'item="modified"\n   revision="12"\n   props="none"')}${
   svnEntry('gone.c', 'item="missing"\n   props="none"')}${
+  svnEntry('rep.c', 'item="replaced"\n   props="none"')}${
   svnEntry('.', 'item="normal"\n   revision="12"\n   props="modified"')}${
   svnEntry('pc.c', 'item="normal"\n   revision="12"\n   props="conflicted"')}${
   svnEntry('tc.c', 'item="normal"\n   revision="12"\n   props="none"\n   tree-conflicted="true"')}${
@@ -42,11 +43,11 @@ const SVN_INFO = `<?xml version="1.0" encoding="UTF-8"?>
 `
 
 describe('svn', () => {
-  test('both columns count, a path once: the AGENTS.md mapping', async () => {
-    // added, deleted → staged; modified, missing, props-only, both → modified;
+  test('both columns count, a path once: added → staged; deleted, replaced, modified, missing, props → modified', async () => {
+    // added → staged; deleted, modified, missing, replaced, props-only, both → modified;
     // props conflicted, tree-conflicted → conflicted; ignored → nothing
     expect(parseSvnStatusXml(SVN_STATUS)).toEqual(
-      { staged: 2, modified: 4, untracked: 1, conflicted: 2, ahead: 0, behind: 0 })
+      { staged: 1, modified: 6, untracked: 1, conflicted: 2, ahead: 0, behind: 0 })
   })
 
   test('only <wc-status> counts, never the server view of -u', async () => {
@@ -57,7 +58,7 @@ describe('svn', () => {
 
   test('a cut-off output counts the entries read whole', async () => {
     const cut = SVN_STATUS.slice(0, SVN_STATUS.indexOf('path="gone.c"'))
-    expect(parseSvnStatusXml(cut)).toEqual({ staged: 2, modified: 1, untracked: 0, conflicted: 0, ahead: 0, behind: 0 })
+    expect(parseSvnStatusXml(cut)).toEqual({ staged: 1, modified: 2, untracked: 0, conflicted: 0, ahead: 0, behind: 0 })
   })
 
   test('info: project and branch from the URL', async () => {

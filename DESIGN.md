@@ -226,9 +226,20 @@ on a five-second baseline and hold off a slow walk by ten times its duration.
 Claude, OmO and Antigravity can request earlier work after relevant tools
 subject to that hold. A directory or worktree change invalidates old readings.
 All four hosts fall back to local SVN XML in a working copy outside Git (Git
-wins ties when nested), counting property as well as item status. The SVN
-branch label shows the name from the repository URL without a revision suffix,
-for example `branch:trunk`.
+wins ties when nested), counting property as well as item status across the
+four local marks (`✗`, `+`, `!`, `?`):
+
+- `conflicted` (`✗`): `conflicted` and `obstructed` items, `props="conflicted"`,
+  and `tree-conflicted="true"`.
+- `staged` (`+`): `added` items only (SVN has no index, so `deleted` and
+  `replaced` do not show in green `+`).
+- `modified` (`!`): `modified`, `deleted`, `replaced`, `merged`, `missing`, and
+  `incomplete` items, and property-only modifications (`props="modified"`),
+  counted once per path.
+- `untracked` (`?`): `unversioned` items.
+
+The SVN branch label shows the name from the repository URL without a revision
+suffix, for example `branch:trunk`.
 
 ## Codex CLI
 

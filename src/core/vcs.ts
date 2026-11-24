@@ -154,8 +154,9 @@ type SvnBucket = 'conflicted' | 'staged' | 'modified' | 'untracked'
 // The `item` values that place an entry, whatever its props say.
 const SVN_ITEM_BUCKET = new Map<string, SvnBucket>([
   ['conflicted', 'conflicted'], ['obstructed', 'conflicted'],
-  ['added', 'staged'], ['deleted', 'staged'], ['replaced', 'staged'],
-  ['modified', 'modified'], ['merged', 'modified'], ['missing', 'modified'], ['incomplete', 'modified'],
+  ['added', 'staged'],
+  ['modified', 'modified'], ['deleted', 'modified'], ['replaced', 'modified'],
+  ['merged', 'modified'], ['missing', 'modified'], ['incomplete', 'modified'],
   ['unversioned', 'untracked'],
 ])
 
@@ -167,17 +168,18 @@ function svnBucket(attrs: string): SvnBucket | null {
   return SVN_ITEM_BUCKET.get(attr('item') ?? '') ?? (attr('props') === 'modified' ? 'modified' : null)
 }
 
-// `svn status --xml` into git's shape (VantageHUD AGENTS.md mapping; svn has
-// no index, so "staged" is "scheduled for commit"). Both the `item` and the
-// `props` column count: a property conflict is item normal, props conflicted,
-// and a property-only edit (every merge root's svn:mergeinfo) item normal,
-// props modified.
-// - conflicted: item conflicted or obstructed, props conflicted, or any
+// `svn status --xml` into the 4 local status marks (`✗ + ! ?`). SVN has no
+// staging index, so `+` (`staged`) counts only `added` items; `deleted` and
+// `replaced` join `!` (`modified`) rather than showing in green `+`. Both the
+// `item` and the `props` column count: a property conflict is item normal,
+// props conflicted, and a property-only edit (every merge root's svn:mergeinfo)
+// item normal, props modified.
+// - conflicted (`✗`): item conflicted or obstructed, props conflicted, or any
 //   tree-conflicted="true"
-// - staged: added, deleted, replaced
-// - modified: modified, merged, missing, incomplete; then props modified,
-//   checked last so a path is counted once
-// - untracked: unversioned
+// - staged (`+`): added
+// - modified (`!`): modified, deleted, replaced, merged, missing, incomplete;
+//   then props modified, checked last so a path is counted once
+// - untracked (`?`): unversioned
 // Only <wc-status> counts; <repos-status> (from `-u`, never passed) is the
 // server's view.
 export function parseSvnStatusXml(xml: string): VcsCounts {
