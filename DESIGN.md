@@ -201,6 +201,27 @@ The row uses one compact layout across all four hosts:
 [Themes](src/theme/index.ts) use 24-bit SGR styles and default to `graphite`.
 Each palette in [palettes.ts](src/theme/palettes.ts) defines 9 tokens: `text`,
 `label`, `faint`, `sep`, `calm`, `alert`, `add`, `del` and `track`.
+Every bundled palette follows the same 3-group OKLCH rules, checked in
+[theme.test.mts](tests/shared/theme.test.mts) across dark (`#181818`–`#282828`)
+and light (`#ffffff`–`#f6f8fa`) background ranges:
+
+- **5-step tonal ramp (`text > label > calm > faint > sep`)**: low-chroma steps
+  (`OKLCH C ≤ 0.045`; achromatic `C = 0` in `graphite`) sharing the theme's base
+  undertone, strictly ordered by contrast against the worst-case background.
+- **Contrast floors & polarity**: every dark-theme token is brighter than
+  `#282828` and every `daylight` token is darker than `#f6f8fa`; on the
+  worst-case background, `text`, `label`, `calm`, `add`, `del` and `track`
+  `≥ 4.5:1`, `alert ≥ 5.0:1` (and contrast `≥ del`), `faint ≥ 3.0:1`, and
+  `sep` stays between `1.4:1` (worst-case) and `2.5:1` (typical).
+- **Alarm isolation**: `alert` is vivid red and the highest-chroma token on
+  the row, with OKLCH chroma at least `2×` `del`.
+- **Balanced VCS triad**: `add` (green), `del` (muted red) and `track` (distinct
+  3rd hue) sit in `calm`'s lightness/contrast band with matched lightness and
+  chroma; conflicts (`✗`) stay on `del` ([vcs.test.mts](tests/shared/vcs.test.mts)).
+- **Adjacent-pair separation**: side-by-side token pairs (`text`–`label`,
+  `label`–`calm`, `calm`–`faint`, `label`–`faint`, `text`–`faint`, `label`–`alert`,
+  `calm`–`alert`, `alert`–`faint`, `text`–`alert`, `del`–`alert`, `add`–`del`,
+  `add`–`track`, `del`–`track`) meet `OKLab ΔE ≥ 0.08`.
 The palette registry uses own-property lookup and falls back for unknown
 names. When a host sees a non-empty `NO_COLOR`, the theme returns plain text. Run
 `vargus themes [NAME]` ([themes.ts](src/cli/themes.ts)) to preview bundled palettes

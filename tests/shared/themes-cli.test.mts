@@ -106,7 +106,7 @@ describe('vargus themes', () => {
     const colored = await execFileAsync(process.execPath, ['src/cli.ts', 'themes', 'graphite'], {
       env: { ...envBase, NO_COLOR: '' },
     })
-    assert.match(colored.stdout, /\x1b\[38;2;230;230;230m/)
+    assert.ok(colored.stdout.includes(makeTheme('graphite', false).paint('text', 'text')))
     assert.ok(colored.stdout.startsWith('graphite (default)\n'))
 
     const plain = await execFileAsync(process.execPath, ['src/cli.ts', 'themes', 'graphite'], {

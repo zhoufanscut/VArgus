@@ -1,45 +1,47 @@
 import type { TokenName } from '../core/types.ts'
 
-// Five bundled palettes derived from VantageHUD 0.6.0 (src/hud/themes.js), 9
-// hex tokens each (two tiers: calm and alert). What each token paints:
-//   text      location anchors (bold folder; plain repo and branch/ref names)
-//   label     `xxx:` prefixes, model name, detached `@`, call counts and stale text
-//   faint     secondary parentheticals (`(carbon)`, `(fast)`, reset times, cache/speed, `(wt:x)`)
-//   sep       the ` | ` separator (including before the stale marker)
-//   calm      under-threshold readings (effort at/above default, <80% context/limits,
-//             <1M tokens or <4M with includeSubagents, <12h session)
-//   alert     over-threshold/error states (low effort, >=80% context/limits, >=1M
-//             tokens or >=4M with includeSubagents, >=12h session, `[API 429]`/`[API AUTH]`/`[API ERR]`, git in-progress ops)
-//   add / del / track   git/svn: staged (svn: added) and ahead / conflicts, modified and behind / untracked
+// Five bundled palettes using one 3-group OKLCH structure, 9 hex tokens each:
+//   - 5-step tonal ramp (`text > label > calm > faint > sep`) in one base undertone:
+//       text   location anchors (bold folder; plain repo and branch/ref names)
+//       label  `xxx:` prefixes, model name, detached `@`, call counts and stale text
+//       calm   under-threshold readings (effort at/above default, <80% context/limits,
+//              <1M tokens or <4M with includeSubagents, <12h session)
+//       faint  secondary parentheticals (`(carbon)`, `(fast)`, reset times, cache/speed, `(wt:x)`)
+//       sep    the ` | ` separator (including before the stale marker)
+//   - 1 vivid alarm (`alert`, highest chroma, >=2x `del` chroma):
+//       alert  over-threshold/error states (low effort, >=80% context/limits, >=1M
+//              tokens or >=4M with includeSubagents, >=12h session, `[API 429]`/`[API AUTH]`/`[API ERR]`, git in-progress ops)
+//   - 3 balanced muted VCS tokens:
+//       add / del / track   git/svn: staged (svn: added) and ahead / conflicts, modified and behind / untracked
 export const PALETTES: Record<string, Record<TokenName, string>> = {
-  // cool slate with cyan-teal accents (Nord / Tokyo Night family)
+  // cool cyan-slate dark (Nord / Tokyo Night family)
   aurora: {
-    text: '#c8d3e8', label: '#8fd0d8', faint: '#6e7896', sep: '#48506a',
-    calm: '#72d3c3', alert: '#e0909e',
-    add: '#8fd0b8', del: '#e0909e', track: '#8dc2d6',
+    text: '#d3e2ed', label: '#adc1cd', faint: '#6e7c89', sep: '#444e59',
+    calm: '#90a1ad', alert: '#f6808d',
+    add: '#82b291', del: '#c59094', track: '#78aac9',
   },
-  // warm dark (Gruvbox family)
+  // warm stone/parchment dark (Gruvbox family)
   ember: {
-    text: '#ebdbb2', label: '#a89984', faint: '#928374', sep: '#665c54',
-    calm: '#969619', alert: '#fb4934',
-    add: '#969619', del: '#fb4934', track: '#fe8019',
+    text: '#eadfc5', label: '#c8baa6', faint: '#84786d', sep: '#544b44',
+    calm: '#a89a8a', alert: '#fe7768',
+    add: '#93ad78', del: '#c78c83', track: '#72a9c2',
   },
-  // vivid dark with mauve accents (Catppuccin Mocha family)
+  // cool mauve-slate dark (Catppuccin Mocha family)
   nebula: {
-    text: '#cdd6f4', label: '#cba6f7', faint: '#6c7086', sep: '#45475a',
-    calm: '#94e2d5', alert: '#f38ba8',
-    add: '#a6e3a1', del: '#f38ba8', track: '#89b4fa',
+    text: '#dcdef4', label: '#bfb9d7', faint: '#76798c', sep: '#494c5b',
+    calm: '#9c9cb4', alert: '#f87f99',
+    add: '#86b689', del: '#c99099', track: '#85a6d7',
   },
-  // near-monochrome dark: only alert and VCS counts carry hue. VArgus's default.
+  // pure neutral-gray dark, lowest VCS chroma. VArgus's default.
   graphite: {
-    text: '#e6e6e6', label: '#9e9e9e', faint: '#7d7d7d', sep: '#3f3f3f',
-    calm: '#b0b0b0', alert: '#cd6a6a',
-    add: '#8fa88f', del: '#b08f8f', track: '#8f9db0',
+    text: '#e6e6e6', label: '#bfbfbf', faint: '#7a7a7a', sep: '#4a4a4a',
+    calm: '#9e9e9e', alert: '#f47e7c',
+    add: '#8aaa8b', del: '#bc908e', track: '#86a1c0',
   },
-  // the one palette for a light background (GitHub light family)
+  // cool slate-ink on light background (GitHub light family)
   daylight: {
-    text: '#24292f', label: '#0550ae', faint: '#6e7781', sep: '#d0d7de',
-    calm: '#0a7c5a', alert: '#cf222e',
-    add: '#116329', del: '#cf222e', track: '#8250df',
+    text: '#22272d', label: '#3d4650', faint: '#7c848d', sep: '#c3c8ce',
+    calm: '#5c646d', alert: '#bb1423',
+    add: '#3f764c', del: '#945451', track: '#676099',
   },
 }

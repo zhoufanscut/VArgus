@@ -156,8 +156,9 @@ On a detached Git HEAD, the branch label shows the checkout ref or short commit 
 During a rebase it shows the branch being rebased when available.
 Claude shows the account-wide five-hour and seven-day limits when available.
 
-- **Theme**: one of five bundled palettes, `graphite` by default (near-monochrome; only alert and
-  VCS counts carry hue). All but `daylight` assume a dark terminal.
+- **Theme**: one of five bundled palettes, `graphite` by default (neutral-gray
+  tonal ramp; every theme keeps readings calm and uses colour mainly for `alert`
+  and VCS counts). All but `daylight` assume a dark terminal.
 - **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.
   Other programs Claude Code starts see it too.
 

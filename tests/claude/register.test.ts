@@ -153,8 +153,8 @@ describe('register: the line as the host sets it up', () => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock, { HOME: '/home/u' })
     await $.session.start(start)
-    // graphite's sep #3f3f3f
-    expect(await line(clock, w)).toContain('\x1b[38;2;63;63;63m | \x1b[0m')
+    // graphite's sep #4a4a4a
+    expect(await line(clock, w)).toContain('\x1b[38;2;74;74;74m | \x1b[0m')
   })
 
   test('effort colour follows the main step model default or high cutoff', NO_VCS, async ($, on) => {
@@ -191,8 +191,8 @@ describe('register: the line as the host sets it up', () => {
         return { value: undefined }
       })
       await $.session.start(start)
-      // ember's sep #665c54
-      expect(await line(clock, w)).toContain('\x1b[38;2;102;92;84m | \x1b[0m')
+      // ember's sep #544b44
+      expect(await line(clock, w)).toContain('\x1b[38;2;84;75;68m | \x1b[0m')
       expect(closedPanes).toEqual(['vargus'])
       expect(commands).not.toContain('vargus')
     })
