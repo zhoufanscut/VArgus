@@ -121,9 +121,9 @@ Removal touches only the owned loader. The separate experimental
 On a detached Git HEAD, the branch label shows the checkout ref or short commit ID.
 During a rebase it shows the branch being rebased when available.
 
-Tokens count persisted main-session assistant input plus output across the whole
+Main-session tokens count persisted assistant input plus output across the whole
 session history, including earlier branches and compaction history. Cache reads,
-cache writes and child/tool-result usage are excluded. Native assistant edits made
+cache writes and embedded tool-result usage are excluded. Native assistant edits made
 while this extension is loaded are recorded as non-billable copies, so editing a
 response does not increase its token total. OmO does not persist edit provenance
 itself: copies made before installation or through another client without VArgus
@@ -143,17 +143,17 @@ assistant tool calls; calls hidden inside `eval` are not added. Agents count dis
 task IDs from accepted spawn results. Main-session skill counts are omitted because a
 `SKILL.md` read alone does not establish a skill load.
 
-By default (`includeSubagents: false`), tokens, tools and agents count main-session
-activity only with no extra disk I/O (skills stay omitted). Enable
-`includeSubagents: true` (in `vargus.jsonc`, your `--config` file, or
-`/vargus config {"includeSubagents":true}`) to asynchronously read OmO's on-disk
-`senpi-task` store and fold subagent tokens, tools, deduplicated agent counts and
+By default (`includeSubagents: true`), VArgus asynchronously reads OmO's on-disk
+`senpi-task` store and folds subagent tokens, tools, deduplicated agent counts and
 explicitly resolved child task skills (`skills.resolved` on accepted spawn receipts,
-excluding missing skills) across direct children, nested
+excluding missing skills) into the main-session totals across direct children, nested
 descendants, revived runs and DAG/team/workpool tasks, excluding confirmed
 pre-launch refusals (including fallback-chain admission refusals and provisional
 spawn receipts whose store record later confirms refusal for that run) from both
-agent and skill counts. An open widget remembers a confirmed refusal in memory
+agent and skill counts. Setting `includeSubagents: false` (in `vargus.jsonc`, your
+`--config` file, or `/vargus config {"includeSubagents":false}`) keeps tokens,
+tools and agents on the main session with no task-store disk I/O (skills stay
+omitted). An open widget remembers a confirmed refusal in memory
 after OmO expires the task record (cleared on `/reload`, `/resume`, or
 reconfiguring `/vargus`). Cache-hit percentage, output
 speed (`t/s`), context, model, effort, session time, quotas and VCS always remain on

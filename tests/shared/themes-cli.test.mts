@@ -132,7 +132,7 @@ describe('vargus themes', () => {
         assert.ok(alert.includes(t.paint('label', 'opus:') + t.paint('alert', 'low')))
         assert.ok(alert.includes(t.paint('alert', '[API 429]') + ' ' + t.paint('label', '7d:') + t.paint('alert', '88%') + t.paint('detail', '(5d6h)')))
         assert.ok(alert.includes(t.paint('label', 'ctx:') + t.paint('alert', '85%')))
-        assert.ok(alert.includes(t.paint('label', 'token:') + t.paint('alert', '1.20M') + t.paint('detail', '(99.4%, 48t/s)')))
+        assert.ok(alert.includes(t.paint('label', 'token:') + t.paint('alert', '4.20M') + t.paint('detail', '(99.4%, 48t/s)')))
         assert.ok(alert.includes(t.paint('label', 'session:') + t.paint('alert', '12h30m')))
         assert.ok(alert.includes(t.paint('label', 'branch:') + t.paint('text', 'feat') + t.paint('alert', '(rebase 2/3)')))
         assert.ok(alert.includes(`${t.paint('del', '✗1')} ${t.paint('del', '!3')} ${t.paint('del', '⇣2')}`))

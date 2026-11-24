@@ -222,13 +222,13 @@ providers deliberately bypass `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. Kimi's
 direct usage endpoint is experimental, so its response shape may change.
 
 Claude's token total and tool, agent and skill counts cover the main
-conversation by default since the mod first loaded, or since the last `/clear`
-or in-session resume. Cache reads and writes are excluded. Enable
-`includeSubagents` (**Include subagents** in `/config`) to fold in-process
-subagent tokens, tools, agents and skills into those totals immediately,
-including activity already recorded in the session. The cache-hit percentage
-and output decode speed (`t/s`) in parentheses always follow the latest
-main-conversation request. Claude Code counts missing provider cache counters
+conversation and in-process subagents by default (`includeSubagents: true`)
+since the mod first loaded, or since the last `/clear` or in-session resume.
+Cache reads and writes are excluded. Set `includeSubagents: false` (**Include
+subagents** in `/config`) to restrict those totals to the main conversation
+only, reflecting already-recorded session activity immediately. The cache-hit
+percentage and output decode speed (`t/s`) in parentheses always follow the
+latest main-conversation request. Claude Code counts missing provider cache counters
 as zero. Output speed divides `output_tokens` by the streamed generation span
 (first thinking, text or tool chunk to stop, excluding server-side tool
 execution spans) when at least 0.5 s elapsed across multiple chunks; shorter

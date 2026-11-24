@@ -16,9 +16,10 @@
 //   Counting `agent.spawn` would include agents started by plugins.
 // - main vs subagent split: main-loop (`e.agentId` absent) and in-process
 //   subagent (`e.agentId` present) tokens and call counts are tracked and
-//   persisted separately in `$.state`. `includeSubagents` defaults to false
-//   (main loop only); enabling it adds the recorded subagent counts at render
-//   time while keeping cache hit, decode speed, context and effort main-only.
+//   persisted separately in `$.state`. `includeSubagents` defaults to true
+//   (combining recorded subagent counts at render time); disabling it shows
+//   main-loop counts only while keeping cache hit, decode speed, context and
+//   effort main-only.
 // Edges: a hook above VArgus that answers without `next` hides that event
 // from it; the tool names are the 2.1.300 tool table's (VantageHUD also
 // counted `Task`, `proxy_Task`, `proxy_Skill`, which that table lacks).

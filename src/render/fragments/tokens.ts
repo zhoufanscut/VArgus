@@ -5,11 +5,11 @@ import type { Fragment } from '../../core/types.ts'
 // (DESIGN, "Fragments").
 
 // Raw under 1k, one decimal of k under 1M, two decimals of M beyond. The k/M
-// switch (and default `includeSubagents: false` calm -> alert flip) is at
+// switch (and `includeSubagents: false` calm -> alert flip) is at
 // 999,950, where one decimal of k would round to `1000.0k` and switches to
 // `1.00M` (VantageHUD's formatTokenCount).
 const MILLION_THRESHOLD = 999_950
-// Subagents mode (`includeSubagents: true`) expands the calm -> alert flip to
+// Default mode (`includeSubagents: true`) expands the calm -> alert flip to
 // 3,995,000, where two-decimal M rounds from `3.99M` to `4.00M`.
 const SUBAGENT_ALERT_THRESHOLD = 3_995_000
 

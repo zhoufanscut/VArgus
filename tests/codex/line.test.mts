@@ -192,7 +192,7 @@ test('codexLine folds extraCounts without mutating the collector, keeps viewed m
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
-test('codexLine uses the 1M alert threshold by default and 4M with includeSubagents (including paused snapshots)', async () => {
+test('codexLine uses the 4M alert threshold by default and 1M with includeSubagents: false (including paused snapshots)', async () => {
   const colored = makeTheme('graphite', false)
   const baseOpts = { session: false, repo: false, branch: false, status: false }
   const collector = new CodexCollector('/repo', undefined)
@@ -203,12 +203,11 @@ test('codexLine uses the 1M alert threshold by default and 4M with includeSubage
     modelContextWindow: 200_000,
   })
 
-  const mainLine = codexLine(collector, resolveCodexOptions({ ...baseOpts, includeSubagents: false }), colored)
-  const mainRow = await mainLine(200)
-  assert.ok(mainRow.includes(colored.paint('label', 'token:') + colored.paint('alert', '1.50M')))
-  assert.equal(mainLine.paused(200), mainRow)
+  const subLine = codexLine(collector, resolveCodexOptions(baseOpts), colored)
+  const subOneFive = await subLine(200)
+  assert.ok(subOneFive.includes(colored.paint('label', 'token:') + colored.paint('calm', '1.50M')))
+  assert.equal(subLine.paused(200), subOneFive)
 
-  const subLine = codexLine(collector, resolveCodexOptions({ ...baseOpts, includeSubagents: true }), colored)
   const subCalm = await subLine(200, { tokens: 2_494_999, tools: 0, agents: 0, skills: 0 })
   assert.ok(subCalm.includes(colored.paint('label', 'token:') + colored.paint('calm', '3.99M')))
   assert.equal(subLine.paused(200), subCalm)
@@ -216,4 +215,9 @@ test('codexLine uses the 1M alert threshold by default and 4M with includeSubage
   const subAlert = await subLine(200, { tokens: 2_495_000, tools: 0, agents: 0, skills: 0 })
   assert.ok(subAlert.includes(colored.paint('label', 'token:') + colored.paint('alert', '4.00M')))
   assert.equal(subLine.paused(200), subAlert)
+
+  const mainLine = codexLine(collector, resolveCodexOptions({ ...baseOpts, includeSubagents: false }), colored)
+  const mainRow = await mainLine(200)
+  assert.ok(mainRow.includes(colored.paint('label', 'token:') + colored.paint('alert', '1.50M')))
+  assert.equal(mainLine.paused(200), mainRow)
 })

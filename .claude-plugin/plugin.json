@@ -63,7 +63,7 @@
       "type": "boolean",
       "title": "Include subagents",
       "description": "Include subagent tokens, tools, agents and skills in session totals",
-      "default": false
+      "default": true
     },
     "rateLimits": {
       "type": "boolean",

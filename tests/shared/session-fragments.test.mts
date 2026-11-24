@@ -124,30 +124,32 @@ describe('tokens', () => {
     )
   })
 
-  test('token count alerts at 1.00M (999,950) by default and 4.00M (3,995,000) with includeSubagents; hidden at zero', () => {
+  test('token count alerts at 4.00M (3,995,000) by default and 1.00M (999,950) with includeSubagents: false; hidden at zero', () => {
+    // Default (includeSubagents: true) keeps the k/M format switch at 999,950 while alerting at 4.00M (3,995,000).
     assert.equal(tokens(input({ counts: counts({ tokens: 69_500 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(calm, '69.5k'))
     assert.equal(tokens(input({ counts: counts({ tokens: 999_949 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(calm, '999.9k'))
-    assert.equal(tokens(input({ counts: counts({ tokens: 999_950 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(alert, '1.00M'))
-    assert.equal(tokens(input({ counts: counts({ tokens: 1_500_000 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(alert, '1.50M'))
-    assert.equal(tokens(input({ counts: counts({ tokens: 3_994_999 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(alert, '3.99M'))
-    assert.equal(tokens(input({})), null)
-
-    // Subagents mode keeps the k/M format switch at 999,950 while expanding the alert flip to 4.00M (3,995,000).
-    assert.equal(tokens(input({ counts: counts({ tokens: 999_949 }) }, { includeSubagents: true }, { color: true })), t.paint('label', 'token:') + t.paint(calm, '999.9k'))
-    assert.equal(tokens(input({ counts: counts({ tokens: 999_950 }) }, { includeSubagents: true }, { color: true })), t.paint('label', 'token:') + t.paint(calm, '1.00M'))
-    assert.equal(tokens(input({ counts: counts({ tokens: 1_500_000 }) }, { includeSubagents: true }, { color: true })), t.paint('label', 'token:') + t.paint(calm, '1.50M'))
-    assert.equal(tokens(input({ counts: counts({ tokens: 3_994_999 }) }, { includeSubagents: true }, { color: true })), t.paint('label', 'token:') + t.paint(calm, '3.99M'))
-    assert.equal(tokens(input({ counts: counts({ tokens: 3_995_000 }) }, { includeSubagents: true }, { color: true })), t.paint('label', 'token:') + t.paint(alert, '4.00M'))
-    assert.equal(tokens(input({ counts: counts({ tokens: 4_500_000 }) }, { includeSubagents: true }, { color: true })), t.paint('label', 'token:') + t.paint(alert, '4.50M'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 999_950 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(calm, '1.00M'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 1_500_000 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(calm, '1.50M'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 3_994_999 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(calm, '3.99M'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 3_995_000 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(alert, '4.00M'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 4_500_000 }) }, {}, { color: true })), t.paint('label', 'token:') + t.paint(alert, '4.50M'))
     assert.equal(
-      tokens(input({ counts: counts({ tokens: 3_994_999 }), cacheHitPercent: 95, tokensPerSecond: 48 }, { includeSubagents: true }, { color: true })),
+      tokens(input({ counts: counts({ tokens: 3_994_999 }), cacheHitPercent: 95, tokensPerSecond: 48 }, {}, { color: true })),
       t.paint('label', 'token:') + t.paint(calm, '3.99M') + t.paint('detail', '(95%, 48t/s)'),
     )
     assert.equal(
-      tokens(input({ counts: counts({ tokens: 3_995_000 }), cacheHitPercent: 95, tokensPerSecond: 48 }, { includeSubagents: true }, { color: true })),
+      tokens(input({ counts: counts({ tokens: 3_995_000 }), cacheHitPercent: 95, tokensPerSecond: 48 }, {}, { color: true })),
       t.paint('label', 'token:') + t.paint(alert, '4.00M') + t.paint('detail', '(95%, 48t/s)'),
     )
-    assert.equal(tokens(input({}, { includeSubagents: true }, { color: true })), null)
+    assert.equal(tokens(input({}, {}, { color: true })), null)
+
+    // Opt-out (includeSubagents: false) alerts at 1.00M (999,950).
+    assert.equal(tokens(input({ counts: counts({ tokens: 69_500 }) }, { includeSubagents: false }, { color: true })), t.paint('label', 'token:') + t.paint(calm, '69.5k'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 999_949 }) }, { includeSubagents: false }, { color: true })), t.paint('label', 'token:') + t.paint(calm, '999.9k'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 999_950 }) }, { includeSubagents: false }, { color: true })), t.paint('label', 'token:') + t.paint(alert, '1.00M'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 1_500_000 }) }, { includeSubagents: false }, { color: true })), t.paint('label', 'token:') + t.paint(alert, '1.50M'))
+    assert.equal(tokens(input({ counts: counts({ tokens: 3_994_999 }) }, { includeSubagents: false }, { color: true })), t.paint('label', 'token:') + t.paint(alert, '3.99M'))
+    assert.equal(tokens(input({}, { includeSubagents: false }, { color: true })), null)
   })
 
   test('cache suffix shows up to one decimal and reserves 100% for a full hit', () => {

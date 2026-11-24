@@ -418,7 +418,7 @@ test('OmO options file applies on reload and keeps session overrides', async () 
   }
 })
 
-test('OmO includeSubagents defaults off, folds and deduplicates when toggled on, and keeps main metrics untouched', async t => {
+test('OmO includeSubagents defaults on, folds and deduplicates, keeps main metrics untouched, and toggles off', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-entry-sub-'))
   const home = join(dir, 'home')
   const agentDir = join(dir, 'agent')
@@ -565,27 +565,21 @@ test('OmO includeSubagents defaults off, folds and deduplicates when toggled on,
     check()
   })
 
+  let now = 100_000
+  t.mock.method(Date, 'now', () => now)
+  let perf = 1000
+  t.mock.method(performance, 'now', () => perf)
   vargus(api, {})
   handlers.get('session_start')?.({}, ctx)
   try {
-    // Default off: zero subagent reads, main-only counts (200 tokens, 88.9% cache, 1 tool, 1 agent).
-    const offLine = lineText()
-    assert.match(offLine, /token:200\(88\.9%\)/)
-    assert.match(offLine, /🔧1 🤖1|T:1 A:1/)
-    assert.equal(getSessionIdCalls, 0)
-
-    // Toggle on via /vargus config: folds child (500 tok, 2 tools) + grandchild (300 tok, 1 tool) => 1.0k, 4 tools, 2 agents.
+    // Default on: folds child (500 tok, 2 tools) + grandchild (300 tok, 1 tool) => 1.0k, 4 tools, 2 agents.
     // Cache hit (88.9%), decode t/s, and ctx (25%) stay strictly main-only; skills remain omitted (no resolved task skills in this fixture).
-    let now = 100_000
-    t.mock.method(Date, 'now', () => now)
-    let perf = 1000
-    t.mock.method(performance, 'now', () => perf)
-    await command!.handler('config {"includeSubagents":true}', ctx)
     const onLine = await waitForLine(/token:1\.0k\(88\.9%\)/)
     assert.match(onLine, /ctx:25%/)
     assert.match(onLine, /🔧4 🤖2|T:4 A:2/)
     assert.doesNotMatch(onLine, /⚡|S:/)
     assert.ok(renderCount > 0)
+    assert.ok(getSessionIdCalls > 0)
     // Memoized history.agents must NEVER have been mutated by render-time union.
     assert.deepEqual([...collectOmoAgents(ctx)], ['st_00000001'])
 
@@ -634,16 +628,18 @@ test('OmO includeSubagents defaults off, folds and deduplicates when toggled on,
     assert.match(lineText(), /token:1\.6k\(88\.9%, 100t\/s\)/)
     ctx.sessionManager.getSessionId = savedGetSessionId
 
-    // Toggling back off immediately reverts to main-only counts (400 tokens, 1 tool, 1 agent).
+    // Toggling off immediately reverts to main-only counts (400 tokens, 1 tool, 1 agent) with zero task-store scans.
     await command!.handler('config {"includeSubagents":false}', ctx)
     const reverted = lineText()
     assert.match(reverted, /token:400\(88\.9%\)/)
     assert.match(reverted, /🔧1 🤖1|T:1 A:1/)
+    const callsOff = getSessionIdCalls
+    handlers.get('thinking_level_select')?.({}, ctx)
+    assert.equal(getSessionIdCalls, callsOff)
 
     // When both tokens and callCounts are false, includeSubagents: true performs no subagent scans.
-    const callsBefore = getSessionIdCalls
     await command!.handler('config {"includeSubagents":true,"tokens":false,"callCounts":false}', ctx)
-    assert.equal(getSessionIdCalls, callsBefore)
+    assert.equal(getSessionIdCalls, callsOff)
   } finally {
     handlers.get('session_shutdown')?.({}, ctx)
   }
@@ -783,20 +779,24 @@ test('OmO excludes pre-launch refused tasks across main-only and includeSubagent
     check()
   })
 
+  let now = 200_000
+  t.mock.method(Date, 'now', () => now)
   vargus(api, {})
   handlers.get('session_start')?.({}, ctx)
   try {
-    // Default off: only st_00000002 counts -> 1 agent, 150 tokens, 2 outer tool calls.
+    // Default on: union of main and store reports 1 agent, plus st_00000002's 400 tokens & 1 tool.
+    const onLine = await waitForLine(/token:550\(0%\)/)
+    assert.match(onLine, /🔧3 🤖1|T:3 A:1/)
+
+    // Toggle includeSubagents off: only st_00000002 counts in main-only -> 1 agent, 150 tokens, 2 outer tool calls.
+    await command!.handler('config {"includeSubagents":false}', ctx)
     const offLine = lineText()
     assert.match(offLine, /token:150\(0%\)/)
     assert.match(offLine, /🔧2 🤖1|T:2 A:1/)
 
-    // Toggle includeSubagents on: union of main and store still reports 1 agent, plus st_00000002's 400 tokens & 1 tool.
-    let now = 200_000
-    t.mock.method(Date, 'now', () => now)
+    // Toggle includeSubagents back on before adding runtime-errored st_00000003.
     await command!.handler('config {"includeSubagents":true}', ctx)
-    const onLine = await waitForLine(/token:550\(0%\)/)
-    assert.match(onLine, /🔧3 🤖1|T:3 A:1/)
+    await waitForLine(/token:550\(0%\)/)
 
     // Add a control child that actually ran and later errored: counts as 2nd agent and adds its 250 tokens & 1 tool.
     await mkdir(join(stateDir, 'children', 'st_00000003', 'sessions', 'st_00000003'), { recursive: true })
@@ -947,23 +947,17 @@ test('OmO attributes explicitly resolved child task skills only under includeSub
     check()
   })
 
+  let now = 300_000
+  t.mock.method(Date, 'now', () => now)
   vargus(api, {})
   handlers.get('session_start')?.({}, ctx)
   try {
-    // 1. Default off: 1 accepted agent, 0 skills (resolved child skill is not attributed to main).
-    const offLine = lineText()
-    assert.match(offLine, /🔧2 🤖1|T:2 A:1/)
-    assert.doesNotMatch(offLine, /⚡|S:/)
-    assert.equal(getSessionIdCalls, 0)
-
-    // 2. Toggle on even before any task store exists on disk: immediately renders 1 skill (`audit`).
-    let now = 300_000
-    t.mock.method(Date, 'now', () => now)
-    await command!.handler('config {"includeSubagents":true}', ctx)
+    // 1. Default on even before any task store exists on disk: immediately renders 1 skill (`audit`).
     const onImmediate = lineText()
     assert.match(onImmediate, /🔧2 🤖1 ⚡1|T:2 A:1 S:1/)
+    assert.ok(getSessionIdCalls > 0)
 
-    // 3. Populate on-disk child JSONL that spawns grandchild st_00000002 with `review` AND under
+    // 2. Populate on-disk child JSONL that spawns grandchild st_00000002 with `review` AND under
     //    already-seen st_00000001 duplicates `audit` while adding `lint` -> union must show 2 agents and 3 skills.
     await mkdir(join(stateDir, 'tasks'), { recursive: true })
     await mkdir(join(stateDir, 'children', 'st_00000001', 'sessions', 'st_00000001'), { recursive: true })
@@ -1062,16 +1056,18 @@ test('OmO attributes explicitly resolved child task skills only under includeSub
     const tokensOnly = await waitForLine(/token:1\.0k\(0%\)/)
     assert.doesNotMatch(tokensOnly, /🔧|🤖|⚡|T:|A:|S:/)
 
-    // 6. Toggling includeSubagents back off immediately drops skills back to 0.
+    // 6. Toggling includeSubagents off immediately drops skills back to 0 with no extra store scans.
     await command!.handler('config {"includeSubagents":false,"tokens":true,"callCounts":true}', ctx)
     const backOff = lineText()
     assert.match(backOff, /🔧3 🤖2|T:3 A:2/)
     assert.doesNotMatch(backOff, /⚡|S:/)
+    const callsOff = getSessionIdCalls
+    handlers.get('thinking_level_select')?.({}, ctx)
+    assert.equal(getSessionIdCalls, callsOff)
 
     // 7. Both tokens and callCounts false skips disk scans cleanly.
-    const callsBefore = getSessionIdCalls
     await command!.handler('config {"includeSubagents":true,"tokens":false,"callCounts":false}', ctx)
-    assert.equal(getSessionIdCalls, callsBefore)
+    assert.equal(getSessionIdCalls, callsOff)
   } finally {
     handlers.get('session_shutdown')?.({}, ctx)
   }
@@ -1235,22 +1231,28 @@ test('OmO reconciles queued pending receipts against store refusals, excludes ad
     check()
   })
 
+  let now = 400_000
+  t.mock.method(Date, 'now', () => now)
   vargus(api, {})
   handlers.get('session_start')?.({}, ctx)
   try {
-    // Default mode (includeSubagents: false): zero task-store reads; st_00000003 is already excluded by receipt,
-    // while queued st_00000002 remains pending in main-only view (🤖2, no skills).
-    const offLine = lineText()
-    assert.equal(getSessionIdCalls, 0)
-    assert.match(offLine, /🤖2|A:2/)
-    assert.doesNotMatch(offLine, /⚡|S:/)
-
-    // Enable includeSubagents: store scan confirms st_00000002's run-0 refusal and reconciles it and `audit` away -> 🤖1, no skill.
-    let now = 400_000
-    t.mock.method(Date, 'now', () => now)
-    await command!.handler('config {"includeSubagents":true}', ctx)
+    // Default on: store scan confirms st_00000002's run-0 refusal and reconciles it and `audit` away -> 🤖1, no skill.
     const reconciledLine = await waitForLine(/(?:🤖1|A:1)(?!.*(?:⚡|S:))/)
     assert.doesNotMatch(reconciledLine, /⚡|S:/)
+
+    // Toggle includeSubagents off: zero task-store reads; st_00000003 is excluded by receipt,
+    // while queued st_00000002 remains pending in main-only view (🤖2, no skills).
+    await command!.handler('config {"includeSubagents":false}', ctx)
+    const offLine = lineText()
+    assert.match(offLine, /🤖2|A:2/)
+    assert.doesNotMatch(offLine, /⚡|S:/)
+    const callsOff = getSessionIdCalls
+    handlers.get('thinking_level_select')?.({}, ctx)
+    assert.equal(getSessionIdCalls, callsOff)
+
+    // Re-enable includeSubagents: re-scans and reconciles st_00000002 before expiry.
+    await command!.handler('config {"includeSubagents":true}', ctx)
+    await waitForLine(/(?:🤖1|A:1)(?!.*(?:⚡|S:))/)
 
     // Expiry removes the store record while the parent's queued receipt survives.
     await rm(join(stateDir, 'tasks', 'st_00000002.json'))
@@ -1427,7 +1429,7 @@ test('OmO reconciles queued pending receipts against store refusals, excludes ad
   }))
   const soleEntries: SessionEntry[] = [
     { id: 's', type: 'custom', timestamp: '', customType: 'vargus-settings',
-      data: { enabled: true, options: { repo: false, branch: false, status: false, includeSubagents: true } } },
+      data: { enabled: true, options: { repo: false, branch: false, status: false } } },
     { id: 'r1', type: 'message', timestamp: '', message: {
       role: 'toolResult', toolCallId: 'c1', toolName: 'task',
       details: {
@@ -1487,7 +1489,7 @@ test('OmO reconciles queued pending receipts against store refusals, excludes ad
   }
 })
 
-test('OmO token alert threshold switches from 1M to 4M when toggling includeSubagents', async () => {
+test('OmO token alert threshold switches from 4M (default) to 1M when toggling includeSubagents', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-token-alert-'))
   const savedNoColor = process.env.NO_COLOR
   const savedAgentDir = process.env.OMO_CODING_AGENT_DIR
@@ -1508,6 +1510,9 @@ test('OmO token alert threshold switches from 1M to 4M when toggling includeSuba
     const tokenText = (tone: 'calm' | 'alert', value: string) =>
       colored.paint('label', 'token:') + colored.paint(tone, value)
 
+    assert.ok((h.row?.render(200).join('') ?? '').includes(tokenText('calm', '1.50M')))
+
+    await h.command('config {"includeSubagents":false}')
     assert.ok((h.row?.render(200).join('') ?? '').includes(tokenText('alert', '1.50M')))
 
     await h.command('config {"includeSubagents":true}')

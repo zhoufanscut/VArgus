@@ -180,13 +180,13 @@ takes effect immediately on the next status-line update with no restart.
 Antigravity CLI reads live model, context and quota fields from `agy`'s `statusLine`
 JSON input and incrementally replays the active conversation's `transcript.jsonl`
 for session age, uncached input plus output tokens, and tool, subagent (`invoke_subagent`,
-`swarm` `add`) and skill (`SKILL.md` reads) counts. By default (`includeSubagents: false`),
-tokens and call counts cover the active conversation only with no child transcript I/O.
-Setting `includeSubagents: true` (in `vargus.jsonc` or your `--config` file) recursively
-folds `invoke_subagent` child and nested descendant transcripts' tokens, tools, agents
-and skills (resolving isolated-worktree children's custom skills against their own
-recorded workspaces, bounded at depth 8, 64 child transcripts and 400 ms per refresh); `swarm`
-and `run_workflow` child transcripts are excluded. Context, cache-hit percentage, output
+`swarm` `add`) and skill (`SKILL.md` reads) counts. By default (`includeSubagents: true`),
+VArgus recursively folds `invoke_subagent` child and nested descendant transcripts' tokens,
+tools, agents and skills (resolving isolated-worktree children's custom skills against their
+own recorded workspaces, bounded at depth 8, 64 child transcripts and 400 ms per refresh);
+`swarm` and `run_workflow` child transcripts are excluded. Setting `includeSubagents: false`
+(in `vargus.jsonc` or your `--config` file) keeps tokens and call counts on the active
+conversation only with no child transcript I/O. Context, cache-hit percentage, output
 decode speed (`t/s`), session age, model, effort, quotas and VCS always remain on the
 active conversation.
 The cache-hit percentage in parentheses comes from the active conversation’s latest request in

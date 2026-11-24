@@ -6,13 +6,13 @@ export type PalettePolarity = 'dark' | 'light'
 //   - 5-step data-first tonal ramp (`text > calm > label > detail > sep`) in one theme hue family:
 //       text    location anchors (bold folder; plain repo and branch/ref names)
 //       calm    under-threshold readings (effort at/above default, <80% context/limits,
-//               <1M tokens or <4M with includeSubagents, <12h session)
+//               <4M tokens by default or <1M with includeSubagents: false, <12h session)
 //       label   `xxx:` prefixes, model name, detached `@`, call counts and stale marker (carries signature theme colour)
 //       detail  secondary parentheticals (`(carbon)`, `(fast)`, reset times, cache/speed, `(wt:x)`)
 //       sep     the ` | ` separator (including before the stale marker)
 //   - 1 vivid alarm (`alert`, highest chroma, >=2x `del` and >=1.5x `label` chroma):
-//       alert   over-threshold/error states (low effort, >=80% context/limits, >=1M
-//               tokens or >=4M with includeSubagents, >=12h session, `[API 429]`/`[API AUTH]`/`[API ERR]`, git in-progress ops)
+//       alert   over-threshold/error states (low effort, >=80% context/limits, >=4M
+//               tokens by default or >=1M with includeSubagents: false, >=12h session, `[API 429]`/`[API AUTH]`/`[API ERR]`, git in-progress ops)
 //   - 3 balanced muted VCS tokens (between `label` and `detail`):
 //       add / del / track   git/svn: staged (svn: added) and ahead / conflicts, modified and behind / untracked
 export const PALETTES: Record<string, Record<TokenName, string>> = {

@@ -82,7 +82,7 @@ function sampleValues(isWsl: boolean): { calm: Values; alert: Values } {
         cacheHitPercent: 99.4,
         tokensPerSecond: 48,
         startedAt: -(12 * 60 + 30) * 60_000,
-        counts: { tokens: 1_200_000, ...baseCounts },
+        counts: { tokens: 4_200_000, ...baseCounts },
       },
       limits: [
         'rate_limited',

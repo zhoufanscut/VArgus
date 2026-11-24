@@ -114,8 +114,9 @@ own display rules.
 [Shared defaults](src/options.ts) and the Claude manifest agree on picker keys
 and defaults. Both follow the shared key order in [the sample](vargus.sample.jsonc).
 The shared `callCounts` setting controls the tool, agent and skill counts together.
-The shared `includeSubagents` setting defaults to `false`, keeping token and call
-counts on the active conversation unless enabled.
+The shared `includeSubagents` setting defaults to `true`, folding attributable
+subagent tokens and call counts into session totals; setting it to `false` keeps
+counts on the active conversation only.
 Codex's [startup hook option](src/hosts/codex/options.ts) defaults on.
 Explicit activation or hook installation enables its tmux integration.
 
@@ -243,9 +244,9 @@ Element-to-token mappings follow the [visual grammar](#visual-grammar).
 Readings with a threshold use two flat tiers (`calm` / `alert`):
 
 - `ctx` and rate-limit percentages flip at 80%.
-- `tokens` flips at `1.00M` (999,950 tokens, matching its `k`/`M` switch) by
-  default and at `4.00M` (3,995,000 tokens, matching two-decimal `M` rounding
-  from `3.99M` to `4.00M`) when `includeSubagents` is `true`.
+- `tokens` flips at `4.00M` (3,995,000 tokens, matching two-decimal `M` rounding
+  from `3.99M` to `4.00M`) by default (`includeSubagents: true`) and at `1.00M`
+  (999,950 tokens, matching its `k`/`M` switch) when `includeSubagents` is `false`.
 - `session` age flips at 12 hours.
 - Effort uses `calm` at or above the model's default and `alert` below it. An
   absent default uses `high`. An exact match to the baseline is `calm` even for
@@ -371,10 +372,10 @@ attributed agent and skill counts; later polls still drain any complete buffered
 records even when file size has not changed. The row only replays data the
 engine saved.
 
-With `includeSubagents: false` (default), or when both `tokens` and `callCounts`
+With `includeSubagents: false`, or when both `tokens` and `callCounts`
 are `false`, the worker polls only the displayed thread and skips `.jsonl.zst`
 discovery so background compressed children are not decompressed. With
-`includeSubagents: true` (and `tokens` or `callCounts` enabled), the worker also
+`includeSubagents: true` (default) and `tokens` or `callCounts` enabled, the worker also
 discovers and polls saved descendant threads of the viewed thread
 (`Views.descendants`), including zstd-compressed `.jsonl.zst` rollouts produced
 by Codex compression, without creating per-descendant VCS pollers or resolving
@@ -482,10 +483,9 @@ the saved selection.
 Tools count completed visible items and exclude user-shell controls. Agents
 count recorded starts. [Skill counting](src/hosts/codex/skills.ts) uses marked
 instruction injections or successful recognised reads of catalogued
-`SKILL.md` files, deduplicated by path and turn. Parent and child counts stay
-separate by default; with `includeSubagents: true`, the viewed thread sums
-attributable descendants (Main shows the whole saved family; a child view shows
-its own subtree).
+`SKILL.md` files, deduplicated by path and turn. By default (`includeSubagents: true`), the viewed thread sums attributable
+descendants (Main shows the whole saved family; a child view shows its own
+subtree); `includeSubagents: false` keeps parent and child counts separate.
 
 ### Opt-in tmux row
 
@@ -581,10 +581,10 @@ For a native assistant edit that copies usage,
 registration writes a receipt naming the new entry. Older unobserved copies
 remain in the total, and equal usage amounts alone do not identify copies.
 
-With `includeSubagents: false` (default), or when both `tokens` and `callCounts`
+With `includeSubagents: false`, or when both `tokens` and `callCounts`
 are `false`, OmO performs no task-store disk I/O and keeps tokens, tools and
-agents on the main session. With `includeSubagents: true` (and `tokens` or
-`callCounts` enabled), [subagents.ts](src/hosts/omo/subagents.ts) asynchronously
+agents on the main session. With `includeSubagents: true` (default) and `tokens` or
+`callCounts` enabled, [subagents.ts](src/hosts/omo/subagents.ts) asynchronously
 reads OmO's on-disk `senpi-task` store (`tasks/*.json` for session-tree links and
 `children/<taskId>/sessions/<taskId>/*.jsonl` across live and revived runs).
 Store resolution mirrors OmO's config and state-directory rules: it reads user
@@ -703,9 +703,9 @@ outputs (such as `read_file` and `run_command`, which emit their own headers)
 do not produce false positives. Local `file://` `workspaceUris` entries are
 converted via `fileURLToPath` (capped at 16 unique local directories; non-file
 or malformed URIs are ignored without dropping `conversationId`).
-With `includeSubagents: false` (default), or when both `tokens` and `callCounts`
+With `includeSubagents: false`, or when both `tokens` and `callCounts`
 are `false`, Antigravity performs no child transcript I/O. With
-`includeSubagents: true` (and `tokens` or `callCounts` enabled),
+`includeSubagents: true` (default) and `tokens` or `callCounts` enabled,
 [subagents.ts](src/hosts/antigravity/subagents.ts) extracts the normalized
 `brain` directory directly containing the parent's
 `<id>/.system_generated/logs/transcript.jsonl`, resolves declared skill roots
@@ -817,11 +817,11 @@ state shapes. [Mod reference](https://code.claude.com/docs/en/plugins/mods/refer
   (`e.agentId` absent) and in-process subagent (`e.agentId` present) counts
   separately in memory and in `$.state` (top-level main fields plus optional
   nested `subagents` inside `counts`, omitted when all four subagent counts are
-  zero). With `includeSubagents: false`
-  (default), the row displays main-loop counts only; with
-  `includeSubagents: true`, [register.ts](src/hosts/claude/register.ts) adds
-  the recorded subagent counts at render time so toggling the option reflects
-  prior session activity immediately without mutating main counts.
+  zero). With `includeSubagents: true` (default),
+  [register.ts](src/hosts/claude/register.ts) adds the recorded subagent counts
+  at render time; with `includeSubagents: false`, the row displays main-loop
+  counts only, so toggling the option reflects prior session activity
+  immediately without mutating main counts.
   The cache reading follows completed main-loop requests. Claude Code 2.1.323's
   `ModelUsage` describes `input_tokens` as “the part of the
   prompt neither read from nor written to the prompt cache.” The denominator
@@ -982,10 +982,10 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   `views-engine` `includeSubagents` fixture (Linux, Codex 0.171.0, tmux 3.5a)
   exercised a parent spawning both a paginated forked child (`fork_turns: "all"`)
   and a mid child spawning a tool/skill-running grandchild, verifying subtree
-  folding on Main (`token:28.8k(94.3%)`, `🔧1 🤖3 ⚡1`), `/root/mid`
-  (`token:14.4k(0%)`, `🔧1 🤖1 ⚡1`), and `/root/forked` (`token:10.2k(0%)`),
-  plus reload back to `includeSubagents: false` (`token:4.2k(94.3%)` / `🤖2` on
-  Main and `token:8.2k(0%)` / `🤖1` on `/root/mid`), and a separate stdio
+  folding under default `includeSubagents: true` on Main (`token:28.8k(94.3%)`,
+  `🔧1 🤖3 ⚡1`), `/root/mid` (`token:14.4k(0%)`, `🔧1 🤖1 ⚡1`), and `/root/forked`
+  (`token:10.2k(0%)`), plus reload to `includeSubagents: false` (`token:4.2k(94.3%)`
+  / `🤖2` on Main and `token:8.2k(0%)` / `🤖1` on `/root/mid`), and a separate stdio
   `rollout/compress` fixture (Linux, Codex 0.171.0) verified that a 15-day-old
   child compressed to `.jsonl.zst` preserves the 9,000-token total across both
   live reader transition and fresh discovery while keeping folding-off at 2,000

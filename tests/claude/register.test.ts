@@ -325,10 +325,10 @@ describe('register: the line as the host sets it up', () => {
     const w = world(on, clock, { HOME: '/home/u', CLAUDE_CONFIG_DIR: profile, NO_COLOR: '1' }, false)
     const provider = { plugin: 'vargus@vargus', tier: 'user' } as const
     const row: ConfigRow = {
-      key: 'vargus.includeSubagents', label: 'Include subagents', kind: 'boolean', value: false,
+      key: 'vargus.includeSubagents', label: 'Include subagents', kind: 'boolean', value: true,
       provider, isLocked: false,
     }
-    let file = '{"includeSubagents":true}\n'
+    let file = '{"includeSubagents":false}\n'
     let staged = ''
     let backup: string | undefined
     const edits: string[] = []
@@ -375,36 +375,36 @@ describe('register: the line as the host sets it up', () => {
     await step($)
     await step($, { agentId: 'a1' })
     await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls', agentId: 'a1' } as never)
+    const mainOnly = await line(clock, w)
+    expect(mainOnly).toContain('token:3(37.5%) | session:0m')
+    expect(mainOnly).not.toContain('🔧')
+
+    // Opening /config copies the shared false choice into the picker.
+    await command('config')
+    expect(row.value).toBe(false)
+    expect(edits).toEqual(['vargus.includeSubagents=false'])
+
+    // Setting true in the picker (matching given default true) updates vargus.jsonc and the running row.
+    const setTrue = {
+      key: row.key, previous: false, value: true, provider: row.provider, origin: { kind: 'composer' },
+    } as const
+    expect(await $.config.set(setTrue)).toEqual({ value: true })
+    expect(file).toBe('{"includeSubagents":true}\n')
+    expect(operations).toEqual(['prepare', 'commit'])
     expect(await line(clock, w)).toContain('token:6(37.5%) | session:0m | 🔧1')
 
-    // Opening /config copies the shared true choice into the picker.
-    await command('config')
-    expect(row.value).toBe(true)
-    expect(edits).toEqual(['vargus.includeSubagents=true'])
-
-    // Setting false in the picker (matching given default false) updates vargus.jsonc and the running row.
-    const setFalse = {
-      key: row.key, previous: true, value: false, provider: row.provider, origin: { kind: 'composer' },
-    } as const
-    expect(await $.config.set(setFalse)).toEqual({ value: false })
-    expect(file).toBe('{"includeSubagents":false}\n')
-    expect(operations).toEqual(['prepare', 'commit'])
-    const afterFalse = await line(clock, w)
-    expect(afterFalse).toContain('token:3(37.5%) | session:0m')
-    expect(afterFalse).not.toContain('🔧')
-
-    // Removing the key from vargus.jsonc and reloading/opening /config keeps the saved native false.
+    // Removing the key from vargus.jsonc and reloading/opening /config keeps the saved native true.
     file = '{}\n'
     await command('reload-plugins')
     await command('config')
-    expect(row.value).toBe(false)
+    expect(row.value).toBe(true)
   })
 
-  test('token alert threshold flips from 1M to 4M when includeSubagents is enabled', NO_VCS, async ($, on) => {
+  test('token alert threshold flips from 4M (default) to 1M when includeSubagents is disabled', NO_VCS, async ($, on) => {
     const { clock, w, rows, state, command } = sharedPicker($, on)
     const provider = { plugin: 'vargus@vargus', tier: 'user' } as const
     rows.push({
-      key: 'vargus.includeSubagents', label: 'Include subagents', kind: 'boolean', value: false,
+      key: 'vargus.includeSubagents', label: 'Include subagents', kind: 'boolean', value: true,
       provider, isLocked: false,
     })
     const theme = makeTheme('graphite', false)
@@ -414,9 +414,14 @@ describe('register: the line as the host sets it up', () => {
     await $.session.start(start)
     w.stepUsage = { input_tokens: 1_500_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'm' }
     await step($)
+    expect(await line(clock, w)).toContain(tokenText('calm', '1.50M'))
+
+    // Disabling includeSubagents narrows the alert threshold to 1.00M (999,950) immediately.
+    state.file = '{"includeSubagents":false}\n'
+    await command('reload-plugins')
     expect(await line(clock, w)).toContain(tokenText('alert', '1.50M'))
 
-    // Enabling includeSubagents expands the alert threshold to 4.00M (3,995,000) immediately.
+    // Re-enabling includeSubagents restores the 4.00M (3,995,000) alert threshold.
     state.file = '{"includeSubagents":true}\n'
     await command('reload-plugins')
     expect(await line(clock, w)).toContain(tokenText('calm', '1.50M'))

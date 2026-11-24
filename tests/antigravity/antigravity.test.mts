@@ -1861,28 +1861,28 @@ test('Antigravity includeSubagents folds recursive trees while keeping root metr
     ], baseTime + 7000)
 
     const now = baseTime + 10 * 60_000
-    // 1. Default includeSubagents: false -> root only (tokens: 5500, tools: 2, agents: 2, skills: 0), zero child cache files written.
-    const defaultLine = await renderAntigravityStatusLine(makePayload('idle'), {
-      home, noColor: true, cacheDir, now, givenOptions: baseOpts,
+    // 1. Explicit includeSubagents: false -> root only (tokens: 5500, tools: 2, agents: 2, skills: 0), zero child cache files written.
+    const mainOnlyLine = await renderAntigravityStatusLine(makePayload('idle'), {
+      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: false },
     })
     assert.equal(
-      defaultLine,
+      mainOnlyLine,
       '  ~/proj/demo | neon:high | ctx:12% | token:5.5k(80%, 100t/s) | session:10m | 🔧2 🤖2',
     )
     await assert.rejects(() => readFile(cachePath(cacheDir, 'transcript', childATr), 'utf8'))
 
-    // 2. includeSubagents: true with tokens:false & callCounts:false -> still skips all child transcript I/O.
+    // 2. Default includeSubagents: true with tokens:false & callCounts:false -> still skips all child transcript I/O.
     const hiddenCountsLine = await renderAntigravityStatusLine(makePayload('idle'), {
-      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: true, tokens: false, callCounts: false },
+      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, tokens: false, callCounts: false },
     })
     assert.equal(hiddenCountsLine, '  ~/proj/demo | neon:high | ctx:12% | session:10m')
     await assert.rejects(() => readFile(cachePath(cacheDir, 'transcript', childATr), 'utf8'))
 
-    // 3. includeSubagents: true -> folds root (5500,2,2,0) + childA (4000,3,1,1) + childB (2500,1,1,0) + grandC (2000,4,2,1)
+    // 3. Default includeSubagents: true -> folds root (5500,2,2,0) + childA (4000,3,1,1) + childB (2500,1,1,0) + grandC (2000,4,2,1)
     //    = tokens: 14.0k, tools: 10, agents: 6, skills: 2.
     //    ctx (12%), cache% (80%), t/s (100t/s), session age (10m) remain strictly root-only!
     const foldedLine = await renderAntigravityStatusLine(makePayload('idle'), {
-      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: true },
+      home, noColor: true, cacheDir, now, givenOptions: baseOpts,
     })
     assert.equal(
       foldedLine,
@@ -1891,16 +1891,16 @@ test('Antigravity includeSubagents folds recursive trees while keeping root metr
     // Verify root mutatingToolsSeen stays 0 even though childA and grandC ran mutating tools.
     assert.equal((await readTranscriptState(rootTr, cacheDir)).mutatingToolsSeen, 0)
 
-    // Asymmetric tokens / callCounts combinations with includeSubagents: true still fold the enabled counter.
+    // Asymmetric tokens / callCounts combinations with default includeSubagents: true still fold the enabled counter.
     const tokensOnlyFolded = await renderAntigravityStatusLine(makePayload('idle'), {
-      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: true, tokens: true, callCounts: false },
+      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, tokens: true, callCounts: false },
     })
     assert.equal(
       tokensOnlyFolded,
       '  ~/proj/demo | neon:high | ctx:12% | token:14.0k(80%, 100t/s) | session:10m',
     )
     const callsOnlyFolded = await renderAntigravityStatusLine(makePayload('idle'), {
-      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: true, tokens: false, callCounts: true },
+      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, tokens: false, callCounts: true },
     })
     assert.equal(
       callsOnlyFolded,
@@ -1908,10 +1908,10 @@ test('Antigravity includeSubagents folds recursive trees while keeping root metr
     )
 
     // Flipping back to includeSubagents: false immediately returns root-only counts (distinct row cache key).
-    const backToDefault = await renderAntigravityStatusLine(makePayload('idle'), {
+    const backToMainOnly = await renderAntigravityStatusLine(makePayload('idle'), {
       home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: false },
     })
-    assert.equal(backToDefault, defaultLine)
+    assert.equal(backToMainOnly, mainOnlyLine)
 
     // 4. Corrupt child cache isolation: damage childA's cache + append a line so childA throws on read.
     //    Parent row must still render cleanly WITHOUT `| ⌛stale`, folding healthy childB + grandC (via childB).
@@ -1920,7 +1920,7 @@ test('Antigravity includeSubagents folds recursive trees while keeping root metr
     await writeFile(childACache, JSON.stringify({ ...savedChildA, seenSkillsInTurn: 42 }))
     await appendFile(childATr, '{}\n')
     const isolatedLine = await renderAntigravityStatusLine(makePayload('idle'), {
-      home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: true },
+      home, noColor: true, cacheDir, now, givenOptions: baseOpts,
     })
     assert.doesNotMatch(isolatedLine, /stale/)
     // Root (5500,2,2,0) + childB (2500,1,1,0) + grandC (2000,4,2,1) = 10.0k, tools 7, agents 5, skills 1.
@@ -2106,21 +2106,21 @@ test('Antigravity includeSubagents resolves isolated worktree and multi-root chi
       assert.equal(offLine, '  token:100 | 🔧1 🤖1', `${label} folding off`)
       await assert.rejects(() => readFile(cachePath(cacheDir, 'transcript', childTr), 'utf8'))
 
-      // Folding on resolves the child skill in targetWs.
+      // Folding on by default resolves the child skill in targetWs.
       const foldedParent = await renderAntigravityStatusLine(parentPayload, {
-        home, appDataDir, cacheDir, noColor: true, givenOptions: { ...baseOpts, includeSubagents: true },
+        home, appDataDir, cacheDir, noColor: true, givenOptions: baseOpts,
       })
       assert.equal(foldedParent, '  token:130 | 🔧2 🤖1 ⚡1', `${label} folded parent`)
 
       // Direct child render with the warmed cache hits cache and shows 1 skill.
       const warmChild = await renderAntigravityStatusLine(childPayload, {
-        home, appDataDir, cacheDir, noColor: true, givenOptions: { ...baseOpts, includeSubagents: true },
+        home, appDataDir, cacheDir, noColor: true, givenOptions: baseOpts,
       })
       assert.equal(warmChild, '  token:30 | 🔧1 ⚡1', `${label} warm child`)
 
       // Direct child render with a fresh cache agrees.
       const freshChild = await renderAntigravityStatusLine(childPayload, {
-        home, appDataDir, cacheDir: freshCacheDir, noColor: true, givenOptions: { ...baseOpts, includeSubagents: true },
+        home, appDataDir, cacheDir: freshCacheDir, noColor: true, givenOptions: baseOpts,
       })
       assert.equal(freshChild, '  token:30 | 🔧1 ⚡1', `${label} fresh child`)
     }
@@ -2340,7 +2340,7 @@ test('Antigravity includeSubagents resolves isolated worktree and multi-root chi
   }
 })
 
-test('Antigravity token alert threshold switches from 1M to 4M under includeSubagents without row-cache bleed', async () => {
+test('Antigravity token alert threshold switches from 4M (default) to 1M (includeSubagents: false) without row-cache bleed', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vargus-agy-token-alert-'))
   try {
     const home = join(root, 'home')
@@ -2358,25 +2358,25 @@ test('Antigravity token alert threshold switches from 1M to 4M under includeSuba
     const baseOpts = { folder: false, model: false, rateLimits: false, context: false, session: false, callCounts: false, repo: false, branch: false, status: false }
     const payload: AntigravityPayload = { conversation_id: 'conv-alert', transcript_path: transcriptPath, cwd: root }
 
+    const subCalmRow = await renderAntigravityStatusLine(payload, {
+      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: baseOpts,
+    })
+    assert.equal(subCalmRow, '  ' + colored.paint('label', 'token:') + colored.paint('calm', '1.50M'))
+
     const mainRow = await renderAntigravityStatusLine(payload, {
       home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: false },
     })
     assert.equal(mainRow, '  ' + colored.paint('label', 'token:') + colored.paint('alert', '1.50M'))
 
-    const subCalmRow = await renderAntigravityStatusLine(payload, {
-      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: true },
-    })
-    assert.equal(subCalmRow, '  ' + colored.paint('label', 'token:') + colored.paint('calm', '1.50M'))
-
     // Corrupt the transcript cache and force an incremental read failure: each mode must
-    // fall back to its own cached row (alert vs calm) without row-cache bleed.
+    // fall back to its own cached row (calm vs alert) without row-cache bleed.
     const transcriptCache = cachePath(cacheDir, 'transcript', transcriptPath)
     const savedTranscriptCache = await readFile(transcriptCache, 'utf8')
     await writeFile(transcriptCache, JSON.stringify({ ...JSON.parse(savedTranscriptCache), seenSkillsInTurn: 42 }))
     await appendFile(transcriptPath, '{}\n')
     const staleSuffix = colored.paint('sep', ' | ') + colored.paint('label', '⌛stale')
     const subStaleRow = await renderAntigravityStatusLine(payload, {
-      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: true },
+      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: baseOpts,
     })
     assert.equal(subStaleRow, subCalmRow + staleSuffix)
     const mainStaleRow = await renderAntigravityStatusLine(payload, {
@@ -2390,7 +2390,7 @@ test('Antigravity token alert threshold switches from 1M to 4M under includeSuba
       step_index: 2, type: 'PLANNER_RESPONSE', created_at: '2026-11-24T00:00:02Z', input_tokens: 2_494_999, output_tokens: 0,
     }) + '\n')
     const subBorderCalmRow = await renderAntigravityStatusLine(payload, {
-      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: true },
+      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: baseOpts,
     })
     assert.equal(subBorderCalmRow, '  ' + colored.paint('label', 'token:') + colored.paint('calm', '3.99M'))
 
@@ -2398,7 +2398,7 @@ test('Antigravity token alert threshold switches from 1M to 4M under includeSuba
       step_index: 3, type: 'PLANNER_RESPONSE', created_at: '2026-11-24T00:00:03Z', input_tokens: 1, output_tokens: 0,
     }) + '\n')
     const subAlertRow = await renderAntigravityStatusLine(payload, {
-      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: true },
+      home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: baseOpts,
     })
     assert.equal(subAlertRow, '  ' + colored.paint('label', 'token:') + colored.paint('alert', '4.00M'))
   } finally {
