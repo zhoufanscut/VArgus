@@ -1015,6 +1015,11 @@ test('OmoSubagents excludes admission-exhausted chains, carries refused run fenc
   await rm(later)
   const expiredAgain = await reader.refresh(project, 'root', 50_000)
   assert.deepEqual([...expiredAgain.skills.get(id)!].sort(), ['kept', 'review'])
+  assert.deepEqual(expiredAgain.refusedTasks.get(id), [
+    { runStartEpoch: 1, runEpoch: 1 },
+    { runStartEpoch: 3, runEpoch: 3 },
+  ])
+  // Earlier snapshot's refusal list must stay immutable when later runs are recorded.
   assert.deepEqual(expired.refusedTasks.get(id), [{ runStartEpoch: 1, runEpoch: 1 }])
 
   // Subsequent evidence of a launch corrects epoch 3 alone. Epoch 1's skill stays excluded.
@@ -1022,8 +1027,20 @@ test('OmoSubagents excludes admission-exhausted chains, carries refused run fenc
     run_start_epoch: 3, notification: { run_epoch: 3 } })
   const corrected = await reader.refresh(project, 'root', 60_000)
   assert.deepEqual([...corrected.skills.get(id)!].sort(), ['kept', 'lint', 'review'])
+  assert.deepEqual(corrected.refusedTasks.get(id), [{ runStartEpoch: 1, runEpoch: 1 }])
+
+  // Switching session, cwd, or task store resets remembered refusal ranges.
+  assert.equal((await reader.refresh(project, 'other-session', 70_000)).refusedTasks.size, 0)
+  const reloaded = await reader.refresh(project, 'root', 80_000)
+  assert.equal(reloaded.refusedTasks.has(id), false)
+  assert.equal(reloaded.refusedTasks.has('st_00000001'), true)
+
+  const otherProject = join(root, 'other-proj')
+  await mkdir(otherProject, { recursive: true })
+  assert.equal((await reader.refresh(otherProject, 'root', 90_000)).refusedTasks.size, 0)
+  assert.equal((await reader.refresh(project, 'root', 100_000)).refusedTasks.has('st_00000001'), true)
 
   await mkdir(join(project, '.omo'))
   await writeFile(join(project, '.omo', 'omo.json'), JSON.stringify({ task: { state_dir: join(root, 'other-store') } }))
-  assert.equal((await reader.refresh(project, 'root', 70_000)).refusedTasks.size, 0)
+  assert.equal((await reader.refresh(project, 'root', 110_000)).refusedTasks.size, 0)
 })

@@ -665,3 +665,33 @@ test('reconcileOmoSpawns cancels matching provisional pending runs while retaini
     assert.equal(reconciled.skills.has(dropped), false, `expected ${dropped} skills dropped`)
   }
 })
+
+test('reconcileOmoSpawns handles multiple refused run ranges per task while keeping unrefused runs', () => {
+  const h = host([
+    result('m1', 'c1', 'task', {
+      mode: 'spawn',
+      items: [
+        { task_id: 'st_00000011', status: 'pending', skills: { resolved: ['unepoched-dropped'] } },
+        { task_id: 'st_00000011', run_epoch: 0, status: 'pending', skills: { resolved: ['r0-dropped'] } },
+        { task_id: 'st_00000011', run_epoch: 1, status: 'pending', skills: { resolved: ['r1-kept'] } },
+        { task_id: 'st_00000011', run_epoch: 2, status: 'running', skills: { resolved: ['r2-dropped'] } },
+        { task_id: 'st_00000011', run_epoch: 3, status: 'paused', skills: { resolved: ['r3-dropped'] } },
+        { task_id: 'st_00000011', run_epoch: 4, status: 'pending', skills: { resolved: ['r4-kept'] } },
+        { task_id: 'st_00000012', run_epoch: 0, status: 'pending', skills: { resolved: ['all-dropped-0'] } },
+        { task_id: 'st_00000012', run_epoch: 2, status: 'error', skills: { resolved: ['all-dropped-2'] } },
+        { task_id: 'st_00000013', status: 'pending', skills: { resolved: ['unepoched-kept'] } },
+      ],
+    }),
+  ])
+
+  const reconciled = reconcileOmoSpawns(collectOmoSpawns(h.ctx), new Map([
+    ['st_00000011', [{ runStartEpoch: 0, runEpoch: 0 }, { runStartEpoch: 2, runEpoch: 3 }]],
+    ['st_00000012', [{ runStartEpoch: 0, runEpoch: 1 }, { runStartEpoch: 2, runEpoch: 2 }]],
+    ['st_00000013', [{ runStartEpoch: 1, runEpoch: 1 }, { runStartEpoch: 3, runEpoch: 3 }]],
+  ]))
+
+  assert.deepEqual([...reconciled.agents].sort(), ['st_00000011', 'st_00000013'])
+  assert.deepEqual([...reconciled.skills.get('st_00000011')!].sort(), ['r1-kept', 'r4-kept'])
+  assert.equal(reconciled.skills.has('st_00000012'), false)
+  assert.deepEqual([...reconciled.skills.get('st_00000013')!], ['unepoched-kept'])
+})

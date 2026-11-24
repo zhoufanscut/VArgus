@@ -153,8 +153,9 @@ excluding missing skills) across direct children, nested
 descendants, revived runs and DAG/team/workpool tasks, excluding confirmed
 pre-launch refusals (including fallback-chain admission refusals and provisional
 spawn receipts whose store record later confirms refusal for that run) from both
-agent and skill counts. An open widget remembers a confirmed refusal after OmO
-expires the task record. Cache-hit percentage, output
+agent and skill counts. An open widget remembers a confirmed refusal in memory
+after OmO expires the task record (cleared on `/reload`, `/resume`, or
+reconfiguring `/vargus`). Cache-hit percentage, output
 speed (`t/s`), context, model, effort, session time, quotas and VCS always remain on
 the main session. Other skill-loading paths (such as `SKILL.md` reads) remain
 uncounted, expunged tasks' tokens, tools and nested child skill receipts drop once
