@@ -13,12 +13,14 @@ const HELP = `Usage:
 ${INSTALL_COMMANDS}
 ${REMOVE_COMMANDS}
   vargus statusline [--theme NAME] [--config FILE]
+  vargus themes [NAME]
   vargus on|off|status|reload [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
   vargus hook session-start|prompt [--config FILE] [--pane %ID] [--socket PATH]
   vargus tmux-reset
 
 ${INSTALL_DETAILS}
 Antigravity CLI runs \`vargus statusline\` from PATH and pipes session JSON on stdin.
+Run \`vargus themes [NAME]\` to preview bundled colour themes in your terminal.
 
 The tmux row is opt-in for Codex. Standalone on/off hide/restore Codex's saved footer
 through tmux /statusline commands. Off removes the row; inactive views restore
@@ -37,6 +39,7 @@ export async function main(argv: string[]): Promise<number> {
   const [command, host] = argv
   if (command === undefined || command === '--help') { console.log(HELP); return 0 }
   if (command === 'statusline') return (await import('./cli/antigravity.ts')).statusline(argv.slice(1))
+  if (command === 'themes') return (await import('./cli/themes.ts')).themes(argv.slice(1))
   if (command === 'install' || command === 'remove') {
     const usage = `Usage:\n${command === 'install' ? INSTALL_COMMANDS : REMOVE_COMMANDS}`
     if (host === '--help' && argv.length === 2) {

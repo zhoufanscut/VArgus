@@ -202,7 +202,9 @@ The row uses one compact layout across all four hosts:
 Each palette in [palettes.ts](src/theme/palettes.ts) defines 9 tokens: `text`,
 `label`, `faint`, `sep`, `calm`, `alert`, `add`, `del` and `track`.
 The palette registry uses own-property lookup and falls back for unknown
-names. When a host sees a non-empty `NO_COLOR`, the theme returns plain text. External
+names. When a host sees a non-empty `NO_COLOR`, the theme returns plain text. Run
+`vargus themes [NAME]` ([themes.ts](src/cli/themes.ts)) to preview bundled palettes
+in the terminal through the shared renderer, respecting `NO_COLOR`. External
 text passes through [control-character sanitization](src/render/text.ts) before
 styling. The tmux output translates the renderer's styles without recursively
 expanding content from paths or branches.
