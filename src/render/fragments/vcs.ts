@@ -3,7 +3,7 @@ import { cleanText } from '../text.ts'
 
 // 9-11. repo, branch, working-tree status, for git or svn (DESIGN,
 // "Fragments"): prefixes and `@` in `label`, repo and branch names in plain
-// `text` (no bold), worktree in `faint`, an operation in progress in `alert`,
+// `text` (no bold), worktree in `detail`, an operation in progress in `alert`,
 // then `add` / `del` / `track` for all status counts (including conflicts in `del`).
 
 // repo:VArgus
@@ -18,7 +18,7 @@ export const branch: Fragment = f => {
   const head = branchName(f)
   if (!head) return null
   const wt = v.vcs.kind === 'git' && v.vcs.worktree
-    ? t.paint('faint', `${l.worktree}${cleanText(v.vcs.worktree)})`)
+    ? t.paint('detail', `${l.worktree}${cleanText(v.vcs.worktree)})`)
     : ''
   return `${t.paint('label', `${l.branch}:`)}${head}${wt}`
 }

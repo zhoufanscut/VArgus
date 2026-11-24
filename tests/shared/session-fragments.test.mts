@@ -141,11 +141,11 @@ describe('tokens', () => {
     assert.equal(tokens(input({ counts: counts({ tokens: 4_500_000 }) }, { includeSubagents: true }, { color: true })), t.paint('label', 'token:') + t.paint(alert, '4.50M'))
     assert.equal(
       tokens(input({ counts: counts({ tokens: 3_994_999 }), cacheHitPercent: 95, tokensPerSecond: 48 }, { includeSubagents: true }, { color: true })),
-      t.paint('label', 'token:') + t.paint(calm, '3.99M') + t.paint('faint', '(95%, 48t/s)'),
+      t.paint('label', 'token:') + t.paint(calm, '3.99M') + t.paint('detail', '(95%, 48t/s)'),
     )
     assert.equal(
       tokens(input({ counts: counts({ tokens: 3_995_000 }), cacheHitPercent: 95, tokensPerSecond: 48 }, { includeSubagents: true }, { color: true })),
-      t.paint('label', 'token:') + t.paint(alert, '4.00M') + t.paint('faint', '(95%, 48t/s)'),
+      t.paint('label', 'token:') + t.paint(alert, '4.00M') + t.paint('detail', '(95%, 48t/s)'),
     )
     assert.equal(tokens(input({}, { includeSubagents: true }, { color: true })), null)
   })
@@ -177,7 +177,7 @@ describe('tokens', () => {
     assert.equal(tokens(input({ counts: total, cacheHitPercent: 99.4, tokensPerSecond: 48.4 })), 'token:69.5k(99.4%, 48t/s)')
     assert.equal(
       tokens(input({ counts: total, cacheHitPercent: 99.4, tokensPerSecond: 48.4 }, {}, { color: true })),
-      t.paint('label', 'token:') + t.paint(calm, '69.5k') + t.paint('faint', '(99.4%, 48t/s)'),
+      t.paint('label', 'token:') + t.paint(calm, '69.5k') + t.paint('detail', '(99.4%, 48t/s)'),
     )
     assert.equal(tokens(input({ counts: total, cacheHitPercent: 99.4, tokensPerSecond: 0.04 })), 'token:69.5k(99.4%)')
   })
@@ -201,11 +201,11 @@ describe('session time', () => {
 describe('call counts', () => {
   const c = counts({ tools: 73, agents: 2, skills: 1 })
 
-  test('emoji, zeros left out, all zero hidden; numbers in the label tone', () => {
+  test('emoji, zeros left out, all zero hidden; icons and numbers in the label tone', () => {
     assert.equal(calls(input({ counts: c })), '🔧73 🤖2 ⚡1')
     assert.equal(calls(input({ counts: counts({ tools: 5, skills: 2 }) })), '🔧5 ⚡2')
     assert.equal(calls(input({})), null)
-    assert.equal(calls(input({ counts: counts({ tools: 1 }) }, {}, { color: true })), '🔧' + t.paint('label', '1'))
+    assert.equal(calls(input({ counts: counts({ tools: 1 }) }, {}, { color: true })), t.paint('label', '🔧1'))
   })
 
   test('text on WSL: T:73 A:2 S:1 painted in label', () => {

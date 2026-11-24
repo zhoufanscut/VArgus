@@ -83,8 +83,8 @@ test('Fast mode stays beside the model when effort is hidden or unavailable', ()
   assert.equal(model(codexInput(v)), 'sol:max(fast)')
   assert.equal(model(codexInput(v, { ...defaults, effort: false })), 'sol(fast)')
   const t = makeTheme('graphite', false)
-  assert.equal(model(codexInput(v, defaults, t)), t.paint('label', 'sol:') + t.paint(t.rgb.calm, 'max') + t.paint('faint', '(fast)'))
-  assert.equal(model(codexInput(v, { ...defaults, effort: false }, t)), t.paint('label', 'sol') + t.paint('faint', '(fast)'))
+  assert.equal(model(codexInput(v, defaults, t)), t.paint('label', 'sol:') + t.paint(t.rgb.calm, 'max') + t.paint('detail', '(fast)'))
+  assert.equal(model(codexInput(v, { ...defaults, effort: false }, t)), t.paint('label', 'sol') + t.paint('detail', '(fast)'))
   v.session.effort = undefined
   assert.equal(model(codexInput(v)), 'sol(fast)')
   v.session.fast = false
@@ -155,7 +155,7 @@ test('OmO speed suffixes follow effort and stay visible when effort is hidden', 
   v.session.fast = true
   const t = makeTheme('graphite', false)
   assert.equal(model({ ...input(), t }),
-    t.paint('label', 'sol:') + t.paint(t.rgb.calm, 'high') + t.paint('faint', '(ultrafast)'))
+    t.paint('label', 'sol:') + t.paint(t.rgb.calm, 'high') + t.paint('detail', '(ultrafast)'))
   v.session.fast = false
   for (const [display, id, name] of [
     [codexDisplay, 'gpt-6.1-sol-fast', 'gpt-6.1-sol-fast'],

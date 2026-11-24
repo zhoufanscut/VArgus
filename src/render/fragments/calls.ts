@@ -4,7 +4,7 @@ import type { Fragment } from '../../core/types.ts'
 // emoji wrong and break the row (DESIGN, "Config"; VantageHUD's
 // elements/call-counts.js, oh-my-claudecode#710). A zero count is left out;
 // all zero: hidden. The emoji are the same in every language; the text marks
-// are labels. Numbers in the label tone, so they recede.
+// are labels. Painted together in the label tone, so they recede.
 const ICONS = { tool: '🔧', agent: '🤖', skill: '⚡' } as const
 
 export const calls: Fragment = ({ v, display, l, t }) => {
@@ -17,6 +17,6 @@ export const calls: Fragment = ({ v, display, l, t }) => {
   ]
   const parts = items
     .filter(([, n]) => n > 0)
-    .map(([kind, n]) => (text ? t.paint('label', `${l[kind]}:${n}`) : ICONS[kind] + t.paint('label', String(n))))
+    .map(([kind, n]) => t.paint('label', text ? `${l[kind]}:${n}` : `${ICONS[kind]}${n}`))
   return parts.length ? parts.join(' ') : null
 }

@@ -10,7 +10,7 @@ import type { VcsValues } from './vcs.ts'
 export type Rgb = readonly [number, number, number]
 
 export type TokenName =
-  | 'text' | 'label' | 'faint' | 'sep' | 'calm' | 'alert' | 'add' | 'del' | 'track'
+  | 'text' | 'label' | 'detail' | 'sep' | 'calm' | 'alert' | 'add' | 'del' | 'track'
 
 // A resolved palette and the only way colour codes enter the line
 // (DESIGN, "Colours"): with NO_COLOR every call returns its text unchanged.

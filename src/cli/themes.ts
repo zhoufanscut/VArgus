@@ -10,7 +10,7 @@ import { DEFAULT_THEME, makeTheme } from '../theme/index.ts'
 import { PALETTES } from '../theme/palettes.ts'
 
 const TOKEN_ORDER: readonly TokenName[] = [
-  'text', 'label', 'calm', 'faint', 'sep', 'alert', 'add', 'del', 'track',
+  'text', 'calm', 'label', 'detail', 'sep', 'alert', 'add', 'del', 'track',
 ]
 const THEME_NAMES = Object.keys(PALETTES)
 

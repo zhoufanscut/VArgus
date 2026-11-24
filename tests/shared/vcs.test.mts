@@ -157,7 +157,7 @@ describe('vcs fragments', () => {
     assert.equal(branch(input({ kind: 'svn', branch: 'T' }, marked)), '⟦branch⟧:T')
   })
 
-  test('colours: bold text for folder, plain text for repo/branch, faint worktree, alert git ops, del for conflicts', () => {
+  test('colours: bold text for folder, plain text for repo/branch, detail worktree, alert git ops, del for conflicts', () => {
     const tag: Theme = {
       ...makeTheme('graphite', true),
       paint: (c, s) => `<${String(c)}>${s}</>`,
@@ -167,14 +167,14 @@ describe('vcs fragments', () => {
     const f = input({ kind: 'git', repo: 'R', branch: 'B', worktree: 'W', counts: all }, en, tag)
     assert.equal(folder(f), '<b><text>/w</></b>')
     assert.equal(repo(f), '<label>repo:</><text>R</>')
-    assert.equal(branch(f), '<label>branch:</><text>B</><faint>(wt:W)</>')
+    assert.equal(branch(f), '<label>branch:</><text>B</><detail>(wt:W)</>')
     assert.equal(status(f), '<del>✗1</> <add>+1</> <del>!1</> <track>?1</> <add>⇡1</> <del>⇣1</>')
     const d = input({ kind: 'git', detached: { name: 'N', onBranch: false, operation: 'gitMerge', progress: '' } },
       en, tag)
     assert.equal(branch(d), '<label>branch:</><label>@</><text>N</><alert>(merge)</>')
     const combined = input({ kind: 'git', worktree: 'w', detached: { name: 'feat', onBranch: true, operation: 'gitRebase', progress: '2/3' } },
       en, tag)
-    assert.equal(branch(combined), '<label>branch:</><text>feat</><alert>(rebase 2/3)</><faint>(wt:w)</>')
+    assert.equal(branch(combined), '<label>branch:</><text>feat</><alert>(rebase 2/3)</><detail>(wt:w)</>')
   })
 })
 

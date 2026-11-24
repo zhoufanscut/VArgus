@@ -79,7 +79,7 @@ can still exceed the threshold. At 16 columns `~/projects/payments/api` folds.
 The 24-column default keeps that 23-column path intact.
 
 The [token fragment](src/render/fragments/tokens.ts) keeps the session's token
-total and appends a faint parenthesized suffix with the latest request's
+total and appends a `detail` parenthesized suffix with the latest request's
 cache-read share of prompt input and its output speed (`t/s`), separated by `, `
 when both are present.
 Cache-hit share rounds to one decimal place with trailing zeros omitted, and a
@@ -105,8 +105,7 @@ with no text suffixes and defaults unknown context readings to `ctx:0%` across
 all hosts.
 
 A whole-row freshness warning appends ` | ⌛stale` (` | !:stale` on WSL) to the
-last available readings, using `sep` for the divider and `label` for the text
-(leaving `⌛` unstyled). The [formatter](src/render/freshness.ts) drops trailing
+last available readings, using `sep` for the divider and `label` for the marker and text. The [formatter](src/render/freshness.ts) drops trailing
 readings when needed to fit the warning. Missing individual metrics retain their
 own display rules.
 
@@ -181,7 +180,7 @@ The row uses one compact layout across all four hosts:
 - **Parentheticals**: attach directly to their value with no leading space
   (`opus:high(fast)`, `orchestrator(carbon)`, `5h:4%(4h37m)`,
   `token:69.5k(99.4%, 48t/s)`, `branch:main(wt:x)`,
-  `branch:feat(rebase 2/3)(wt:w)`). Multiple `faint` items in one suffix join
+  `branch:feat(rebase 2/3)(wt:w)`). Multiple `detail` items in one suffix join
   with `, ` (`(99.4%, 48t/s)`, `(carbon, fast)`).
 
 | Pattern | Form | Tokens | Examples |
@@ -190,9 +189,9 @@ The row uses one compact layout across all four hosts:
 | Key : identity | `key:value` | `label` prefix + plain `text` (detached `@` in `label`) | `repo:VArgus`, `branch:main`, `branch:@v1.0` |
 | Key : reading | `key:value` | `label` prefix + `calm` or `alert` | `opus:high`, `5h:4%`, `ctx:20%`, `token:69.5k`, `session:24m` |
 | Model without effort | `name` | `label` | `opus`, `orchestrator` |
-| Secondary parenthetical | `(info)` attached | `faint` | `(carbon)`, `(argon)`, `(fast)`, `(ultrafast)`, `(4h37m)`, `(99.4%, 48t/s)`, `(wt:x)` |
+| Secondary parenthetical | `(info)` attached | `detail` | `(carbon)`, `(argon)`, `(fast)`, `(ultrafast)`, `(4h37m)`, `(99.4%, 48t/s)`, `(wt:x)` |
 | Git operation parenthetical | `(op)` attached | `alert` | `(rebase 2/3)`, `(merge)`, `(bisect)` |
-| Icon prefix | `<icon><text>` (WSL `<char>:<text>`) | unstyled icon + `label` (WSL all `label`) | `🔧73 🤖2 ⚡1` / `T:73 A:2 S:1`, `⌛stale` / `!:stale` |
+| Icon prefix | `<icon><text>` (WSL `<char>:<text>`) | `label` | `🔧73 🤖2 ⚡1` / `T:73 A:2 S:1`, `⌛stale` / `!:stale` |
 | API error badge | `[API CODE]` | `alert` (in the rate-limit slot) | `[API 429]`, `[API AUTH]`, `[API ERR]` |
 | VCS status | `<mark><count>` | `add` (`+`, `⇡`), `del` (`✗`, `!`, `⇣`), `track` (`?`) | `✗1 +2 !3 ?4 ⇡1 ⇣2` |
 
@@ -200,28 +199,33 @@ The row uses one compact layout across all four hosts:
 
 [Themes](src/theme/index.ts) use 24-bit SGR styles and default to `graphite`.
 Each palette in [palettes.ts](src/theme/palettes.ts) defines 9 tokens: `text`,
-`label`, `faint`, `sep`, `calm`, `alert`, `add`, `del` and `track`.
-Every bundled palette follows the same 3-group OKLCH rules, checked in
+`label`, `detail`, `sep`, `calm`, `alert`, `add`, `del` and `track`.
+Every bundled palette follows the same 3-group data-first OKLCH rules, checked in
 [theme.test.mts](tests/shared/theme.test.mts) across dark (`#181818`–`#282828`)
 and light (`#ffffff`–`#f6f8fa`) background ranges:
 
-- **5-step tonal ramp (`text > label > calm > faint > sep`)**: low-chroma steps
-  (`OKLCH C ≤ 0.045`; achromatic `C = 0` in `graphite`) sharing the theme's base
-  undertone, strictly ordered by contrast against the worst-case background.
+- **5-step data-first tonal ramp (`text > calm > label > detail > sep`)**:
+  strictly ordered by contrast against the worst-case background and sharing one
+  theme hue family (hue spread `≤ 35°`; achromatic `C = 0` in `graphite`). In
+  the four coloured themes, `text` and `sep` stay near-neutral (`OKLCH C ≤ 0.03`),
+  `calm` and `detail` carry a light highlight / soft shadow tint (`C ≤ 0.06`),
+  and `label` carries the signature theme colour (`0.08 ≤ C ≤ 0.11`).
 - **Contrast floors & polarity**: every dark-theme token is brighter than
   `#282828` and every `daylight` token is darker than `#f6f8fa`; on the
-  worst-case background, `text`, `label`, `calm`, `add`, `del` and `track`
-  `≥ 4.5:1`, `alert ≥ 5.0:1` (and contrast `≥ del`), `faint ≥ 3.0:1`, and
+  worst-case background, every readable token (`text`, `calm`, `label`, `detail`,
+  `add`, `del`, `track`) `≥ 4.5:1`, `alert ≥ 5.0:1` (and contrast `≥ del`), and
   `sep` stays between `1.4:1` (worst-case) and `2.5:1` (typical).
 - **Alarm isolation**: `alert` is vivid red and the highest-chroma token on
-  the row, with OKLCH chroma at least `2×` `del`.
+  the row, with OKLCH chroma at least `2×` `del` and `1.5×` `label`.
 - **Balanced VCS triad**: `add` (green), `del` (muted red) and `track` (distinct
-  3rd hue) sit in `calm`'s lightness/contrast band with matched lightness and
-  chroma; conflicts (`✗`) stay on `del` ([vcs.test.mts](tests/shared/vcs.test.mts)).
-- **Adjacent-pair separation**: side-by-side token pairs (`text`–`label`,
-  `label`–`calm`, `calm`–`faint`, `label`–`faint`, `text`–`faint`, `label`–`alert`,
-  `calm`–`alert`, `alert`–`faint`, `text`–`alert`, `del`–`alert`, `add`–`del`,
-  `add`–`track`, `del`–`track`) meet `OKLab ΔE ≥ 0.08`.
+  3rd hue) sit between `label` and `detail` in lightness and worst-case contrast
+  with matched lightness (`spread ≤ 0.03`) and chroma (`spread ≤ 0.015`);
+  conflicts (`✗`) stay on `del` ([vcs.test.mts](tests/shared/vcs.test.mts)).
+- **Adjacent-pair separation**: 14 side-by-side token pairs (`text`–`calm`,
+  `text`–`label`, `label`–`calm`, `calm`–`detail`, `label`–`detail`,
+  `text`–`detail`, `label`–`alert`, `calm`–`alert`, `alert`–`detail`,
+  `text`–`alert`, `del`–`alert`, `add`–`del`, `add`–`track`, `del`–`track`) meet
+  `OKLab ΔE ≥ 0.08`.
 The palette registry uses own-property lookup and falls back for unknown
 names. When a host sees a non-empty `NO_COLOR`, the theme returns plain text. Run
 `vargus themes [NAME]` ([themes.ts](src/cli/themes.ts)) to preview bundled palettes

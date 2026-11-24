@@ -105,7 +105,7 @@ test('OmO warns on a redraw after missed updates and clears the warning after re
   const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
   const theme = makeTheme('graphite', false)
   const staleMark = isWsl ? '!:stale' : '⌛stale'
-  const styledSuffix = theme.paint('sep', ' | ') + (isWsl ? theme.paint('label', '!:stale') : '⌛' + theme.paint('label', 'stale'))
+  const styledSuffix = theme.paint('sep', ' | ') + theme.paint('label', staleMark)
   h.load(); h.event('session_start')
   const raw = () => h.row!.render(200)[0]!
   const text = () => raw().replace(/\x1b\[[0-9;]*m/g, '')

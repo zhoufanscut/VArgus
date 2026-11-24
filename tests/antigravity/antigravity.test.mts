@@ -146,14 +146,14 @@ test('Antigravity colour follows the published default or the high cutoff', () =
     const v = collectAntigravityPayload({ model: { display_name: displayName } })
     assert.equal(
       model({ v, display: antigravityDisplay(v.session), o: DEFAULTS, l: en, t: theme, now: 0 }),
-      theme.paint('label', 'orchestrator') + theme.paint('faint', `(${variant})`),
+      theme.paint('label', 'orchestrator') + theme.paint('detail', `(${variant})`),
     )
   }
   const fastOrch = collectAntigravityPayload({ model: { display_name: 'Orchestrator (Carbon)' } })
   fastOrch.session.fast = true
   assert.equal(
     model({ v: fastOrch, display: antigravityDisplay(fastOrch.session), o: DEFAULTS, l: en, t: theme, now: 0 }),
-    theme.paint('label', 'orchestrator') + theme.paint('faint', '(carbon, fast)'),
+    theme.paint('label', 'orchestrator') + theme.paint('detail', '(carbon, fast)'),
   )
 })
 
@@ -2374,7 +2374,7 @@ test('Antigravity token alert threshold switches from 1M to 4M under includeSuba
     const savedTranscriptCache = await readFile(transcriptCache, 'utf8')
     await writeFile(transcriptCache, JSON.stringify({ ...JSON.parse(savedTranscriptCache), seenSkillsInTurn: 42 }))
     await appendFile(transcriptPath, '{}\n')
-    const staleSuffix = colored.paint('sep', ' | ') + '⌛' + colored.paint('label', 'stale')
+    const staleSuffix = colored.paint('sep', ' | ') + colored.paint('label', '⌛stale')
     const subStaleRow = await renderAntigravityStatusLine(payload, {
       home, appDataDir, cacheDir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, includeSubagents: true },
     })

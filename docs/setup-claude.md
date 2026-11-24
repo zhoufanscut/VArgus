@@ -157,8 +157,9 @@ During a rebase it shows the branch being rebased when available.
 Claude shows the account-wide five-hour and seven-day limits when available.
 
 - **Theme**: one of five bundled palettes, `graphite` by default (neutral-gray
-  tonal ramp; every theme keeps readings calm and uses colour mainly for `alert`
-  and VCS counts). All but `daylight` assume a dark terminal.
+  ramp; the four coloured themes split one signature hue across `calm`, `label`
+  and `detail`, keeping VCS counts muted and reserving vivid red for `alert`).
+  All but `daylight` assume a dark terminal.
 - **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.
   Other programs Claude Code starts see it too.
 

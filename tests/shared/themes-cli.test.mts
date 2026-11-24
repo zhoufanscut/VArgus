@@ -36,32 +36,32 @@ describe('vargus themes', () => {
       assert.equal(lines[0], name === 'graphite' ? 'graphite (default)' : name)
 
       const t = makeTheme(name, false)
-      for (const tok of ['text', 'label', 'calm', 'faint', 'sep', 'alert', 'add', 'del', 'track'] as const) {
+      for (const tok of ['text', 'calm', 'label', 'detail', 'sep', 'alert', 'add', 'del', 'track'] as const) {
         assert.ok(lines[1]!.includes(t.paint(tok, tok)), `${name} swatches missing ${tok}`)
       }
 
       const calm = lines[2]!
       assert.ok(calm.includes(t.bold(t.paint('text', '~/proj/VArgus'))))
-      assert.ok(calm.includes(t.paint('label', 'opus:') + t.paint('calm', 'high') + t.paint('faint', '(fast)')))
-      assert.ok(calm.includes(t.paint('label', '5h:') + t.paint('calm', '4%') + t.paint('faint', '(4h37m)')))
-      assert.ok(calm.includes(t.paint('label', '7d:') + t.paint('calm', '39%') + t.paint('faint', '(5d6h)')))
+      assert.ok(calm.includes(t.paint('label', 'opus:') + t.paint('calm', 'high') + t.paint('detail', '(fast)')))
+      assert.ok(calm.includes(t.paint('label', '5h:') + t.paint('calm', '4%') + t.paint('detail', '(4h37m)')))
+      assert.ok(calm.includes(t.paint('label', '7d:') + t.paint('calm', '39%') + t.paint('detail', '(5d6h)')))
       assert.ok(calm.includes(t.paint('label', 'ctx:') + t.paint('calm', '20%')))
-      assert.ok(calm.includes(t.paint('label', 'token:') + t.paint('calm', '69.5k') + t.paint('faint', '(99.4%, 48t/s)')))
+      assert.ok(calm.includes(t.paint('label', 'token:') + t.paint('calm', '69.5k') + t.paint('detail', '(99.4%, 48t/s)')))
       assert.ok(calm.includes(t.paint('label', 'session:') + t.paint('calm', '24m')))
-      assert.ok(calm.includes(`🔧${t.paint('label', '73')} 🤖${t.paint('label', '2')} ⚡${t.paint('label', '1')}`))
+      assert.ok(calm.includes(`${t.paint('label', '🔧73')} ${t.paint('label', '🤖2')} ${t.paint('label', '⚡1')}`))
       assert.ok(calm.includes(t.paint('label', 'repo:') + t.paint('text', 'VArgus')))
-      assert.ok(calm.includes(t.paint('label', 'branch:') + t.paint('text', 'main') + t.paint('faint', '(wt:x)')))
+      assert.ok(calm.includes(t.paint('label', 'branch:') + t.paint('text', 'main') + t.paint('detail', '(wt:x)')))
       assert.ok(calm.includes(`${t.paint('add', '+2')} ${t.paint('del', '!3')} ${t.paint('track', '?4')} ${t.paint('add', '⇡1')} ${t.paint('del', '⇣2')}`))
 
       const alert = lines[3]!
       assert.ok(alert.includes(t.paint('label', 'opus:') + t.paint('alert', 'low')))
-      assert.ok(alert.includes(t.paint('alert', '[API 429]') + ' ' + t.paint('label', '7d:') + t.paint('alert', '88%') + t.paint('faint', '(5d6h)')))
+      assert.ok(alert.includes(t.paint('alert', '[API 429]') + ' ' + t.paint('label', '7d:') + t.paint('alert', '88%') + t.paint('detail', '(5d6h)')))
       assert.ok(alert.includes(t.paint('label', 'ctx:') + t.paint('alert', '85%')))
-      assert.ok(alert.includes(t.paint('label', 'token:') + t.paint('alert', '1.20M') + t.paint('faint', '(99.4%, 48t/s)')))
+      assert.ok(alert.includes(t.paint('label', 'token:') + t.paint('alert', '1.20M') + t.paint('detail', '(99.4%, 48t/s)')))
       assert.ok(alert.includes(t.paint('label', 'session:') + t.paint('alert', '12h30m')))
       assert.ok(alert.includes(t.paint('label', 'branch:') + t.paint('text', 'feat') + t.paint('alert', '(rebase 2/3)')))
       assert.ok(alert.includes(`${t.paint('del', '✗1')} ${t.paint('del', '!3')} ${t.paint('del', '⇣2')}`))
-      assert.ok(alert.endsWith(t.paint('sep', ' | ') + '⌛' + t.paint('label', 'stale')))
+      assert.ok(alert.endsWith(t.paint('sep', ' | ') + t.paint('label', '⌛stale')))
     }
   })
 

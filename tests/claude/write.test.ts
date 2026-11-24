@@ -177,7 +177,7 @@ describe('line file', () => {
     await clock.settle()
     expect(w.writes[0]?.path).toBe('/cfg/plugins/data/vargus-vargus/S1/line.3.tmp')
     expect(w.checkIns[0]).toBe(
-      `6\n${theme.bold(theme.paint('text', '~/proj/x'))}${theme.paint('sep', ' | ')}⌛${theme.paint('label', 'stale')}\n`,
+      `6\n${theme.bold(theme.paint('text', '~/proj/x'))}${theme.paint('sep', ' | ')}${theme.paint('label', '⌛stale')}\n`,
     )
     // A stale-style change alone refreshes line.live immediately within the 2s idle window.
     const liveWrites: string[] = []

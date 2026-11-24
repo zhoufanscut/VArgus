@@ -102,14 +102,14 @@ describe('limits fragment', () => {
     expect(draw({ error: 'rate_limited' })).toBe('[API 429]')
   })
 
-  test('colours: labels in label, percent calm <80% and alert >=80%, resets faint, all API badges alert', async () => {
+  test('colours: labels in label, percent calm <80% and alert >=80%, resets detail, all API badges alert', async () => {
     const base = makeTheme('graphite', true)
     const t: Theme = {
       ...base,
       paint: (c, text) => `<${typeof c === 'string' ? c : 'rgb'}>${text}`,
     }
     expect(draw({ api: api({ monthly: { percent: 12, resetsAt: NOW + 5 * MIN } }), lastSuccessAt: NOW, error: 'network' }, { t }))
-      .toBe('<label>1mo:<calm>12%<faint>(5m)')
+      .toBe('<label>1mo:<calm>12%<detail>(5m)')
     expect(draw({ engine: [{ kind: 'five_hour', percentUsed: 79.4 }, { kind: 'seven_day', percentUsed: 79.5 }] }, { t }))
       .toBe('<label>5h:<calm>79% <label>7d:<alert>80%')
     expect(draw({ error: 'rate_limited' }, { t })).toBe('<alert>[API 429]')

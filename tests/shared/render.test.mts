@@ -141,11 +141,11 @@ test('stale rows style the separator and marker, fit complete readings, handle W
   const sep = t.paint('sep', ' | ')
   assert.equal(
     staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 22, { t }),
-    'sol' + sep + 'ctx:7%' + sep + '⌛' + t.paint('label', 'stale'),
+    'sol' + sep + 'ctx:7%' + sep + t.paint('label', '⌛stale'),
   )
   assert.equal(
     staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 8, { t }),
-    '⌛' + t.paint('label', 'stale'),
+    t.paint('label', '⌛stale'),
   )
   assert.equal(
     staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 22, { t, isWsl: true }),
@@ -161,7 +161,7 @@ test('stale rows style the separator and marker, fit complete readings, handle W
   folderPipe.v.session.effort = 'high'
   folderPipe.display = displaySession(folderPipe.v.session, shortModelName)
   const folderRow = render(folderPipe)
-  assert.equal(staleLine(folderRow, 15, { t }), '⌛' + t.paint('label', 'stale'))
+  assert.equal(staleLine(folderRow, 15, { t }), t.paint('label', '⌛stale'))
 
   const repoPipe = input()
   repoPipe.t = t
@@ -172,7 +172,7 @@ test('stale rows style the separator and marker, fit complete readings, handle W
   repoPipe.v.vcs = { ...initialVcs(), kind: 'git', repo: ' | foo', branch: 'main' }
   const repoRow = render(repoPipe)
   const expectedPrefix = render({ ...repoPipe, o: { ...DEFAULTS, repo: false, branch: false } })
-  assert.equal(staleLine(repoRow, 43, { t }), expectedPrefix + sep + '⌛' + t.paint('label', 'stale'))
+  assert.equal(staleLine(repoRow, 43, { t }), expectedPrefix + sep + t.paint('label', '⌛stale'))
 
   const wtPipe = input()
   wtPipe.t = t
@@ -183,7 +183,7 @@ test('stale rows style the separator and marker, fit complete readings, handle W
   wtPipe.v.vcs = { ...initialVcs(), kind: 'git', repo: 'R', branch: 'main', worktree: 'wt | 2' }
   const wtRow = render(wtPipe)
   const beforeBranch = render({ ...wtPipe, o: { ...DEFAULTS, branch: false } })
-  assert.equal(staleLine(wtRow, 64, { t }), beforeBranch + sep + '⌛' + t.paint('label', 'stale'))
+  assert.equal(staleLine(wtRow, 64, { t }), beforeBranch + sep + t.paint('label', '⌛stale'))
 
   // Idempotent on rows that already end with the stale marker (including narrower refits).
   assert.equal(staleLine(staleLine(row)), row + ' | ⌛stale')
@@ -192,7 +192,7 @@ test('stale rows style the separator and marker, fit complete readings, handle W
   assert.equal(staleLine(' | ⌛stale', 20), '⌛stale')
   const styledStale = staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 22, { t })
   assert.equal(staleLine(styledStale, 22, { t }), styledStale)
-  assert.equal(staleLine('⌛' + t.paint('label', 'stale'), 20, { t }), '⌛' + t.paint('label', 'stale'))
+  assert.equal(staleLine(t.paint('label', '⌛stale'), 20, { t }), t.paint('label', '⌛stale'))
   const wslStale = staleLine('sol' + sep + 'ctx:7%' + sep + 'token:3.2k', 22, { t, isWsl: true })
   assert.equal(staleLine(wslStale, 22, { t, isWsl: true }), wslStale)
 })

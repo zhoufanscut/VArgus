@@ -39,7 +39,7 @@ export const tokens: Fragment = ({ v, o, l, t }) => {
   if (v.session.cacheHitPercent !== undefined) details.push(`${formatCachePercent(v.session.cacheHitPercent)}%`)
   const rate = v.session.tokensPerSecond === undefined ? null : formatTokenRate(v.session.tokensPerSecond)
   if (rate !== null) details.push(`${rate}${l.tokensPerSecond}`)
-  const suffix = details.length ? t.paint('faint', `(${details.join(', ')})`) : ''
+  const suffix = details.length ? t.paint('detail', `(${details.join(', ')})`) : ''
   const alertThreshold = o.includeSubagents ? SUBAGENT_ALERT_THRESHOLD : MILLION_THRESHOLD
   return t.paint('label', `${l.tokens}:`) + t.paint(total >= alertThreshold ? 'alert' : 'calm', formatTokenCount(total)) + suffix
 }

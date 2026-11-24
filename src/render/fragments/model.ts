@@ -4,7 +4,7 @@ import { cleanText } from '../text.ts'
 // 2. model: the model's short name, with `:effort` when the effort option is on
 // and the model has one (`opus:high`) (DESIGN, "Fragments"; VantageHUD's
 // elements/model.js, format `short`). Model variants (`(carbon)`) and recorded
-// Fast mode (`(fast)`) follow in a faint parenthetical suffix.
+// Fast mode (`(fast)`) follow in a detail parenthetical suffix.
 
 const EFFORT_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
 
@@ -29,7 +29,7 @@ export const model: Fragment = ({ v, display, o, t }) => {
   const details: string[] = []
   if (variant) details.push(cleanText(variant))
   if (speed) details.push(speed)
-  const suffix = details.length ? t.paint('faint', `(${details.join(', ')})`) : ''
+  const suffix = details.length ? t.paint('detail', `(${details.join(', ')})`) : ''
   const effort = o.effort ? v.session.effort : undefined
   if (effort === undefined || effort === '') return t.paint('label', name) + suffix
   const level = cleanText(String(effort)).toLowerCase()

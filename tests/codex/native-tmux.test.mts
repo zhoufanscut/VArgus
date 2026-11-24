@@ -144,10 +144,10 @@ test('native stale readings occupy only the VArgus slot in each layout', async t
       const t = makeTheme('graphite', false)
       await output.update('sol | ctx:7%', undefined, { t, isWsl: false })
       now += 6000
-      assert.ok(rows()[at]!.includes('#[fg=#4a4a4a,nobold] | #[fg=default,nobold]⌛#[fg=#bfbfbf,nobold]stale'))
+      assert.ok(rows()[at]!.includes('#[fg=#4a4a4a,nobold] | #[fg=#aeaeae,nobold]⌛stale'))
       await output.update('sol | ctx:7%', undefined, { t, isWsl: true })
       now += 6000
-      assert.ok(rows()[at]!.includes('#[fg=#4a4a4a,nobold] | #[fg=#bfbfbf,nobold]!:stale'))
+      assert.ok(rows()[at]!.includes('#[fg=#4a4a4a,nobold] | #[fg=#aeaeae,nobold]!:stale'))
       await output.update('')
       now += 6000
       assert.doesNotMatch(rows().join(''), /⌛stale|!:stale/)

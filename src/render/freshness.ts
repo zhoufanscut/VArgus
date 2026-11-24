@@ -10,9 +10,8 @@ const SEPARATOR = ' | '
 export type StaleStyle = { t?: Theme; l?: Labels; isWsl?: boolean }
 
 function staleLabel({ t, l = en, isWsl = false }: StaleStyle): string {
-  const text = isWsl ? `${l.staleMark}:${l.stale}` : l.stale
-  const painted = t ? t.paint('label', text) : text
-  return isWsl ? painted : STALE_ICON + painted
+  const text = isWsl ? `${l.staleMark}:${l.stale}` : `${STALE_ICON}${l.stale}`
+  return t ? t.paint('label', text) : text
 }
 
 // Keep whole readings when the extra fragment would overflow the terminal.

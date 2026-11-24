@@ -72,7 +72,7 @@ function oklabDist(x: Rgb, y: Rgb): number {
 describe('theme', () => {
   test('five bundled palettes of the same 9 tokens; graphite is the default', () => {
     assert.deepEqual(Object.keys(PALETTES), ['aurora', 'ember', 'nebula', 'graphite', 'daylight'])
-    const tokens = ['text', 'label', 'faint', 'sep', 'calm', 'alert', 'add', 'del', 'track']
+    const tokens = ['text', 'label', 'detail', 'sep', 'calm', 'alert', 'add', 'del', 'track']
     for (const p of Object.values(PALETTES)) {
       assert.deepEqual(Object.keys(p), tokens)
       for (const hex of Object.values(p)) assert.match(hex, /^#[0-9a-f]{6}$/)
@@ -82,13 +82,13 @@ describe('theme', () => {
   })
 
   test('every palette\'s 9 tokens match the unified OKLCH palette definitions', () => {
-    // token order: text label faint sep calm alert add del track
+    // token order: text label detail sep calm alert add del track
     const expected: Record<string, string> = {
-      aurora: '#d3e2ed #adc1cd #6e7c89 #444e59 #90a1ad #f6808d #82b291 #c59094 #78aac9',
-      ember: '#eadfc5 #c8baa6 #84786d #544b44 #a89a8a #fe7768 #93ad78 #c78c83 #72a9c2',
-      nebula: '#dcdef4 #bfb9d7 #76798c #494c5b #9c9cb4 #f87f99 #86b689 #c99099 #85a6d7',
-      graphite: '#e6e6e6 #bfbfbf #7a7a7a #4a4a4a #9e9e9e #f47e7c #8aaa8b #bc908e #86a1c0',
-      daylight: '#22272d #3d4650 #7c848d #c3c8ce #5c646d #bb1423 #3f764c #945451 #676099',
+      aurora: '#dfeaef #69b8d0 #7898a7 #434f57 #add6e0 #f6808d #82b291 #c59094 #78aac9',
+      ember: '#eee7db #d3a067 #a58d78 #544b44 #e1caa6 #fe7768 #93ad78 #c78c83 #72a9c2',
+      nebula: '#e6e7f2 #b2a2e4 #8c90ae #4a4c59 #cacaeb #f87f99 #86b689 #c99099 #85a6d7',
+      graphite: '#ededed #aeaeae #929292 #4a4a4a #d1d1d1 #f47e7c #8aaa8b #bc908e #86a1c0',
+      daylight: '#181d24 #20548a #5b6e81 #c3c8ce #253a4e #bb1423 #3f764c #945451 #676099',
     }
     const ours = Object.fromEntries(Object.entries(PALETTES).map(([name, p]) => [name, Object.values(p).join(' ')]))
     assert.deepEqual(ours, expected)
@@ -96,14 +96,15 @@ describe('theme', () => {
 
   test('every palette satisfies the contrast ladder, alarm isolation, and pair-separation rules', () => {
     const adjacentPairs: readonly [TokenName, TokenName][] = [
+      ['text', 'calm'],
       ['text', 'label'],
       ['label', 'calm'],
-      ['calm', 'faint'],
-      ['label', 'faint'],
-      ['text', 'faint'],
+      ['calm', 'detail'],
+      ['label', 'detail'],
+      ['text', 'detail'],
       ['label', 'alert'],
       ['calm', 'alert'],
-      ['alert', 'faint'],
+      ['alert', 'detail'],
       ['text', 'alert'],
       ['del', 'alert'],
       ['add', 'del'],
@@ -120,12 +121,12 @@ describe('theme', () => {
       const bgWst: Rgb = isLight ? [0xf6, 0xf8, 0xfa] : [0x28, 0x28, 0x28]
       const bgWstLum = relLum(bgWst)
 
-      for (const tok of ['text', 'label', 'faint', 'sep', 'calm', 'alert', 'add', 'del', 'track'] as const) {
+      for (const tok of ['text', 'label', 'detail', 'sep', 'calm', 'alert', 'add', 'del', 'track'] as const) {
         const tokLum = relLum(rgb[tok])
         assert.ok(isLight ? tokLum < bgWstLum : tokLum > bgWstLum, `${name}.${tok} polarity wrong for ${isLight ? 'light' : 'dark'} theme`)
       }
 
-      for (const tok of ['text', 'label', 'calm', 'add', 'del', 'track'] as const) {
+      for (const tok of ['text', 'calm', 'label', 'detail', 'add', 'del', 'track'] as const) {
         const cr = contrast(rgb[tok], bgWst)
         assert.ok(cr >= 4.5, `${name}.${tok} worst-case contrast ${cr.toFixed(2)} < 4.5`)
       }
@@ -133,24 +134,33 @@ describe('theme', () => {
       const delCr = contrast(rgb.del, bgWst)
       assert.ok(alertCr >= 5.0, `${name}.alert worst-case contrast ${alertCr.toFixed(2)} < 5.0`)
       assert.ok(alertCr >= delCr, `${name}.alert contrast ${alertCr.toFixed(2)} < del ${delCr.toFixed(2)}`)
-      const faintCr = contrast(rgb.faint, bgWst)
-      assert.ok(faintCr >= 3.0, `${name}.faint worst-case contrast ${faintCr.toFixed(2)} < 3.0`)
       const sepWst = contrast(rgb.sep, bgWst)
       const sepTyp = contrast(rgb.sep, bgTyp)
       assert.ok(sepWst >= 1.4 && sepTyp <= 2.5, `${name}.sep contrast ${sepWst.toFixed(2)}..${sepTyp.toFixed(2)} out of 1.4..2.5`)
 
-      const ladder = (['text', 'label', 'calm', 'faint', 'sep'] as const).map(tok => contrast(rgb[tok], bgWst))
+      const ladder = (['text', 'calm', 'label', 'detail', 'sep'] as const).map(tok => contrast(rgb[tok], bgWst))
       for (let i = 0; i < ladder.length - 1; i++) {
         assert.ok(ladder[i]! > ladder[i + 1]!, `${name} contrast ladder failed at index ${i}: ${ladder.join(' > ')}`)
       }
 
-      const maxRampChroma = name === 'graphite' ? 1e-6 : 0.045
-      const rampTokens = ['text', 'label', 'calm', 'faint', 'sep'] as const
-      for (const tok of rampTokens) {
-        const c = chroma(rgb[tok])
-        assert.ok(c <= maxRampChroma, `${name}.${tok} ramp chroma ${c.toFixed(4)} > ${maxRampChroma}`)
-      }
-      if (name !== 'graphite') {
+      const rampTokens = ['text', 'calm', 'label', 'detail', 'sep'] as const
+      if (name === 'graphite') {
+        for (const tok of rampTokens) {
+          const c = chroma(rgb[tok])
+          assert.ok(c <= 1e-6, `${name}.${tok} ramp chroma ${c.toFixed(4)} > 1e-6`)
+        }
+      } else {
+        for (const tok of ['text', 'sep'] as const) {
+          const c = chroma(rgb[tok])
+          assert.ok(c <= 0.03, `${name}.${tok} chroma ${c.toFixed(4)} > 0.03`)
+        }
+        for (const tok of ['calm', 'detail'] as const) {
+          const c = chroma(rgb[tok])
+          assert.ok(c <= 0.06, `${name}.${tok} chroma ${c.toFixed(4)} > 0.06`)
+        }
+        const labelC = chroma(rgb.label)
+        assert.ok(labelC >= 0.08 && labelC <= 0.11, `${name}.label chroma ${labelC.toFixed(4)} outside 0.08..0.11`)
+
         const rampHues = rampTokens.map(tok => hue(rgb[tok]))
         for (let i = 0; i < rampHues.length; i++) {
           for (let j = i + 1; j < rampHues.length; j++) {
@@ -174,9 +184,17 @@ describe('theme', () => {
 
       const vcsL = [lightness(rgb.add), lightness(rgb.del), lightness(rgb.track)]
       assert.ok(Math.max(...vcsL) - Math.min(...vcsL) <= 0.03, `${name} VCS lightness spread > 0.03`)
-      const calmL = lightness(rgb.calm)
-      for (const l of vcsL) {
-        assert.ok(Math.abs(l - calmL) <= 0.035, `${name} VCS lightness ${l.toFixed(3)} too far from calm ${calmL.toFixed(3)}`)
+      const labelL = lightness(rgb.label)
+      const detailL = lightness(rgb.detail)
+      const minBandL = Math.min(labelL, detailL)
+      const maxBandL = Math.max(labelL, detailL)
+      const labelCr = contrast(rgb.label, bgWst)
+      const detailCr = contrast(rgb.detail, bgWst)
+      for (const tok of ['add', 'del', 'track'] as const) {
+        const l = lightness(rgb[tok])
+        const cr = contrast(rgb[tok], bgWst)
+        assert.ok(l > minBandL && l < maxBandL, `${name}.${tok} lightness ${l.toFixed(3)} not strictly between ${minBandL.toFixed(3)} and ${maxBandL.toFixed(3)}`)
+        assert.ok(cr > detailCr && cr < labelCr, `${name}.${tok} contrast ${cr.toFixed(2)} not strictly between detail (${detailCr.toFixed(2)}) and label (${labelCr.toFixed(2)})`)
       }
       const vcsC = [chroma(rgb.add), chroma(rgb.del), chroma(rgb.track)]
       assert.ok(Math.max(...vcsC) - Math.min(...vcsC) <= 0.015, `${name} VCS chroma spread > 0.015`)
@@ -184,7 +202,8 @@ describe('theme', () => {
       const alertChroma = chroma(rgb.alert)
       const delChroma = chroma(rgb.del)
       assert.ok(alertChroma >= 2 * delChroma, `${name}.alert chroma ${alertChroma.toFixed(4)} < 2x del ${delChroma.toFixed(4)}`)
-      for (const tok of ['text', 'label', 'faint', 'sep', 'calm', 'add', 'del', 'track'] as const) {
+      assert.ok(alertChroma >= 1.5 * chroma(rgb.label), `${name}.alert chroma ${alertChroma.toFixed(4)} < 1.5x label ${chroma(rgb.label).toFixed(4)}`)
+      for (const tok of ['text', 'label', 'detail', 'sep', 'calm', 'add', 'del', 'track'] as const) {
         assert.ok(chroma(rgb[tok]) < alertChroma, `${name}.${tok} chroma >= alert`)
       }
 
@@ -200,12 +219,12 @@ describe('theme', () => {
       assert.equal(resolvePalette(name).name, 'graphite')
     }
     assert.equal(resolvePalette(' Ember ').name, 'ember')
-    assert.deepEqual(makeTheme('constructor', false).rgb.text, [0xe6, 0xe6, 0xe6])
+    assert.deepEqual(makeTheme('constructor', false).rgb.text, [0xed, 0xed, 0xed])
   })
 
   test('paint is a 24-bit SGR code and a reset; bold ends bold alone', () => {
     const t = makeTheme('aurora', false)
-    assert.equal(t.paint('label', 'ctx:'), '\x1b[38;2;173;193;205mctx:\x1b[0m')
+    assert.equal(t.paint('label', 'ctx:'), '\x1b[38;2;105;184;208mctx:\x1b[0m')
     assert.equal(t.paint([1, 2, 3], 'x'), '\x1b[38;2;1;2;3mx\x1b[0m')
     assert.equal(t.bold('x'), '\x1b[1mx\x1b[22m')
   })
