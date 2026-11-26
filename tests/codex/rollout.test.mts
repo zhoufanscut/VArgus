@@ -652,13 +652,25 @@ test('corrupt or malformed JSONL records latch a permanent history error and dro
 
     // 4. Valid Codex records with UNC or malformed file:// URLs in skill/read paths must not falsely latch.
     const urlFile = join(dir, 'urls.jsonl')
+    const localSkill = pathToFileURL(resolve('alpha/SKILL.md')).href
+    const relativeRead = (id: string, cwd: string) => ({ type: 'event_msg', payload: {
+      type: 'item_completed', thread_id: 'thread-a', turn_id: 'u1', item: {
+        id, cwd, type: 'CommandExecution', source: 'agent', status: 'completed', exit_code: 0,
+        parsed_cmd: [{ type: 'read', path: 'alpha/SKILL.md' }],
+      },
+    } })
     await writeFile(urlFile, jsonl([
       meta,
       { type: 'event_msg', payload: { type: 'task_started', turn_id: 'u1' } },
       { type: 'response_item', payload: {
         type: 'message', role: 'developer',
-        content: [{ type: 'input_text', text: '- remote: Fixture. (file: file://example.com/share/SKILL.md)\n- bad: Fixture. (file: file://%ZZ/SKILL.md)' }],
+        content: [{ type: 'input_text', text: `- remote: Fixture. (file: file://example.com/share/SKILL.md)\n- bad: Fixture. (file: file://%ZZ/SKILL.md)\n- local: Fixture. (file: ${localSkill})` }],
         internal_chat_message_metadata_passthrough: { turn_id: 'u1', content_item_kinds: ['host_skills.instructions'] },
+      } },
+      { type: 'response_item', payload: {
+        type: 'message', role: 'user',
+        content: [{ type: 'input_text', text: '<skill>\n<name>bad</name>\n<path>file://%ZZ/SKILL.md</path>\n</skill>' }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'u1', content_item_kinds: ['skills.selected_skill_instructions'] },
       } },
       { type: 'event_msg', payload: {
         type: 'item_completed', thread_id: 'thread-a', turn_id: 'u1',
@@ -673,14 +685,18 @@ test('corrupt or malformed JSONL records latch a permanent history error and dro
           status: 'completed', exit_code: 0,
         },
       } },
-      count,
+      relativeRead('invalid-base', 'file://%ZZ/repo'), count,
     ]))
     const urlReader = new RolloutReader(urlFile, 'thread-a', '/repo', dir)
     await urlReader.poll(false)
     assert.equal(urlReader.attributable, true)
     assert.equal(urlReader.collector.snapshot()!.session.counts.tokens, 3201)
-    assert.equal(urlReader.collector.snapshot()!.session.counts.tools, 1)
-    assert.equal(urlReader.collector.snapshot()!.session.counts.skills, process.platform === 'win32' ? 1 : 0)
+    const uncLoads = process.platform === 'win32' ? 1 : 0
+    assert.equal(urlReader.collector.snapshot()!.session.counts.tools, 2)
+    assert.equal(urlReader.collector.snapshot()!.session.counts.skills, uncLoads)
+    await appendFile(urlFile, jsonl([relativeRead('valid-base', pathToFileURL(process.cwd()).href)]))
+    await urlReader.poll(false)
+    assert.equal(urlReader.collector.snapshot()!.session.counts.skills, uncLoads + 1)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 

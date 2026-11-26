@@ -2,13 +2,13 @@
 # The statusLine commands from the Claude setup guide, run in a test home.
 # Run: sh tests/claude/reader.test.sh   (exits 1 on a failure)
 set -u
-root=$(cd "$(dirname "$0")/../.." && pwd)
+cd "$(dirname "$0")/../.." || exit 1
 fails=0
 fail() { echo "FAIL: $*"; fails=$((fails + 1)); }
 
 cmd='f="$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line"; if [ -s "$f" ] && { IFS= read -r d && [ "$(date +%s)" -ge "$d" ] && IFS= read -r row; } 2>/dev/null < "$f.live"; then printf %s "$row"; else cat "$f" 2>/dev/null; fi'
 
-node --input-type=module - "$root/docs/setup-claude.md" "$cmd" <<'JS' || exit 1
+node --input-type=module - docs/setup-claude.md "$cmd" <<'JS' || exit 1
 import { readFileSync } from "node:fs"
 const [file, ...commands] = process.argv.slice(2)
 const guide = readFileSync(file, "utf8")

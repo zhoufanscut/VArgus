@@ -1,2 +1,3 @@
+bin/vargus text eol=lf
 src/hosts/claude/replace-config.sh text eol=lf
 tests/claude/*.sh text eol=lf

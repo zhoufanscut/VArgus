@@ -1,9 +1,11 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, readFile, rm, rmdir, symlink, writeFile } from 'node:fs/promises'
+import childProcess, { execFile } from 'node:child_process'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, rmdir, symlink, writeFile } from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
+import { setImmediate as nextTurn } from 'node:timers/promises'
 import { promisify } from 'node:util'
 
 import { initialSession } from '../../src/core/session.ts'
@@ -19,22 +21,51 @@ import { DEFAULTS } from '../../src/options.ts'
 import { folder } from '../../src/render/fragments/folder.ts'
 import { branch, repo, status } from '../../src/render/fragments/vcs.ts'
 import { makeTheme } from '../../src/theme/index.ts'
+import { withCleanup } from '../fixture-commands.mts'
 
 const exec = promisify(execFile)
 
 test('readGit releases a non-repository working directory before returning on Windows', { skip: process.platform !== 'win32' }, async () => {
   await exec('git', ['--version'], { windowsHide: true })
-  const directory = await mkdtemp(join(tmpdir(), 'vargus-git-cwd-'))
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'vargus-git-cwd-'))
   const previous = process.env.GIT_CEILING_DIRECTORIES
   process.env.GIT_CEILING_DIRECTORIES = dirname(directory)
-  try {
+  await withCleanup(async () => {
     assert.deepEqual(await readGit(directory), initialVcs())
-    await rmdir(directory)
-  } catch (error) {
-    throw new Error(`Retained Git fixture at ${directory}`, { cause: error })
-  } finally {
+  }, async () => {
     if (previous === undefined) delete process.env.GIT_CEILING_DIRECTORIES
     else process.env.GIT_CEILING_DIRECTORIES = previous
+    await rmdir(directory).catch(error => { throw new Error(`Retained Git fixture at ${directory}`, { cause: error }) })
+  })
+})
+
+test('readGit waits for each sibling probe when status fails', async () => {
+  const pending = new Map<string, (error: Error) => void>()
+  const original = childProcess.execFile
+  let controlledRead: typeof readGit
+  try {
+    childProcess.execFile = ((_file: string, args: string[], _options: unknown, done: (error: Error) => void) => {
+      pending.set(args[2]!, done)
+    }) as unknown as typeof execFile
+    syncBuiltinESMExports()
+    const module = await import(new URL('../../src/node/git.ts?controlled-probes', import.meta.url).href)
+    controlledRead = module.readGit
+  } finally {
+    childProcess.execFile = original
+    syncBuiltinESMExports()
+  }
+  for (const last of ['rev-parse', 'remote']) {
+    pending.clear()
+    let returned = false
+    const result = controlledRead('fixture').then(value => { returned = true; return value })
+    assert.deepEqual([...pending.keys()].sort(), ['remote', 'rev-parse', 'status'])
+    const failure = new Error('not a Git repository')
+    pending.get('status')!(failure)
+    pending.get(last === 'remote' ? 'rev-parse' : 'remote')!(failure)
+    await nextTurn()
+    assert.equal(returned, false, `returned before ${last} finished`)
+    pending.get(last)!(failure)
+    assert.deepEqual(await result, initialVcs())
   }
 })
 

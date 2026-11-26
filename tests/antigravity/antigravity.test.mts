@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, utimes, writeFile } from 'node:fs/promises'
 import { fixtureCheckout } from '../checkout.mts'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { renderAntigravityStatusLine } from '../../src/cli/antigravity.ts'
@@ -154,6 +154,39 @@ test('Antigravity row cache v2 preserves whole fragments containing ` | ` under 
     await writeFile(folderTranscriptCache, JSON.stringify({ ...JSON.parse(savedFolderTranscript), seenSkillsInTurn: 42 }))
     await appendFile(folderTranscript, '{}\n')
     await assert.rejects(() => renderAntigravityStatusLine(folderPayload, folderRuntime))
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('a real linked worktree with a separator cannot leave half a branch in a stale row', { skip: process.platform === 'win32' }, async () => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'vargus-pipe-worktree-'))
+  try {
+    const name = 'alpha | beta_long_suffix'
+    const base = join(dir, 'base'), linked = join(dir, name)
+    await exec('git', ['init', '-q', '-b', 'main-base', base])
+    await exec('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '--no-gpg-sign', '-m', 'base'], { cwd: base })
+    await exec('git', ['worktree', 'add', '-b', 'main', linked], { cwd: base })
+    const oldAdmin = (await exec('git', ['rev-parse', '--absolute-git-dir'], { cwd: linked })).stdout.trimEnd()
+    const adminRoot = join(base, '.git', 'worktrees'), admin = join(adminRoot, name)
+    assert.equal(dirname(oldAdmin), adminRoot)
+    if (oldAdmin !== admin) {
+      await rename(oldAdmin, admin)
+      await writeFile(join(linked, '.git'), `gitdir: ${admin}\n`)
+    }
+    const transcript = join(dir, '.gemini', 'antigravity-cli', 'brain', 'wt', '.system_generated', 'logs', 'transcript.jsonl')
+    await mkdir(dirname(transcript), { recursive: true })
+    await writeFile(transcript, '{}\n')
+    const runtime = { home: dir, cacheDir: join(dir, 'cache'), isWsl: false, noColor: true, givenOptions: {
+      folder: false, model: false, rateLimits: false, context: false, tokens: false, session: false, callCounts: false, repo: false, status: false,
+    } }
+    const branch = `branch:main(wt:${name})`
+    const width = stringWidth(branch)
+    const payload = { conversation_id: 'wt', cwd: linked, transcript_path: transcript, terminal_width: width + 2 }
+    assert.equal(await renderAntigravityStatusLine(payload, runtime), `  ${branch}`)
+    const cached = cachePath(runtime.cacheDir, 'transcript', transcript)
+    await writeFile(cached, JSON.stringify({ ...JSON.parse(await readFile(cached, 'utf8')), seenSkillsInTurn: 42 }))
+    await appendFile(transcript, '{}\n')
+    assert.ok(stringWidth('branch:main(wt:alpha | ⌛stale') <= width)
+    assert.equal(await renderAntigravityStatusLine(payload, runtime), '  ⌛stale')
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 

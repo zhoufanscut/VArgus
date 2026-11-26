@@ -960,7 +960,8 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
 - `npm run test:local` type-checks the Node graph and exercises shared rendering,
   import boundaries, installers and local fixtures. The Codex replay fixtures
   check which counters belong to each thread, attribution gating (`attributable`),
-  replaced-file and corrupt/malformed JSONL error latching, unchanged-size
+  replaced-file and corrupt/malformed JSONL error latching, malformed skill URLs
+  without loss of attribution, Windows UNC reads, unchanged-size
   buffered draining, `Views.descendants` subtree closure, `.jsonl.zst`
   compressed rollout discovery/replay/stat-caching/transition handling and
   multi-level descendant folding. Display fixtures cover legacy
@@ -970,7 +971,11 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   usage, an explicit miss and a context-only estimate.
   A separate Codex row test checks
   out a tag in a real linked worktree and renders it with defaults and with
-  the former `detachedHead: false` setting. The suite also checks the psmux
+  the former `detachedHead: false` setting. A POSIX Antigravity fixture awaits
+  the Git reading and fits a stale row from a worktree whose name contains the
+  literal fragment separator.
+  A controlled Git test holds each sibling probe open after `status` fails,
+  independently of the native Windows directory-removal check. The suite also checks the psmux
   command contract, and [wsl.test.mts](tests/shared/wsl.test.mts) covers
   `detectWsl` and the Node entry points (`vargus themes`, Antigravity, OmO) for
   native Windows with `WSLENV` set and for real WSL signals.
@@ -1004,12 +1009,22 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   tmux. Model choice,
   billing and different provider timing need their own evidence.
 - `npm run test:claude` type-checks against generated types. The
-  [runner](tests/run-claude.mjs) stages the plugin sources, Claude fixtures
-  and reader guide under a temporary directory for validation and tests.
-  This keeps the checkout's `tmp/` out of engine discovery. Pointing Claude
-  Code 2.1.332 at `tests/claude` directly reports “no hooks module to load,”
+  [runner](tests/run-claude.mjs) stages the plugin manifests, sources, README,
+  launchers, Claude engine fixtures and reader guide in a temporary directory.
+  This keeps the checkout's `tmp/` out of engine discovery; Node-only `.test.mts`
+  files stay in the Node suite. On Windows with Claude
+  Code 2.1.332, normal validation listed both launchers and still warned about
+  `.ts` import extensions; passing the separate type-check is not strict validation.
+  Pointing Claude Code 2.1.332 at `tests/claude` directly reports “no hooks module to load,”
   so the stage keeps the plugin manifest. The engine fixtures mock filesystem
   hooks; the shell checks exercise the documented reader and manifest separately.
+  Each command starts behind a gate. On Windows a private Job Object owns the
+  shell and descendants before the gate opens; cleanup checks its active-process
+  count, not command-line markers. On POSIX the runner checks that `ps` sees
+  the marker on the gated shell itself, and keeps the group leader alive until
+  cleanup. Interrupt and termination signals during a command go through the
+  same bounded group cleanup as a timeout.
+  A failed exit check retains the fixture rather than deleting its home.
 
 ### Live evidence and limits
 
@@ -1023,6 +1038,11 @@ detached Windows smoke test with psmux 3.4.0 covered the scalar header:
 `dump-state` showed the stale row after setting an expired deadline, and
 detach restored the original bar height and `status-left`. That smoke test
 did not start Codex.
+
+Separately, on 2026-11-26 the [native Windows fixture](tests/codex/windows.test.mts)
+ran Codex 0.172.0 with a localhost provider and its executable first on `PATH`.
+Hook activation, row rendering, reload and restoration passed under an isolated
+profile. This was a targeted TUI check, not a full psmux suite pass.
 
 On Linux on 2026-11-20, a checkout installed with `vargus install claude`
 ran in Claude Code 2.1.323 with a saved native `model: true` and a shared
