@@ -32,28 +32,58 @@ export async function withCleanup(work: () => Promise<void>, cleanup: () => Prom
   await cleanup()
 }
 
+export function windowsEnvValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const target = name.toLowerCase()
+  for (const [key, value] of Object.entries(env)) {
+    if (key.toLowerCase() === target && value) return value
+  }
+  return undefined
+}
+
+export function buildWindowsCimQuery(marker: string): string {
+  if (!marker) throw new Error('Missing fixture marker')
+  if (/[\r\n"]/.test(marker)) throw new Error('Invalid Windows fixture marker')
+  return `$ErrorActionPreference = 'Stop'
+# ${marker}
+$marker = $env:VARGUS_CLAUDE_FIXTURE
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -ge 0 } |
+  ForEach-Object { $created = if ($_.CreationDate) { $_.CreationDate.ToString('o') } else { 'unknown-start' }; "$($_.ProcessId) $created $($_.Name)" }`
+}
+
+export function parseWindowsCimRows(stdout: string, scannerPid: number | undefined): string[] {
+  const rows = stdout.trim().split(/\r?\n/).filter(Boolean)
+  const scanner = scannerPid === undefined ? undefined : rows.find(row => row.startsWith(`${scannerPid} `))
+  if (!scanner) throw new Error('CIM did not see its fixture marker')
+  return rows.filter(row => row !== scanner)
+}
+
 async function waitForWindowsFixture(env: NodeJS.ProcessEnv): Promise<void> {
-  const marker = env.VARGUS_CLAUDE_FIXTURE
-  if (!marker) throw new Error('Missing Windows fixture marker')
-  const query = `$ErrorActionPreference = 'Stop'
-Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${marker.replaceAll("'", "''")}') } |
-  ForEach-Object { "$($_.ProcessId) $($_.Name)" }`
+  const query = buildWindowsCimQuery(env.VARGUS_CLAUDE_FIXTURE ?? '')
   const deadline = Date.now() + 5000
   for (;;) {
     const scan = exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', query],
       { env, windowsHide: true, timeout: 5000 })
     const { stdout } = await scan
-    const rows = stdout.trim().split(/\r?\n/)
-    const scanner = rows.find(row => row.startsWith(`${scan.child.pid} `))
-    if (!scanner) throw new Error('CIM did not see its fixture marker')
-    const remaining = rows.filter(row => row !== scanner)
+    const remaining = parseWindowsCimRows(stdout, scan.child.pid)
     if (!remaining.length) return
     if (Date.now() >= deadline) throw new Error(`Fixture processes still active: ${remaining.join(', ')}`)
     await delay(100)
   }
 }
 
+async function stopWindowsTree(pid: number, env: NodeJS.ProcessEnv): Promise<void> {
+  try {
+    await exec('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { env, windowsHide: true, timeout: 5000 })
+  } catch (error) {
+    const details = error as { code?: number | string | null; stdout?: string; stderr?: string; message?: string }
+    if (details.code === 128) return
+    const output = `${details.stderr ?? ''}\n${details.stdout ?? ''}`.trim()
+    throw new Error(`Could not stop Windows fixture tree (PID ${pid}): ${output || details.message}`)
+  }
+}
+
 async function processes(group: number, env: NodeJS.ProcessEnv) {
+  if (!env.VARGUS_CLAUDE_FIXTURE) throw new Error('Missing fixture marker')
   const scan = exec('ps', ['xeww', '-o', 'pid=,pgid=,stat=,lstart=,comm=,args='], {
     env: { ...env, LC_ALL: 'C' }, timeout: 5000, maxBuffer: 8 * 1024 * 1024,
   })
@@ -74,19 +104,55 @@ async function processes(group: number, env: NodeJS.ProcessEnv) {
 
 export async function runFixtureCommand(command: string, cwd: string, env: NodeJS.ProcessEnv, stopped: string, timeout = 120_000): Promise<void> {
   await rm(stopped, { force: true })
+  if (!env.VARGUS_CLAUDE_FIXTURE) throw new Error('Missing fixture marker')
   if (process.platform === 'win32') {
     await waitForWindowsFixture(env)
-    return withCleanup(async () => {
-      const started = new Date().toISOString()
-      const child = spawn(env.ComSpec ?? 'cmd.exe', ['/d', '/v:off', '/s', '/c', `"${command}"`], {
-        cwd, env, stdio: 'inherit', windowsHide: true, windowsVerbatimArguments: true, timeout, killSignal: 'SIGKILL',
+    const started = new Date().toISOString()
+    const comspec = windowsEnvValue(env, 'ComSpec') ?? 'cmd.exe'
+    const child = spawn(comspec, ['/d', '/v:off', '/s', '/c', `"${command}"`], {
+      cwd, env, stdio: 'inherit', windowsHide: true, windowsVerbatimArguments: true,
+    })
+    const cancellation = new AbortController()
+    let exited = false
+    const closed = new Promise<[number | null, NodeJS.Signals | null]>(resolve => {
+      child.once('close', (code, signal) => { exited = true; resolve([code, signal]) })
+    })
+    const interrupt = (signal: NodeJS.Signals) =>
+      cancellation.abort(new Error(`${command} interrupted by ${signal} (PID ${child.pid}, started ${started})`))
+    process.on('SIGINT', interrupt).on('SIGTERM', interrupt)
+    let timer: NodeJS.Timeout | undefined
+    try {
+      await once(child, 'spawn')
+      const pid = child.pid!
+      await withCleanup(async () => {
+        cancellation.signal.throwIfAborted()
+        const [code, signal] = await Promise.race([closed, new Promise<never>((_, reject) => {
+          cancellation.signal.addEventListener('abort', () => reject(cancellation.signal.reason), { once: true })
+          timer = setTimeout(() => reject(new Error(`${command} timed out (PID ${pid}, started ${started})`)), timeout)
+        })])
+        if (code !== 0) {
+          throw new Error(`${command} exited with ${signal ?? code} (PID ${pid}, started ${started})`)
+        }
+      }, async () => {
+        clearTimeout(timer)
+        if (!exited) {
+          try { await stopWindowsTree(pid, env) } catch (error) {
+            child.kill('SIGKILL')
+            throw error
+          }
+          await Promise.race([closed, delay(5000, undefined, { ref: false }).then(() => {
+            throw new Error(`Fixture shell did not close (PID ${pid})`)
+          })])
+        }
+        await waitForWindowsFixture(env)
       })
-      const [code, signal] = await once(child, 'close')
-      if (code !== 0) {
-        const outcome = child.killed ? 'timed out' : `exited with ${signal ?? code}`
-        throw new Error(`${command} ${outcome} (PID ${child.pid}, started ${started})`)
-      }
-    }, () => waitForWindowsFixture(env))
+      cancellation.signal.throwIfAborted()
+    } finally {
+      clearTimeout(timer)
+      child.unref()
+      process.off('SIGINT', interrupt).off('SIGTERM', interrupt)
+    }
+    return
   }
 
   const started = new Date().toISOString()

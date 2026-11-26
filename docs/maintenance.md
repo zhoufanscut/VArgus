@@ -21,6 +21,9 @@ These rules apply to every agent and subagent, test suite and throwaway probe, r
   Wait for confirmed exit before deleting any test home; deleted executables can remain in use.
   If an owned process survives a bounded wait or visibility is insufficient, fail the cleanup check,
   retain its home and report the remaining process or verification gap before handing off.
+  For `npm run test:claude` on native Windows, CIM still fails the check if any marked process
+  survives or its positive control misses its own PID, and retains and prints the staged
+  directory even after a pass because CIM cannot rule out unmarked descendants.
 
 ## Releases
 
@@ -45,7 +48,8 @@ then `---` and `**Full changelog**: <compare link>` (see VantageHUD's GitHub rel
   write its TypeScript declarations to `.claude-plugin/types/`, then exit the session.
   Run `npm run test:claude` for type-checking, staged plugin validation, engine tests
   and the reader and manifest checks. On Windows the shell checks use Git for Windows.
-  Native Windows runs retain the staged fixture even after a pass.
+  Native Windows runs retain the staged fixture even after a pass, so
+  `%TEMP%\vargus-claude-test-*` directories accumulate across runs until removed manually.
   If the runner prints a retained path, confirm fixture processes have exited
   before removing that directory.
   See [test and verification details](../DESIGN.md#tests).

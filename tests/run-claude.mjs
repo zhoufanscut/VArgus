@@ -25,6 +25,7 @@ const env = {
 const windows = process.platform === 'win32'
 const plugin = windows ? '"%VARGUS_CLAUDE_CHECKOUT%"' : '.'
 const shell = windows ? 'git -c "alias.vargus-test=!sh" vargus-test' : 'sh'
+const shellMarker = windows ? ' "%VARGUS_CLAUDE_FIXTURE%"' : ''
 let testsStarted = false
 
 await withCleanup(async () => {
@@ -34,7 +35,12 @@ await withCleanup(async () => {
     await cp(join(source, name), join(checkout, name), { recursive: true, filter: path => !path.endsWith('.test.mts') })
   }
   testsStarted = true
-  for (const command of [`claude plugin validate ${plugin}`, `claude plugin test ${plugin}`, `${shell} tests/claude/reader.test.sh`, `${shell} tests/claude/manifest.test.sh`]) {
+  for (const command of [
+    `claude plugin validate ${plugin}`,
+    `claude plugin test ${plugin}`,
+    `${shell} tests/claude/reader.test.sh${shellMarker}`,
+    `${shell} tests/claude/manifest.test.sh${shellMarker}`,
+  ]) {
     await runFixtureCommand(command, checkout, env, stopped)
     if (!windows) await access(stopped)
   }

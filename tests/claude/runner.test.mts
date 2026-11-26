@@ -6,10 +6,16 @@ import { access, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/prom
 import { tmpdir } from 'node:os'
 import { basename, delimiter, dirname, join } from 'node:path'
 import { test } from 'node:test'
-import { setImmediate as nextTurn } from 'node:timers/promises'
+import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import { processIsRunning } from '../../src/node/process.ts'
-import { runFixtureCommand, withCleanup } from '../fixture-commands.mts'
+import {
+  buildWindowsCimQuery,
+  parseWindowsCimRows,
+  runFixtureCommand,
+  windowsEnvValue,
+  withCleanup,
+} from '../fixture-commands.mts'
 import { checkStoppedOutput } from '../posix-stopped-fixture.mts'
 
 test('fixture cleanup preserves the command error and the independent cleanup error', async () => {
@@ -216,17 +222,68 @@ test('a POSIX payload interrupted by SIGINT reports 130 and does not continue', 
   })
 })
 
-test('Windows checks marked processes and reports command status without certifying the whole tree', { skip: process.platform !== 'win32' }, async () => {
+test('Windows fixture helpers resolve ComSpec case-insensitively and parse CIM rows with positive control', () => {
+  assert.equal(windowsEnvValue({ COMSPEC: 'C:\\Windows\\System32\\cmd.exe' }, 'ComSpec'), 'C:\\Windows\\System32\\cmd.exe')
+  assert.equal(windowsEnvValue({ ComSpec: '', comspec: 'C:\\alt\\cmd.exe' }, 'ComSpec'), 'C:\\alt\\cmd.exe')
+  assert.equal(windowsEnvValue({ OTHER: '1' }, 'ComSpec'), undefined)
+
+  const quoteMarker = "vargus-claude-test-a'b"
+  const query = buildWindowsCimQuery(quoteMarker)
+  assert.match(query, new RegExp(`^# ${quoteMarker}$`, 'm'))
+  assert.match(query, /IndexOf\(\$marker, \[StringComparison\]::OrdinalIgnoreCase\) -ge 0/)
+  assert.match(query, /\$_.CreationDate\.ToString\('o'\)/)
+  assert.throws(() => buildWindowsCimQuery(''), /Missing fixture marker/)
+  assert.throws(() => buildWindowsCimQuery('bad\nmarker'), /Invalid Windows fixture marker/)
+  assert.throws(() => buildWindowsCimQuery('bad"marker'), /Invalid Windows fixture marker/)
+
+  assert.deepEqual(parseWindowsCimRows('123 2026-11-26T00:00:00Z powershell.exe\r\n', 123), [])
+  assert.deepEqual(
+    parseWindowsCimRows('123 2026-11-26T00:00:00Z powershell.exe\r\n456 2026-11-26T00:00:01Z node.exe\r\n', 123),
+    ['456 2026-11-26T00:00:01Z node.exe'],
+  )
+  assert.throws(() => parseWindowsCimRows('', 12), /CIM did not see its fixture marker/)
+  assert.throws(() => parseWindowsCimRows('123 2026-11-26T00:00:00Z powershell.exe\n', 12), /CIM did not see its fixture marker/)
+  assert.throws(() => parseWindowsCimRows('123 2026-11-26T00:00:00Z powershell.exe\n', undefined), /CIM did not see its fixture marker/)
+})
+
+test('runFixtureCommand rejects a missing or empty fixture marker after clearing stopped receipt', async () => {
+  const temp = await realpath(tmpdir()), dir = await mkdtemp(join(temp, 'vargus-empty-marker-'))
+  const stopped = join(dir, 'stopped')
+  try {
+    const missing = { ...process.env }
+    delete missing.VARGUS_CLAUDE_FIXTURE
+    for (const env of [{ ...process.env, VARGUS_CLAUDE_FIXTURE: '' }, missing]) {
+      await writeFile(stopped, 'stale')
+      await assert.rejects(runFixtureCommand('echo ok', dir, env, stopped, 5000), /Missing fixture marker/)
+      await assert.rejects(access(stopped), { code: 'ENOENT' })
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  }
+})
+
+test('Windows checks marked processes, stops timed-out trees, and aggregates cleanup failures', { skip: process.platform !== 'win32' }, async () => {
   const temp = await realpath(tmpdir()), dir = await mkdtemp(join(temp, 'vargus runner-'))
   const marker = basename(dir), stopped = join(dir, 'stopped'), ran = join(dir, 'ran with spaces')
-  const env = { ...process.env, VARGUS_CLAUDE_FIXTURE: marker, TMP: dir, TEMP: dir, TMPDIR: dir }
+  const env = { ...process.env, VARGUS_CLAUDE_FIXTURE: marker, VARGUS_TEST_NODE: process.execPath, TMP: dir, TEMP: dir, TMPDIR: dir }
   const command = 'ver >nul && >"ran with spaces" echo first& >>"ran with spaces" echo second'
-  const blocker = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)', marker], { cwd: dir, env, windowsHide: true, stdio: 'ignore' })
-  const closed = new Promise<void>(resolve => blocker.once('close', () => resolve()))
+  const blocker = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)', marker.toUpperCase()], { cwd: dir, env, windowsHide: true, stdio: 'ignore' })
+  const closed = new Promise<void>(resolve => { blocker.once('close', () => resolve()); blocker.once('error', () => resolve()) })
+  let survivorPid: number | undefined
+  let childPid: number | undefined
+  const stopPid = async (pid: number | undefined) => {
+    if (!(pid && pid > 0)) return
+    try { process.kill(pid) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+    }
+    const until = Date.now() + 2000
+    while (await processIsRunning(pid) && Date.now() < until) await delay(50)
+    if (await processIsRunning(pid)) throw new Error(`Windows test child ${pid} still active`)
+  }
   await withCleanup(async () => {
     await once(blocker, 'spawn')
     await writeFile(stopped, 'stale')
-    await assert.rejects(runFixtureCommand(command, dir, env, stopped), new RegExp(`Fixture processes still active: ${blocker.pid} `))
+    await assert.rejects(runFixtureCommand(command, dir, env, stopped), new RegExp(`Fixture processes still active: ${blocker.pid} \\S+ `))
     await assert.rejects(access(stopped), { code: 'ENOENT' })
     await assert.rejects(access(ran), { code: 'ENOENT' })
     blocker.kill()
@@ -235,12 +292,57 @@ test('Windows checks marked processes and reports command status without certify
     assert.equal(await readFile(ran, 'utf8'), 'first\r\nsecond\r\n')
     await assert.rejects(access(stopped), { code: 'ENOENT' })
     await assert.rejects(runFixtureCommand('exit /b 37', dir, env, stopped), /exited with 37/)
-    await assert.rejects(runFixtureCommand('for /l %n in (1,1,2147483647) do @rem wait', dir, env, stopped, 150), /timed out/)
+
+    await writeFile(join(dir, 'spawn-marked.cjs'), `
+const { spawn } = require('node:child_process')
+const { writeFileSync } = require('node:fs')
+const leaf = spawn(process.execPath, ['-e', "setTimeout(() => {}, 30000); process.send('ready'); process.disconnect()", process.env.VARGUS_CLAUDE_FIXTURE.toUpperCase()], {
+  detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true,
+})
+leaf.once('message', msg => {
+  if (msg !== 'ready') throw new Error('leaf did not report ready')
+  writeFileSync('survivor-pid', String(leaf.pid))
+  leaf.unref()
+  process.exit(37)
+})
+`)
+    try {
+      await runFixtureCommand('"%VARGUS_TEST_NODE%" spawn-marked.cjs', dir, env, stopped)
+      assert.fail('expected command and cleanup to fail')
+    } catch (error) {
+      survivorPid = Number(await readFile(join(dir, 'survivor-pid'), 'utf8'))
+      assert.ok(survivorPid > 0)
+      assert.ok(error instanceof AggregateError && error.errors.length === 2)
+      assert.match(String((error.errors[0] as Error)?.message), /exited with 37/)
+      assert.match(String((error.errors[1] as Error)?.message), new RegExp(`Fixture processes still active: ${survivorPid} \\S+ `))
+    }
+    await stopPid(survivorPid)
+    survivorPid = undefined
+
+    await writeFile(join(dir, 'hold-child.cjs'), `
+const { spawn } = require('node:child_process')
+const { writeFileSync } = require('node:fs')
+const child = spawn(process.execPath, ['-e', "setTimeout(() => {}, 30000); process.send('ready'); process.disconnect()"], {
+  stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true,
+})
+child.once('message', msg => {
+  if (msg !== 'ready') throw new Error('child did not report ready')
+  writeFileSync('child-pid', String(child.pid))
+})
+setTimeout(() => {}, 30000)
+`)
+    await assert.rejects(runFixtureCommand('"%VARGUS_TEST_NODE%" hold-child.cjs', dir, env, stopped, 1500), /timed out/)
+    childPid = Number(await readFile(join(dir, 'child-pid'), 'utf8'))
+    assert.ok(childPid > 0)
+    assert.equal(await processIsRunning(childPid), false, `timed-out child ${childPid} still active`)
+    childPid = undefined
   }, async () => {
     blocker.kill()
     await closed
+    await stopPid(survivorPid)
+    await stopPid(childPid)
     if (await realpath(dir) !== dir || dirname(dir) !== temp) throw new Error(`Fixture path changed: ${dir}`)
-    await rm(dir, { recursive: true })
+    await rm(dir, { recursive: true, maxRetries: 5, retryDelay: 100 })
   })
 })
 
