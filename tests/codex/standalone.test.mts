@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename, cp } from 'node:fs/promises'
-import { tmpdir, release } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -12,6 +12,7 @@ import { PaneInput } from '../../src/outputs/tmux/input.ts'
 import { startupDirectory, startupSuppressed, startupControl } from '../../src/cli/codex/startup.ts'
 import { codexComposer } from '../../src/hosts/codex/footer.ts'
 import { nativeFixtureEnv, removeNativeFixture, startTestDaemon } from './native-fixture.mts'
+import { detectWsl } from '../../src/node/wsl.ts'
 import { fixtureCheckout } from '../checkout.mts'
 
 const exec = promisify(execFile)
@@ -362,7 +363,7 @@ trust_level = "trusted"
       await rename(first.transcript, first.transcript + '.held')
       await assert.rejects(control('reload'))
       assert.equal((await runtime()).pid, first.pid, 'unreadable transcript keeps healthy helper')
-      const staleMark = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release())) ? '!:stale' : '⌛stale'
+      const staleMark = detectWsl() ? '!:stale' : '⌛stale'
       const expanded = async () => (await tmux('display-message', '-p', '-t', pane, '#{E:status-format[0]}')).replace(/#\[[^\]]*\]/g, '')
       await wait(expanded, new RegExp('token:6\\.4k.*' + staleMark))
       await tmux('send-keys', '-l', '-t', pane, 'Typing after a read failure')

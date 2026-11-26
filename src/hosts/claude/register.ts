@@ -14,6 +14,7 @@ import { joinParts, renderParts } from '../../render'
 import { claudeDisplay } from './display'
 import { claudeOptions, registerConfig } from './config'
 import { makeTheme } from '../../theme'
+import { DRIVE_PATH } from './paths'
 import { createWriter, endSession, homeDir, pruneOld, writeLine, type Writer } from './write'
 
 // Wiring only. Module values start over on a hot reload, which runs register
@@ -47,8 +48,14 @@ async function refresh($: EngineInterface): Promise<void> {
   await writeLine($, writer, text, values.core.columns, { t: theme, l: labels, isWsl: values.core.isWsl }, parts)
 }
 
-async function isWsl($: EngineInterface): Promise<boolean> {
-  if (await $.env.get('WSLENV')) return true
+async function isWsl(
+  $: EngineInterface,
+  home: string | undefined,
+  userProfile: string | undefined,
+  cwd: string,
+): Promise<boolean> {
+  if ((!!userProfile && DRIVE_PATH.test(userProfile) && !home?.startsWith('/')) || DRIVE_PATH.test(cwd)) return false
+  if (await $.env.get('WSL_DISTRO_NAME') || await $.env.get('WSL_INTEROP')) return true
   try {
     return /microsoft/i.test(await $.fs.read('/proc/version'))
   } catch {
@@ -88,8 +95,10 @@ export const register: Register = (on, given) => {
         configure($, e, resolveOptions({ ...options, ...changes }), noColor, options)
         refresh($).catch(() => {})
       }
-      values.core.home = homeDir(await $.env.get('HOME'), await $.env.get('USERPROFILE'))
-      values.core.isWsl = await isWsl($)
+      const home = await $.env.get('HOME')
+      const userProfile = await $.env.get('USERPROFILE')
+      values.core.home = homeDir(home, userProfile)
+      values.core.isWsl = await isWsl($, home, userProfile, e.cwd)
       tick?.cancel()
       tick = $.clock.every(1000, () => {
         refresh($).catch(() => {})

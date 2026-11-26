@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
 import { formatThemesPreview, themes } from '../../src/cli/themes.ts'
+import { detectWsl } from '../../src/node/wsl.ts'
 import { stringWidth } from '../../src/render/width.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 import { PALETTES, PALETTE_POLARITY } from '../../src/theme/palettes.ts'
@@ -241,7 +242,7 @@ describe('vargus themes', () => {
   })
 
   test('runs via CLI entrypoint with dark/light backgrounds, NO_COLOR and non-zero exit on invalid theme', async () => {
-    const envBase = { ...process.env, VARGUS_CLI_MAIN: '1', WSL_DISTRO_NAME: '', WSLENV: '' }
+    const envBase = { ...process.env, VARGUS_CLI_MAIN: '1', WSL_DISTRO_NAME: '', WSL_INTEROP: '', WSLENV: '' }
     const dark = await execFileAsync(process.execPath, ['src/cli.ts', 'themes', 'graphite'], {
       env: { ...envBase, NO_COLOR: '' },
     })
@@ -260,6 +261,27 @@ describe('vargus themes', () => {
     })
     assert.doesNotMatch(plain.stdout, /\x1b\[/)
     assert.ok(plain.stdout.startsWith('Dark themes\n\ngraphite (default)\n'))
+
+    const withWslenv = await execFileAsync(process.execPath, ['src/cli.ts', 'themes', 'graphite'], {
+      env: { ...envBase, NO_COLOR: '1', WSLENV: 'WT_SESSION:WT_PROFILE_ID:' },
+    })
+    if (!detectWsl({ WSL_DISTRO_NAME: '', WSL_INTEROP: '' })) {
+      assert.ok(withWslenv.stdout.includes('🔧73 🤖2 ⚡1'))
+      assert.ok(withWslenv.stdout.includes('⌛stale'))
+      assert.doesNotMatch(withWslenv.stdout, /T:73|!:stale/)
+    }
+
+    const withDistro = await execFileAsync(process.execPath, ['src/cli.ts', 'themes', 'graphite'], {
+      env: { ...envBase, NO_COLOR: '1', WSL_DISTRO_NAME: 'Ubuntu' },
+    })
+    if (process.platform === 'linux') {
+      assert.ok(withDistro.stdout.includes('T:73 A:2 S:1'))
+      assert.ok(withDistro.stdout.includes('!:stale'))
+      assert.doesNotMatch(withDistro.stdout, /[🔧🤖⚡⌛]/)
+    } else if (process.platform === 'win32') {
+      assert.ok(withDistro.stdout.includes('🔧73 🤖2 ⚡1'))
+      assert.ok(withDistro.stdout.includes('⌛stale'))
+    }
 
     await assert.rejects(
       execFileAsync(process.execPath, ['src/cli.ts', 'themes', 'nope'], { env: { ...envBase, NO_COLOR: '' } }),

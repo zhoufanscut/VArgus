@@ -1,4 +1,4 @@
-import { homedir, release } from 'node:os'
+import { homedir } from 'node:os'
 import { staleLine, staleParts } from '../render/freshness.ts'
 import { cachePath, defaultCacheDir, readCache, writeCache } from '../hosts/antigravity/cache.ts'
 import { collectAntigravityPayload, type AntigravityPayload } from '../hosts/antigravity/collect.ts'
@@ -9,6 +9,7 @@ import { collectDeclaredSkillRoots, readTranscriptState, resolveConversationId, 
 import { readCachedVcs } from '../hosts/antigravity/vcs.ts'
 import { resolveLabels } from '../i18n/index.ts'
 import { readCheckoutOptions, readOptionsFile } from '../node/options.ts'
+import { detectWsl } from '../node/wsl.ts'
 import { resolveOptions } from '../options.ts'
 import { joinParts, renderParts } from '../render/index.ts'
 import { makeTheme } from '../theme/index.ts'
@@ -40,10 +41,6 @@ export type StatuslineRuntime = {
   fallbackCwd?: string
 }
 
-function detectWsl(env: NodeJS.ProcessEnv): boolean {
-  return Boolean(env.WSL_DISTRO_NAME || env.WSLENV || /microsoft/i.test(release()))
-}
-
 export async function renderAntigravityStatusLine(
   payload: AntigravityPayload,
   runtime: StatuslineRuntime = {},
@@ -51,7 +48,7 @@ export async function renderAntigravityStatusLine(
   const id = resolveConversationId(payload)
   if (!id) return (await collectLine(payload, runtime)).line
   const dir = runtime.cacheDir ?? defaultCacheDir()
-  const isWsl = runtime.isWsl ?? detectWsl(process.env)
+  const isWsl = runtime.isWsl ?? detectWsl()
   const noColor = runtime.noColor ?? Boolean(process.env.NO_COLOR)
   const options = resolveOptions(runtime.givenOptions ?? {})
   const key = JSON.stringify([runtime.appDataDir ?? process.env.ANTIGRAVITY_APP_DATA_DIR, runtime.home ?? homedir(),
@@ -86,7 +83,7 @@ async function collectLine(payload: AntigravityPayload, runtime: StatuslineRunti
   const now = runtime.now ?? Date.now()
   const home = runtime.home ?? homedir()
   const appDataDir = runtime.appDataDir ?? process.env.ANTIGRAVITY_APP_DATA_DIR
-  const isWsl = runtime.isWsl ?? detectWsl(process.env)
+  const isWsl = runtime.isWsl ?? detectWsl()
   const noColor = runtime.noColor ?? Boolean(process.env.NO_COLOR)
   const cacheDir = runtime.cacheDir ?? defaultCacheDir()
   const options = resolveOptions(runtime.givenOptions ?? {})

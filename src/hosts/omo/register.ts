@@ -1,4 +1,4 @@
-import { homedir, release } from 'node:os'
+import { homedir } from 'node:os'
 import {
   collectOmo,
   collectOmoSpawns,
@@ -17,6 +17,7 @@ import { OmoVcs } from './vcs.ts'
 import { OmoKimi, type ProviderAuth } from './kimi.ts'
 import { outputTokensPerSecond } from '../../core/session.ts'
 import { readCheckoutOptions, readOptionsFile } from '../../node/options.ts'
+import { detectWsl } from '../../node/wsl.ts'
 import { mountOmo, type OmoUi } from '../../outputs/omo.ts'
 import { parseOptions, resolveOptions } from '../../options.ts'
 import { resolveLabels } from '../../i18n/index.ts'
@@ -139,7 +140,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     const kimi = new OmoKimi(() => instance.ctx.modelRegistry.getProviderAuth('kimi-coding'))
     const theme = makeTheme(options.theme, Boolean(process.env.NO_COLOR))
     const labels = resolveLabels('en')
-    const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
+    const isWsl = detectWsl()
     let disposed = false
     let stream: { firstAt?: number; lastAt?: number; events: number } | undefined
     let tokensPerSecond: number | undefined

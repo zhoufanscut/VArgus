@@ -2,11 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { appendFile, lstat, mkdir, mkdtemp, readFile, writeFile, readdir, rm, symlink } from 'node:fs/promises'
 import { fixtureCheckout } from '../checkout.mts'
-import { tmpdir, release } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import vargus, { type OmoApi } from '../../src/hosts/omo/register.ts'
 import { main } from '../../src/cli.ts'
+import { detectWsl } from '../../src/node/wsl.ts'
 import { collectOmoAgents, collectOmoSubagentSkills } from '../../src/hosts/omo/collect.ts'
 import { OmoSubagents, projectStateKey } from '../../src/hosts/omo/subagents.ts'
 import type { HistoryReducer, SessionEntry } from '../../src/hosts/omo/contracts.ts'
@@ -102,7 +103,7 @@ test('OmO warns on a redraw after missed updates and clears the warning after re
   const hadNoColor = 'NO_COLOR' in process.env
   const savedNoColor = process.env.NO_COLOR
   delete process.env.NO_COLOR
-  const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
+  const isWsl = detectWsl()
   const theme = makeTheme('graphite', false)
   const staleMark = isWsl ? '!:stale' : '⌛stale'
   const styledSuffix = theme.paint('sep', ' | ') + theme.paint('label', staleMark)
@@ -162,7 +163,7 @@ test('OmO stale trimming preserves whole fragments containing ` | ` under NO_COL
   const hadNoColor = 'NO_COLOR' in process.env
   const savedNoColor = process.env.NO_COLOR
   process.env.NO_COLOR = '1'
-  const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
+  const isWsl = detectWsl()
   const staleMark = isWsl ? '!:stale' : '⌛stale'
   const h = host('tui', '/a | b')
   h.load(); h.event('session_start')

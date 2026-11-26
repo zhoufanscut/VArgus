@@ -1,5 +1,5 @@
 import { rm } from 'node:fs/promises'
-import { homedir, release } from 'node:os'
+import { homedir } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
 import { addCounts, type Counts } from '../../core/session.ts'
 import { restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, savedFooterSettings, FooterSettings } from '../../hosts/codex/footer.ts'
@@ -15,6 +15,7 @@ import { staleParts } from '../../render/freshness.ts'
 import { joinParts } from '../../render/index.ts'
 import { cleanText } from '../../render/text.ts'
 import { makeTheme } from '../../theme/index.ts'
+import { detectWsl } from '../../node/wsl.ts'
 import { codexLine } from './line.ts'
 import {
   backups, footerPath, json, recordPath, replyPath, requestPath, running, save,
@@ -67,7 +68,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const file = recordPath(target), views = new Views(spec.home, thread, spec.transcript), input = new PaneInput(target)
   const output = new TmuxOutput(target.socket, target.pane)
   const options = resolveCodexOptions(spec.options), theme = makeTheme(options.theme, !!process.env.NO_COLOR)
-  const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release()))
+  const isWsl = detectWsl()
   const staleStyle = { t: theme, l: en, isWsl }
   const footerSettings = new FooterSettings(cwd => savedFooterSettings(cwd, spec.home))
   const modelDefault = options.model && options.effort

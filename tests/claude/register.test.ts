@@ -7,7 +7,7 @@ import { makeTheme } from '../../src/theme'
 // PromptHint viewport; NO_COLOR, the theme option and WSL as the line shows
 // them; the model re-read on each tick.
 
-type World = { lines: string[]; model: string; stepUsage: typeof SENTINEL.step.usage }
+type World = { lines: string[]; checkIns: string[]; model: string; stepUsage: typeof SENTINEL.step.usage }
 
 // The bottoms answer with sentinels: values no mod would make up, so a hook
 // that rebuilt or replaced the answer is seen.
@@ -25,7 +25,7 @@ const SENTINEL = {
 }
 
 function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '/home/u', NO_COLOR: '1' }, mockProcess = true): World {
-  const w: World = { lines: [], model: 'claude-opus-5-5[1m]', stepUsage: SENTINEL.step.usage }
+  const w: World = { lines: [], checkIns: [], model: 'claude-opus-5-5[1m]', stepUsage: SENTINEL.step.usage }
   mock.env(on, env)
   on('session.start', async () => SENTINEL.start)
   on('session.id', async () => ({ value: 'S1' }))
@@ -35,7 +35,8 @@ function world(on: On, clock: MockClock, env: Record<string, string> = { HOME: '
     value: { startedAt: 0, context: { window: 200000, percent: 20 }, rateLimits: [] },
   }))
   on('fs.write', async ($, e) => {
-    if (!e.path.endsWith('.live')) w.lines.push(e.text)
+    if (e.path.endsWith('.live')) w.checkIns.push(e.text)
+    else w.lines.push(e.text)
     return { value: undefined }
   })
   if (mockProcess) on('process.run', async () => ({
@@ -197,13 +198,101 @@ describe('register: the line as the host sets it up', () => {
       expect(commands).not.toContain('vargus')
     })
 
-  test('WSLENV set: call counts as text', NO_VCS, async ($, on) => {
-    const clock = mock.clock(on, { now: 0 })
-    const w = world(on, clock, { HOME: '/home/u', NO_COLOR: '1', WSLENV: 'WT_SESSION' })
-    await $.session.start(start)
-    await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
-    expect(await line(clock, w)).toContain('| T:1')
-  })
+  for (const c of [
+    {
+      name: 'native Windows with WSLENV keeps icons and ⌛stale (PowerShell)',
+      env: { USERPROFILE: 'C:\\Users\\u', NO_COLOR: '1', WSLENV: 'WT_SESSION:WT_PROFILE_ID:' },
+      cwd: 'C:\\Users\\u\\proj',
+      procVersion: new Error('ENOENT'),
+    },
+    {
+      name: 'native Windows ignores inherited WSL_DISTRO_NAME and WSL_INTEROP (PowerShell)',
+      env: {
+        USERPROFILE: 'C:\\Users\\u',
+        WSL_DISTRO_NAME: 'Ubuntu',
+        WSL_INTEROP: '/run/WSL/123_interop',
+        WSLENV: 'WT_SESSION:WT_PROFILE_ID:',
+        NO_COLOR: '1',
+      },
+      cwd: 'C:\\Users\\u\\proj',
+      procVersion: new Error('ENOENT'),
+    },
+    {
+      name: 'native Windows drive cwd ignores inherited WSL vars even with POSIX HOME',
+      env: {
+        HOME: '/c/Users/u',
+        WSL_DISTRO_NAME: 'Ubuntu',
+        WSL_INTEROP: '/run/WSL/123_interop',
+        WSLENV: 'WT_SESSION:WT_PROFILE_ID:',
+        NO_COLOR: '1',
+      },
+      cwd: 'C:\\Users\\u\\proj',
+      procVersion: new Error('ENOENT'),
+    },
+    {
+      name: 'non-WSL Linux with WSLENV keeps icons and ⌛stale',
+      env: { HOME: '/home/u', NO_COLOR: '1', WSLENV: 'WT_SESSION:WT_PROFILE_ID:' },
+      cwd: '/home/u/x',
+      procVersion: 'Linux version 6.12.107+deb13-amd64',
+    },
+  ] as { name: string; env: Record<string, string>; cwd: string; procVersion: string | Error }[]) {
+    test(c.name, NO_VCS, async ($, on) => {
+      const clock = mock.clock(on, { now: 0 })
+      const w = world(on, clock, c.env)
+      on('fs.read', async ($, e, next) => {
+        if (e.path !== '/proc/version') return next(e)
+        if (c.procVersion instanceof Error) throw c.procVersion
+        return { value: c.procVersion }
+      })
+      await $.session.start({ ...start, cwd: c.cwd })
+      await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+      expect(await line(clock, w)).toContain('| 🔧1')
+      expect(w.lines.at(-1)).not.toContain('| T:1')
+      await clock.advance(2000)
+      expect(w.checkIns.at(-1)).toContain('| ⌛stale')
+      expect(w.checkIns.at(-1)).not.toContain('!:stale')
+    })
+  }
+
+  for (const c of [
+    {
+      name: 'real WSL with WSL_DISTRO_NAME and forwarded USERPROFILE uses T:1 and !:stale',
+      env: {
+        HOME: '/home/u',
+        USERPROFILE: 'C:\\Users\\u',
+        WSL_DISTRO_NAME: 'Ubuntu',
+        WSLENV: 'WT_SESSION:WT_PROFILE_ID:',
+        NO_COLOR: '1',
+      },
+      procVersion: 'Linux version 6.6.10-custom',
+    },
+    {
+      name: 'real WSL with WSL_INTEROP uses T:1 and !:stale',
+      env: { HOME: '/home/u', WSL_INTEROP: '/run/WSL/123_interop', NO_COLOR: '1' },
+      procVersion: 'Linux version 6.6.10-custom',
+    },
+    {
+      name: 'real WSL with Microsoft /proc/version uses T:1 and !:stale',
+      env: { HOME: '/home/u', NO_COLOR: '1' },
+      procVersion: 'Linux version 5.15.167.4-microsoft-standard-WSL2',
+    },
+  ] as { name: string; env: Record<string, string>; procVersion: string }[]) {
+    test(c.name, NO_VCS, async ($, on) => {
+      const clock = mock.clock(on, { now: 0 })
+      const w = world(on, clock, c.env)
+      on('fs.read', async ($, e, next) => {
+        if (e.path !== '/proc/version') return next(e)
+        return { value: c.procVersion }
+      })
+      await $.session.start(start)
+      await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+      expect(await line(clock, w)).toContain('| T:1')
+      expect(w.lines.at(-1)).not.toContain('🔧1')
+      await clock.advance(2000)
+      expect(w.checkIns.at(-1)).toContain('| !:stale')
+      expect(w.checkIns.at(-1)).not.toContain('⌛stale')
+    })
+  }
 
   test('a model switch shows on the next tick, with no session.measure', NO_VCS, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })

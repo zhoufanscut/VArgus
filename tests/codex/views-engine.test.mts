@@ -6,7 +6,7 @@ import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rename, utimes } from 'node:fs/promises'
 import { syncBuiltinESMExports } from 'node:module'
-import { tmpdir, release } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
 import { createInterface } from 'node:readline'
@@ -17,6 +17,7 @@ import { codexComposer } from '../../src/hosts/codex/footer.ts'
 import { RolloutReader } from '../../src/hosts/codex/rollout.ts'
 import { Views, selectedView } from '../../src/hosts/codex/views.ts'
 import { foldDescendantCounts, RolloutReaderCache } from '../../src/cli/codex/worker.ts'
+import { detectWsl } from '../../src/node/wsl.ts'
 import { nativeFixtureEnv, removeNativeFixture, startTestDaemon } from './native-fixture.mts'
 
 const exec = promisify(execFile)
@@ -400,7 +401,7 @@ os.execv('/usr/bin/ps',['ps']+sys.argv[1:])
     const visibleRow = async () => (await tmux('display-message', '-p', '-t', pane, '#{E:status-format[0]}')).replace(/#\[[^\]]*\]/g, '')
     const healthy = await visibleRow()
     assert.match(healthy, new RegExp('token:' + expected.get(lastPath)!.tokens.replace('.', '\\.')))
-    const staleMark = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSLENV || /microsoft/i.test(release())) ? '!:stale' : '⌛stale'
+    const staleMark = detectWsl() ? '!:stale' : '⌛stale'
     await rename(transcript, held)
     await wait(visibleRow, new RegExp(' \\| ' + staleMark + '$'))
     assert.equal(await visibleRow(), await row() + ' | ' + staleMark)
@@ -703,9 +704,43 @@ trust_level = "trusted"
     }
     assert.equal(visited.size, 2)
 
-    // Return to Main, flip includeSubagents to false in vargus.jsonc, reload, and verify self-only counts.
+    // Return to Main, verify worker WSL detection across reload, flip includeSubagents to false in vargus.jsonc, reload, and verify self-only counts.
     await tmux('send-keys', '-t', pane, 'M-Left')
     await wait(row, /token:28\.8k\(94\.3%\)/)
+    const staleRow = async () => {
+      try { return (await tmux('show-options', '-p', '-v', '-t', pane, '@vargus_stale')).replace(/#\[[^\]]*\]/g, '') } catch { return '' }
+    }
+    const beforePid = (await records())[0]?.pid
+    await exec(join(checkout, 'bin/vargus'), ['reload'], {
+      cwd: project,
+      env: { ...env, CODEX_THREAD_ID: active.thread, WSLENV: 'WT_SESSION:WT_PROFILE_ID:', WSL_DISTRO_NAME: '', WSL_INTEROP: '' },
+    })
+    await wait(async () => {
+      const pid = (await records())[0]?.pid
+      return pid && pid !== beforePid ? String(pid) : ''
+    }, /^\d+$/)
+    await wait(async () => codexComposer(await new PaneInput(active.target).snapshot(), '') ? 'ready' : '', /^ready$/)
+    const wslenvRow = await wait(row, /token:28\.8k\(94\.3%\)/)
+    if (!detectWsl({ WSL_DISTRO_NAME: '', WSL_INTEROP: '' })) {
+      assert.match(wslenvRow, /🔧1 🤖3 ⚡1/)
+      assert.doesNotMatch(wslenvRow, /T:1/)
+      assert.match(await staleRow(), /⌛stale/)
+      assert.doesNotMatch(await staleRow(), /!:stale/)
+    }
+    const afterWslenvPid = (await records())[0]?.pid
+    await exec(join(checkout, 'bin/vargus'), ['reload'], {
+      cwd: project,
+      env: { ...env, CODEX_THREAD_ID: active.thread, WSL_DISTRO_NAME: 'Ubuntu', WSLENV: '', WSL_INTEROP: '' },
+    })
+    await wait(async () => {
+      const pid = (await records())[0]?.pid
+      return pid && pid !== afterWslenvPid ? String(pid) : ''
+    }, /^\d+$/)
+    await wait(async () => codexComposer(await new PaneInput(active.target).snapshot(), '') ? 'ready' : '', /^ready$/)
+    const wslRow = await wait(row, /T:1 A:3 S:1/)
+    assert.doesNotMatch(wslRow, /🔧|🤖|⚡/)
+    assert.match(await staleRow(), /!:stale/)
+    assert.doesNotMatch(await staleRow(), /⌛stale/)
     await writeFile(sharedConfig, JSON.stringify({ includeSubagents: false }))
     await exec(join(checkout, 'bin/vargus'), ['reload'], { cwd: project, env: { ...env, CODEX_THREAD_ID: active.thread } })
     const reloaded = (await records())[0]

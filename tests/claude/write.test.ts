@@ -318,7 +318,7 @@ describe('line file', () => {
 
   test('WSL: a Windows USERPROFILE passed through leaves HOME in charge', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
-    const w = world(on, clock, { HOME: '/home/u', USERPROFILE: 'C:\\Users\\u', WSLENV: 'USERPROFILE', NO_COLOR: '1' })
+    const w = world(on, clock, { HOME: '/home/u', USERPROFILE: 'C:\\Users\\u', WSL_DISTRO_NAME: 'Ubuntu', WSLENV: 'USERPROFILE', NO_COLOR: '1' })
     await $.session.start(start)
     await clock.settle()
     expect(w.runs).toEqual([['mv', '-f', `${DATA}/S1/line.3.tmp`, `${DATA}/S1/line`]])

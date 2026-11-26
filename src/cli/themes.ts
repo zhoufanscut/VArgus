@@ -1,7 +1,7 @@
-import { release } from 'node:os'
 import type { Rgb, TokenName, Values } from '../core/types.ts'
 import { initialSession } from '../core/session.ts'
 import { resolveLabels } from '../i18n/index.ts'
+import { detectWsl } from '../node/wsl.ts'
 import { DEFAULTS } from '../options.ts'
 import { staleParts } from '../render/freshness.ts'
 import { render, renderParts } from '../render/index.ts'
@@ -34,10 +34,6 @@ Preview all bundled themes (or one named theme) on a dark (#181818) or light (#f
 Dark themes: ${DARK_THEMES.join(', ')}.
 Light themes: ${LIGHT_THEMES.join(', ')}.
 Respects NO_COLOR.`
-
-function detectWsl(env: NodeJS.ProcessEnv): boolean {
-  return Boolean(env.WSL_DISTRO_NAME || env.WSLENV || /microsoft/i.test(release()))
-}
 
 function sampleValues(isWsl: boolean): { calm: Values; alert: Values } {
   const core = { cwd: '/home/u/proj/VArgus', home: '/home/u', columns: undefined, isWsl }
@@ -206,7 +202,7 @@ export function themes(
     selected = [key]
   }
   const noColor = io?.noColor ?? Boolean(process.env.NO_COLOR)
-  const isWsl = io?.isWsl ?? detectWsl(process.env)
+  const isWsl = io?.isWsl ?? detectWsl()
   const columns = io?.columns ?? (process.stdout.isTTY ? process.stdout.columns : undefined)
   write(formatThemesPreview(selected, { noColor, isWsl, columns }))
   return 0

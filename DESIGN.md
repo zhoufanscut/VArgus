@@ -192,9 +192,11 @@ The row uses one compact layout across all four hosts:
 | Model without effort | `name` | `label` | `opus`, `orchestrator` |
 | Secondary parenthetical | `(info)` attached | `detail` | `(carbon)`, `(argon)`, `(fast)`, `(ultrafast)`, `(4h37m)`, `(99.4%, 48t/s)`, `(wt:x)` |
 | Git operation parenthetical | `(op)` attached | `alert` | `(rebase 2/3)`, `(merge)`, `(bisect)` |
-| Icon prefix | `<icon><text>` (WSL `<char>:<text>`) | `label` | `🔧73 🤖2 ⚡1` / `T:73 A:2 S:1`, `⌛stale` / `!:stale` |
+| Icon prefix | `<icon><text>` (WSL `<char>:<text>`, see below) | `label` | `🔧73 🤖2 ⚡1` / `T:73 A:2 S:1`, `⌛stale` / `!:stale` |
 | API error badge | `[API CODE]` | `alert` (in the rate-limit slot) | `[API 429]`, `[API AUTH]`, `[API ERR]` |
 | VCS status | `<mark><count>` | `add` (`+`, `⇡`), `del` (`✗`, `!`, `⇣`), `track` (`?`) | `✗1 +2 !3 ?4 ⇡1 ⇣2` |
+
+All hosts select the WSL text fallback (`T:`, `A:`, `S:`, `!:stale`) only on WSL and ignore `WSLENV`: native Windows processes launched from Windows Terminal inherit `WSLENV` (such as `WT_SESSION:WT_PROFILE_ID:`) to forward variables into `wsl.exe`, which previously forced false text fallback on native Windows (`win32`) with PowerShell and `psmux` (clearing only `WSLENV` in the same native Windows process switched the preview from `T:73` to `🔧73`). The Node hosts ([`detectWsl`](src/node/wsl.ts), shared by Codex, OmO, Antigravity and `vargus themes`) require Linux (`process.platform === 'linux'`) plus `WSL_DISTRO_NAME`, `WSL_INTEROP`, or a `/microsoft/i` `os.release()` kernel string. The Claude mod ([`isWsl`](src/hosts/claude/register.ts)), which has no `process.platform` API, returns `false` on drive-path Windows environments (`USERPROFILE` a drive path without a `/` `HOME`, or a drive-path working directory) and otherwise checks `WSL_DISTRO_NAME`, `WSL_INTEROP`, or `/proc/version` matching `/microsoft/i`.
 
 ### Colours
 
@@ -964,7 +966,9 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   A separate Codex row test checks
   out a tag in a real linked worktree and renders it with defaults and with
   the former `detachedHead: false` setting. The suite also checks the psmux
-  command contract.
+  command contract, and [wsl.test.mts](tests/shared/wsl.test.mts) covers
+  `detectWsl` and the Node entry points (`vargus themes`, Antigravity, OmO) for
+  native Windows with `WSLENV` set and for real WSL signals.
 - `npm test` adds native Codex and multiplexer integration tests through the
   [platform-aware runner](tests/run-node.mjs). Codex tests with a localhost
   provider exercise the stock engine, saved events and TUI. The supplied
@@ -989,7 +993,10 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   `rollout/compress` fixture (Linux, Codex 0.171.0) verified that a 15-day-old
   child compressed to `.jsonl.zst` preserves the 9,000-token total across both
   live reader transition and fresh discovery while keeping folding-off at 2,000
-  without decompressing compressed children. Model choice,
+  without decompressing compressed children. A later run in the `includeSubagents`
+  fixture (Linux, Codex 0.172.0, tmux 3.5a) also reloaded the Codex worker under
+  `WSLENV` vs `WSL_DISTRO_NAME` to check icons/text counts and stale markers in
+  tmux. Model choice,
   billing and different provider timing need their own evidence.
 - `npm run test:claude` validates the plugin, type-checks against generated
   types, runs Claude engine fixtures and checks the documented reader and
