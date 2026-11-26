@@ -64,7 +64,8 @@ function world(
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   const key = (path: string) => fixtureFsPath(path, pathStyle)
   on('fs.write', async ($, e) => {
-    if (e.path.endsWith('/line.live')) {
+    const path = key(e.path)
+    if (path.endsWith('/line.live')) {
       w.checkIns.push(e.text)
       return { value: undefined }
     }
@@ -73,7 +74,7 @@ function world(
     if (w.holdMs) await clock.sleep(w.holdMs)
     w.inFlight -= 1
     if (w.tmpFails && e.path.endsWith('.tmp')) throw new Error('denied')
-    w.writes.push({ path: key(e.path), text: e.text })
+    w.writes.push({ path, text: e.text })
     return { value: undefined }
   })
   on('fs.list', async ($, e) => {

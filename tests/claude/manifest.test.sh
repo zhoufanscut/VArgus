@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs"
 const root = process.argv[1]
 const fail = msg => { console.log("FAIL: " + msg); process.exit(1) }
 const manifest = JSON.parse(readFileSync(root + "/.claude-plugin/plugin.json", "utf8"))
-const src = readFileSync(root + "/src/options.ts", "utf8")
+const src = readFileSync(root + "/src/options.ts", "utf8").replace(/\r\n/g, "\n")
 const open = "export const DEFAULTS = {\n"
 const block = src.slice(src.indexOf(open) + open.length, src.indexOf("}", src.indexOf(open)))
 const line = /^\s+(\w+): (true|false|\d+|\x27[^\x27]*\x27),$/
@@ -20,7 +20,7 @@ const defaults = Object.fromEntries([...block.matchAll(new RegExp(line.source, "
 const config = Object.fromEntries(Object.entries(manifest.userConfig).map(([k, f]) => [k, f.default]))
 const a = JSON.stringify(defaults), b = JSON.stringify(config)
 if (Object.keys(defaults).length < 10 || a !== b) fail("options.ts " + a + "\n      plugin.json " + b)
-const palettes = readFileSync(root + "/src/theme/palettes.ts", "utf8")
+const palettes = readFileSync(root + "/src/theme/palettes.ts", "utf8").replace(/\r\n/g, "\n")
 const names = [...palettes.matchAll(/^  (\w+): \{$/gm)].map(m => m[1])
 const picker = manifest.userConfig.theme.options
 if (names.length < 5 || JSON.stringify(names) !== JSON.stringify(picker))

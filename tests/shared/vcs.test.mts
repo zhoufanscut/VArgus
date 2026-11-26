@@ -1,9 +1,9 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, rmdir, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 
 import { initialSession } from '../../src/core/session.ts'
@@ -14,13 +14,29 @@ import {
 } from '../../src/core/vcs.ts'
 import type { FragmentInput, Theme } from '../../src/core/types.ts'
 import { en, type Labels } from '../../src/i18n/en.ts'
-import { findSvnRoot, readSvn, readVcs } from '../../src/node/vcs.ts'
+import { findSvnRoot, readGit, readSvn, readVcs } from '../../src/node/vcs.ts'
 import { DEFAULTS } from '../../src/options.ts'
 import { folder } from '../../src/render/fragments/folder.ts'
 import { branch, repo, status } from '../../src/render/fragments/vcs.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 
 const exec = promisify(execFile)
+
+test('readGit releases a non-repository working directory before returning on Windows', { skip: process.platform !== 'win32' }, async () => {
+  await exec('git', ['--version'], { windowsHide: true })
+  const directory = await mkdtemp(join(tmpdir(), 'vargus-git-cwd-'))
+  const previous = process.env.GIT_CEILING_DIRECTORIES
+  process.env.GIT_CEILING_DIRECTORIES = dirname(directory)
+  try {
+    assert.deepEqual(await readGit(directory), initialVcs())
+    await rmdir(directory)
+  } catch (error) {
+    throw new Error(`Retained Git fixture at ${directory}`, { cause: error })
+  } finally {
+    if (previous === undefined) delete process.env.GIT_CEILING_DIRECTORIES
+    else process.env.GIT_CEILING_DIRECTORIES = previous
+  }
+})
 
 // Git porcelain examples captured from Git 2.47.3 in throwaway repositories.
 // ahead 1 behind 1; R. M. A. staged; .M .A (git add -N) modified; two untracked

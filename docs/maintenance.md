@@ -42,7 +42,9 @@ then `---` and `**Full changelog**: <compare link>` (see VantageHUD's GitHub rel
   root on a fresh checkout or after upgrading Claude Code. Let Claude load the plugin and
   write its TypeScript declarations to `.claude-plugin/types/`, then exit the session.
   Run `npm run test:claude` for plugin validation, type-checking, engine tests and the
-  reader and manifest checks. See [test and verification details](../DESIGN.md#tests).
+  reader and manifest checks. On Windows the shell checks use Git for Windows, and
+  the runner checks fixture process exit with CIM.
+  See [test and verification details](../DESIGN.md#tests).
 
 ## Add a host
 

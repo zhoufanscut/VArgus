@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { fixtureCheckout } from '../checkout.mts'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -85,8 +85,8 @@ test('Antigravity row cache v2 preserves whole fragments containing ` | ` under 
     const cacheDir = join(dir, 'cache')
     const home = join(dir, 'home')
     const folderCwd = join(home, 'a | b')
+    const folderLabel = join('~', 'a | b')
     const folderTranscript = join(home, '.gemini', 'antigravity-cli', 'brain', 'folder', '.system_generated', 'logs', 'transcript.jsonl')
-    await mkdir(folderCwd, { recursive: true })
     await mkdir(join(folderTranscript, '..'), { recursive: true })
     await writeFile(folderTranscript, '{}\n')
 
@@ -100,11 +100,11 @@ test('Antigravity row cache v2 preserves whole fragments containing ` | ` under 
       terminal_width: 17,
     }
     const healthyFolder = await renderAntigravityStatusLine(folderPayload, folderRuntime)
-    assert.equal(healthyFolder, '  ~/a | b | opus')
+    assert.equal(healthyFolder, `  ${folderLabel} | opus`)
 
     const folderKey = JSON.stringify([process.env.ANTIGRAVITY_APP_DATA_DIR, home, 'folder', folderCwd, { ...DEFAULTS, ...folderOptions }, true, false])
     const folderRowCache = cachePath(cacheDir, 'row', folderKey)
-    assert.deepEqual(JSON.parse(await readFile(folderRowCache, 'utf8')), { version: 2, parts: ['~/a | b', 'opus'] })
+    assert.deepEqual(JSON.parse(await readFile(folderRowCache, 'utf8')), { version: 2, parts: [folderLabel, 'opus'] })
 
     const folderTranscriptCache = cachePath(cacheDir, 'transcript', folderTranscript)
     const savedFolderTranscript = await readFile(folderTranscriptCache, 'utf8')
@@ -112,53 +112,34 @@ test('Antigravity row cache v2 preserves whole fragments containing ` | ` under 
     await appendFile(folderTranscript, '{}\n')
     assert.equal(await renderAntigravityStatusLine(folderPayload, folderRuntime), '  ⌛stale')
 
-    // Linked worktree containing ` | ` drops the whole branch fragment instead of leaving an unclosed parenthesis.
-    const repoBase = join(dir, 'repo-base')
-    const wtDir = join(home, 'alpha | beta_long_suffix')
-    const git = (cwd: string, args: string[]) => exec('git', args, {
-      cwd,
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: 'Test',
-        GIT_AUTHOR_EMAIL: 'test@example.com',
-        GIT_COMMITTER_NAME: 'Test',
-        GIT_COMMITTER_EMAIL: 'test@example.com',
-      },
-    })
-    await mkdir(repoBase, { recursive: true })
-    await git(repoBase, ['init', '-b', 'init'])
-    await git(repoBase, ['remote', 'add', 'origin', 'https://example.invalid/R.git'])
-    await writeFile(join(repoBase, 'f.txt'), 'x\n')
-    await git(repoBase, ['add', 'f.txt'])
-    await git(repoBase, ['commit', '-m', 'init'])
-    await git(repoBase, ['worktree', 'add', '-b', 'main', wtDir])
-    const newAdmin = join(repoBase, '.git', 'worktrees', 'alpha | beta_long_suffix')
-    await rename(join(repoBase, '.git', 'worktrees', 'alpha-|-beta_long_suffix'), newAdmin)
-    await writeFile(join(wtDir, '.git'), `gitdir: ${newAdmin}\n`)
+    const repoDir = join(home, 'repo')
+    const repoName = 'alpha | beta_long_suffix'
+    await mkdir(repoDir)
+    await exec('git', ['init', '-q', '-b', 'main'], { cwd: repoDir })
+    await exec('git', ['remote', 'add', 'origin', `https://example.invalid/${repoName}.git`], { cwd: repoDir })
 
-    const wtTranscript = join(home, '.gemini', 'antigravity-cli', 'brain', 'wt', '.system_generated', 'logs', 'transcript.jsonl')
-    await mkdir(join(wtTranscript, '..'), { recursive: true })
-    await writeFile(wtTranscript, '{}\n')
-    const wtOptions = { rateLimits: false, tokens: false, session: false, callCounts: false, status: false }
-    const wtRuntime = { cacheDir, home, noColor: true, isWsl: false, givenOptions: wtOptions }
-    const wtPayload: AntigravityPayload = {
-      conversation_id: 'wt',
+    const repoTranscript = join(home, '.gemini', 'antigravity-cli', 'brain', 'repo', '.system_generated', 'logs', 'transcript.jsonl')
+    await mkdir(join(repoTranscript, '..'), { recursive: true })
+    await writeFile(repoTranscript, '{}\n')
+    const repoOptions = { ...folderOptions, session: false, tokens: true, repo: true }
+    const repoRuntime = { ...folderRuntime, givenOptions: repoOptions }
+    const repoPayload: AntigravityPayload = {
+      conversation_id: 'repo',
       model: { display_name: 'Claude Opus 5.5 (High)', effort: 'high' },
-      cwd: wtDir,
-      transcript_path: wtTranscript,
+      cwd: repoDir,
+      transcript_path: repoTranscript,
       terminal_width: 120,
     }
-    const healthyWt = await renderAntigravityStatusLine(wtPayload, wtRuntime)
-    assert.equal(healthyWt, '  ~/alpha | beta_long_suffix | opus:high | ctx:0% | repo:R | branch:main(wt:alpha | beta_long_suffix)')
+    const beforeRepo = `  ${join('~', 'repo')} | opus:high | ctx:0%`
+    const expectedRepo = `${beforeRepo} | repo:${repoName}`
+    assert.equal(await renderAntigravityStatusLine(repoPayload, repoRuntime), expectedRepo)
 
-    const wtTranscriptCache = cachePath(cacheDir, 'transcript', wtTranscript)
-    await writeFile(wtTranscriptCache, JSON.stringify({ ...JSON.parse(await readFile(wtTranscriptCache, 'utf8')), seenSkillsInTurn: 42 }))
-    await appendFile(wtTranscript, '{}\n')
-    const prefixBeforeBranch = '~/alpha | beta_long_suffix | opus:high | ctx:0% | repo:R'
-    const narrowWidth = stringWidth(`${prefixBeforeBranch} | ⌛stale`) + 2
+    const repoTranscriptCache = cachePath(cacheDir, 'transcript', repoTranscript)
+    await writeFile(repoTranscriptCache, JSON.stringify({ ...JSON.parse(await readFile(repoTranscriptCache, 'utf8')), seenSkillsInTurn: 42 }))
+    await appendFile(repoTranscript, '{}\n')
     assert.equal(
-      await renderAntigravityStatusLine({ ...wtPayload, terminal_width: narrowWidth }, wtRuntime),
-      `  ${prefixBeforeBranch} | ⌛stale`,
+      await renderAntigravityStatusLine({ ...repoPayload, terminal_width: stringWidth(expectedRepo) }, repoRuntime),
+      `${beforeRepo} | ⌛stale`,
     )
 
     // Legacy v1 string row cache falls back on error and upgrades to v2 on recovery.
@@ -166,7 +147,7 @@ test('Antigravity row cache v2 preserves whole fragments containing ` | ` under 
     assert.equal(await renderAntigravityStatusLine(folderPayload, folderRuntime), '  ~/x | ⌛stale')
     await writeFile(folderTranscriptCache, savedFolderTranscript)
     assert.equal(await renderAntigravityStatusLine(folderPayload, folderRuntime), healthyFolder)
-    assert.deepEqual(JSON.parse(await readFile(folderRowCache, 'utf8')), { version: 2, parts: ['~/a | b', 'opus'] })
+    assert.deepEqual(JSON.parse(await readFile(folderRowCache, 'utf8')), { version: 2, parts: [folderLabel, 'opus'] })
 
     // Empty v2 cache rethrows on failure instead of returning blank padding.
     await writeFile(folderRowCache, JSON.stringify({ version: 2, parts: [] }))
@@ -572,33 +553,49 @@ test('readCachedVcs honours 5s polling, mutating-tool invalidation, linked workt
     await git(repoDir, ['commit', '-m', 'init'])
     await git(repoDir, ['tag', 'v1.0.0'])
 
+    const timing = async (cwd = repoDir): Promise<{ lastEnd: number; lastMs: number }> =>
+      JSON.parse(await readFile(cachePath(cacheDir, 'vcs', cwd), 'utf8'))
+    const pinShortDuration = async () => {
+      const file = cachePath(cacheDir, 'vcs', repoDir)
+      const saved = JSON.parse(await readFile(file, 'utf8'))
+      await writeFile(file, JSON.stringify({ ...saved, lastMs: 50 }))
+    }
+    const nextPoll = async (mutating: boolean, cwd = repoDir): Promise<number> => {
+      const { lastEnd, lastMs } = await timing(cwd)
+      const hold = 10 * lastMs
+      return lastEnd + (mutating ? hold : Math.max(POLL_MS, hold))
+    }
     const t0 = 1_000_000
     const first = await readCachedVcs(repoDir, 'session-a', 0, cacheDir, t0)
     assert.equal(first.kind, 'git')
     assert.equal(first.repo, 'VArgus')
     assert.equal(first.branch, 'main')
     assert.equal(first.counts?.untracked, 0)
+    await pinShortDuration()
 
     // Create an untracked file; within POLL_MS with no mutating tool, cached counts stay.
     await writeFile(join(repoDir, 'untracked.txt'), 'new\n')
-    const cachedHit = await readCachedVcs(repoDir, 'session-a', 0, cacheDir, t0 + 500)
+    const toolDue = await nextPoll(true)
+    const cachedHit = await readCachedVcs(repoDir, 'session-a', 0, cacheDir, toolDue)
     assert.equal(cachedHit.counts?.untracked, 0)
 
     // A mutating tool in the same session invalidates the poll window (past 10x lastMs).
-    const afterTool = await readCachedVcs(repoDir, 'session-a', 1, cacheDir, t0 + 2000)
+    const beforeTool = await readCachedVcs(repoDir, 'session-a', 1, cacheDir, toolDue - 1)
+    assert.equal(beforeTool.counts?.untracked, 0)
+    const afterTool = await readCachedVcs(repoDir, 'session-a', 1, cacheDir, toolDue)
     assert.equal(afterTool.counts?.untracked, 1)
 
     // Past POLL_MS, external changes also show without a tool call.
     await rm(join(repoDir, 'untracked.txt'))
-    const tAfterPoll = t0 + 2000 + POLL_MS + 2000
-    const afterPoll = await readCachedVcs(repoDir, 'session-a', 1, cacheDir, tAfterPoll)
+    const afterPoll = await readCachedVcs(repoDir, 'session-a', 1, cacheDir, await nextPoll(false))
     assert.equal(afterPoll.counts?.untracked, 0)
+    await pinShortDuration()
 
     // Lowering `mutatingToolsSeen` (after `/rewind`) updates the baseline in cache so the
-    // next mutating tool (`0 -> 1`) invalidates immediately within `POLL_MS`.
-    await readCachedVcs(repoDir, 'session-a', 0, cacheDir, tAfterPoll + 500)
+    // next mutating tool (`0 -> 1`) invalidates once the duration hold expires.
+    await readCachedVcs(repoDir, 'session-a', 0, cacheDir, (await timing()).lastEnd)
     await writeFile(join(repoDir, 'after-rewind.txt'), 'new\n')
-    const afterRewindTool = await readCachedVcs(repoDir, 'session-a', 1, cacheDir, tAfterPoll + 2000)
+    const afterRewindTool = await readCachedVcs(repoDir, 'session-a', 1, cacheDir, await nextPoll(true))
     assert.equal(afterRewindTool.counts?.untracked, 1)
 
     // Backward wall-clock jump (`now < cached.lastEnd`) refreshes instead of freezing.
@@ -617,7 +614,7 @@ test('readCachedVcs honours 5s polling, mutating-tool invalidation, linked workt
 
     await git(wtDir, ['checkout', '-B', 'temp-branch'])
     await git(wtDir, ['checkout', 'v1.0.0'])
-    const detachedTag = await readCachedVcs(wtDir, 'session-b', 1, cacheDir, t0 + 30_000)
+    const detachedTag = await readCachedVcs(wtDir, 'session-b', 1, cacheDir, await nextPoll(true, wtDir))
     assert.deepEqual(detachedTag.detached, { name: 'v1.0.0', onBranch: false, operation: null, progress: '' })
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -683,6 +680,8 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
     const id = '39f30479-0e87-4a15-9bd3-b11ad9452046'
     const home = join(root, 'home')
     const workspace = join(home, 'proj', 'demo')
+    const expectedPath = `  ${join('~', 'proj', 'demo')}`
+    const givenOptions = { repo: false, branch: false, status: false }
     await mkdir(workspace, { recursive: true })
     const transcript = join(home, '.gemini', 'antigravity-cli', 'brain', id, '.system_generated', 'logs', 'transcript.jsonl')
     await mkdir(join(transcript, '..'), { recursive: true })
@@ -732,15 +731,18 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
       isWsl: true,
       noColor: true,
       cacheDir,
+      givenOptions,
     })
-    assert.match(wslLine, /^  ~\/proj\/demo \| carbon:high \| 5h:4%\(4h3\dm\) 7d:39%\(5d6h\) \| ctx:20% \| token:12\.4k\(75\.2%\) \| session:24m \| T:1$/)
+    const expectedReadings = `${expectedPath} | carbon:high | 5h:4%(4h37m) 7d:39%(5d6h) | ctx:20% | token:12.4k(75.2%)`
+    assert.equal(wslLine, `${expectedReadings} | session:24m | T:1`)
 
     const narrowLine = await renderAntigravityStatusLine({ ...payload, terminal_width: 32 }, {
       home,
       noColor: true,
       cacheDir,
+      givenOptions,
     })
-    assert.equal(narrowLine, '  ~/proj/demo | carbon:high')
+    assert.equal(narrowLine, `${expectedPath} | carbon:high`)
 
     // `terminal_width` reserves 2 columns for leading padding (`26 - 2 = 24 < 25`),
     // dropping `| carbon:high` so the indented row never wraps at 26 columns.
@@ -748,30 +750,42 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
       home,
       noColor: true,
       cacheDir,
+      givenOptions,
     })
-    assert.equal(tightLine, '  ~/proj/demo')
+    assert.equal(tightLine, expectedPath)
 
     // Subprocess check through bin/vargus statusline with --config and --theme.
-    const configPath = join(root, 'explicit.jsonc')
-    await writeFile(configPath, '{ /* explicit file */ "callCounts": false, "session": false, "model": true }')
+    const configPath = join(root, 'explicit options.jsonc')
+    await writeFile(configPath, '/* explicit file */ ' + JSON.stringify({ ...givenOptions, callCounts: false, session: false, model: true }))
     const install = await fixtureCheckout(root)
-    const bin = join(install, 'bin', 'vargus')
-    const runStatusline = (args: string[], stdinText: string, extraEnv: NodeJS.ProcessEnv = {}) =>
+    const windows = process.platform === 'win32'
+    const bin = join(install, 'bin', windows ? 'vargus.cmd' : 'vargus')
+    const runStatusline = (args: string[], input: string | Buffer, extraEnv: NodeJS.ProcessEnv = {}) =>
       new Promise<{ code: number | null; stdout: string; stderr: string }>((resolvePromise, reject) => {
-        const child = spawn(bin, ['statusline', ...args], {
-          env: { ...process.env, HOME: home, ...extraEnv },
+        const argv = ['statusline', ...args]
+        const child = spawn(windows ? (process.env.ComSpec ?? 'cmd.exe') : bin,
+          windows ? ['/d', '/s', '/c', `"${[bin, ...argv].map(arg => `"${arg}"`).join(' ')}"`] : argv, {
+          env: { ...process.env, HOME: home, USERPROFILE: home, ...extraEnv },
           stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+          windowsVerbatimArguments: windows,
         })
         let stdout = ''
         let stderr = ''
+        child.stdout.setEncoding('utf8')
+        child.stderr.setEncoding('utf8')
         child.stdout.on('data', d => { stdout += d })
         child.stderr.on('data', d => { stderr += d })
         child.on('error', reject)
         child.on('close', code => resolvePromise({ code, stdout, stderr }))
-        child.stdin.end(stdinText)
+        if (typeof input === 'string') child.stdin.end(input)
+        else {
+          for (let offset = 0; offset < input.length; offset += 2) child.stdin.write(input.subarray(offset, offset + 2))
+          child.stdin.end()
+        }
       })
 
-    await writeFile(join(install, 'vargus.jsonc'), '// checkout default\n{"model":false}')
+    await writeFile(join(install, 'vargus.jsonc'), '// checkout default\n' + JSON.stringify({ ...givenOptions, model: false }))
     const fromCheckout = await runStatusline([], JSON.stringify(payload), { NO_COLOR: '1' })
     assert.equal(fromCheckout.code, 0, fromCheckout.stderr)
     assert.match(fromCheckout.stdout, /ctx:20%/)
@@ -786,7 +800,7 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
     const noColor = await runStatusline(['--config', configPath], JSON.stringify(payload), { NO_COLOR: '1' })
     assert.equal(noColor.code, 0, noColor.stderr)
     assert.ok(!noColor.stdout.includes('\x1b['), 'NO_COLOR must strip all ANSI codes')
-    assert.match(noColor.stdout.replace(/\r?\n$/, ''), /^  ~\/proj\/demo \| carbon:high \| 5h:4%\(4h3\dm\) 7d:39%\(5d6h\) \| ctx:20% \| token:12\.4k\(75\.2%\)$/)
+    assert.equal(noColor.stdout.replace(/\r?\n$/, ''), expectedReadings)
 
     // Empty stdin and JSON array payloads exit 0 quietly so Antigravity never counts them as failures.
     const emptyRes = await runStatusline([], '')
@@ -804,24 +818,9 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
       model: { display_name: 'Gemini 4 Carbon (High)', effort: 'high' },
       terminal_width: 120,
     }), 'utf8')
-    const chunkedUtf8 = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolvePromise, reject) => {
-      const child = spawn(bin, ['statusline', '--config', configPath], {
-        env: { ...process.env, HOME: home, NO_COLOR: '1' },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-      let stdout = ''
-      let stderr = ''
-      child.stdout.on('data', d => { stdout += d })
-      child.stderr.on('data', d => { stderr += d })
-      child.on('error', reject)
-      child.on('close', code => resolvePromise({ code, stdout, stderr }))
-      for (let offset = 0; offset < utf8Payload.length; offset += 2) {
-        child.stdin.write(utf8Payload.subarray(offset, offset + 2))
-      }
-      child.stdin.end()
-    })
+    const chunkedUtf8 = await runStatusline(['--config', configPath], utf8Payload, { NO_COLOR: '1' })
     assert.equal(chunkedUtf8.code, 0, chunkedUtf8.stderr)
-    assert.ok(chunkedUtf8.stdout.startsWith('  ~/项目🚀 | carbon:high'), `got: ${chunkedUtf8.stdout}`)
+    assert.ok(chunkedUtf8.stdout.startsWith(`  ${join('~', '项目🚀')} | carbon:high`), `got: ${chunkedUtf8.stdout}`)
     assert.ok(!chunkedUtf8.stdout.includes('\ufffd'), 'must not corrupt split UTF-8 byte sequences')
 
     // Bad flag exits non-zero with a clear error.
@@ -1959,13 +1958,14 @@ test('Antigravity includeSubagents folds recursive trees while keeping root metr
     ], baseTime + 7000)
 
     const now = baseTime + 10 * 60_000
+    const label = join('~', 'proj', 'demo')
     // 1. Explicit includeSubagents: false -> root only (tokens: 5500, tools: 2, agents: 2, skills: 0), zero child cache files written.
     const mainOnlyLine = await renderAntigravityStatusLine(makePayload('idle'), {
       home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, includeSubagents: false },
     })
     assert.equal(
       mainOnlyLine,
-      '  ~/proj/demo | neon:high | ctx:12% | token:5.5k(80%, 100t/s) | session:10m | 🔧2 🤖2',
+      `  ${label} | neon:high | ctx:12% | token:5.5k(80%, 100t/s) | session:10m | 🔧2 🤖2`,
     )
     await assert.rejects(() => readFile(cachePath(cacheDir, 'transcript', childATr), 'utf8'))
 
@@ -1973,7 +1973,7 @@ test('Antigravity includeSubagents folds recursive trees while keeping root metr
     const hiddenCountsLine = await renderAntigravityStatusLine(makePayload('idle'), {
       home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, tokens: false, callCounts: false },
     })
-    assert.equal(hiddenCountsLine, '  ~/proj/demo | neon:high | ctx:12% | session:10m')
+    assert.equal(hiddenCountsLine, `  ${label} | neon:high | ctx:12% | session:10m`)
     await assert.rejects(() => readFile(cachePath(cacheDir, 'transcript', childATr), 'utf8'))
 
     // 3. Default includeSubagents: true -> folds root (5500,2,2,0) + childA (4000,3,1,1) + childB (2500,1,1,0) + grandC (2000,4,2,1)
@@ -1984,7 +1984,7 @@ test('Antigravity includeSubagents folds recursive trees while keeping root metr
     })
     assert.equal(
       foldedLine,
-      '  ~/proj/demo | neon:high | ctx:12% | token:14.0k(80%, 100t/s) | session:10m | 🔧10 🤖6 ⚡2',
+      `  ${label} | neon:high | ctx:12% | token:14.0k(80%, 100t/s) | session:10m | 🔧10 🤖6 ⚡2`,
     )
     // Verify root mutatingToolsSeen stays 0 even though childA and grandC ran mutating tools.
     assert.equal((await readTranscriptState(rootTr, cacheDir)).mutatingToolsSeen, 0)
@@ -1995,14 +1995,14 @@ test('Antigravity includeSubagents folds recursive trees while keeping root metr
     })
     assert.equal(
       tokensOnlyFolded,
-      '  ~/proj/demo | neon:high | ctx:12% | token:14.0k(80%, 100t/s) | session:10m',
+      `  ${label} | neon:high | ctx:12% | token:14.0k(80%, 100t/s) | session:10m`,
     )
     const callsOnlyFolded = await renderAntigravityStatusLine(makePayload('idle'), {
       home, noColor: true, cacheDir, now, givenOptions: { ...baseOpts, tokens: false, callCounts: true },
     })
     assert.equal(
       callsOnlyFolded,
-      '  ~/proj/demo | neon:high | ctx:12% | session:10m | 🔧10 🤖6 ⚡2',
+      `  ${label} | neon:high | ctx:12% | session:10m | 🔧10 🤖6 ⚡2`,
     )
 
     // Flipping back to includeSubagents: false immediately returns root-only counts (distinct row cache key).
@@ -2024,7 +2024,7 @@ test('Antigravity includeSubagents folds recursive trees while keeping root metr
     // Root (5500,2,2,0) + childB (2500,1,1,0) + grandC (2000,4,2,1) = 10.0k, tools 7, agents 5, skills 1.
     assert.equal(
       isolatedLine,
-      '  ~/proj/demo | neon:high | ctx:12% | token:10.0k(80%, 100t/s) | session:10m | 🔧7 🤖5 ⚡1',
+      `  ${label} | neon:high | ctx:12% | token:10.0k(80%, 100t/s) | session:10m | 🔧7 🤖5 ⚡1`,
     )
 
     // Restore childA cache and test hard caps deterministically via collectAntigravitySubagentCounts.

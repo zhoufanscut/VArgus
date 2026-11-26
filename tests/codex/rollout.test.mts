@@ -650,29 +650,24 @@ test('corrupt or malformed JSONL records latch a permanent history error and dro
     await assert.rejects(reader.poll(false), /invalid record/)
     await assert.rejects(reader.poll(false), /invalid record/)
 
-    // 4. Valid Codex records with non-local or malformed file:// URLs in skill/read paths must not falsely latch.
+    // 4. Valid Codex records with UNC or malformed file:// URLs in skill/read paths must not falsely latch.
     const urlFile = join(dir, 'urls.jsonl')
     await writeFile(urlFile, jsonl([
       meta,
       { type: 'event_msg', payload: { type: 'task_started', turn_id: 'u1' } },
       { type: 'response_item', payload: {
         type: 'message', role: 'developer',
-        content: [{ type: 'input_text', text: '- remote: Fixture. (file: file://example.com/SKILL.md)\n- bad: Fixture. (file: file://%ZZ/SKILL.md)' }],
+        content: [{ type: 'input_text', text: '- remote: Fixture. (file: file://example.com/share/SKILL.md)\n- bad: Fixture. (file: file://%ZZ/SKILL.md)' }],
         internal_chat_message_metadata_passthrough: { turn_id: 'u1', content_item_kinds: ['host_skills.instructions'] },
-      } },
-      { type: 'response_item', payload: {
-        type: 'message', role: 'user',
-        content: [{ type: 'input_text', text: '<skill>\n<name>remote</name>\n<path>file://example.com/SKILL.md</path>\nbody\n</skill>' }],
-        internal_chat_message_metadata_passthrough: { turn_id: 'u1', content_item_kinds: ['skills.selected_skill_instructions'] },
       } },
       { type: 'event_msg', payload: {
         type: 'item_completed', thread_id: 'thread-a', turn_id: 'u1',
         item: {
           id: 'cmd-url', type: 'CommandExecution', source: 'agent',
-          cwd: 'file://example.com/repo',
+          cwd: 'file://example.com/share/repo',
           parsed_cmd: [
-            { type: 'read', path: 'file://example.com/foo' },
-            { type: 'read', path: 'file://%ZZ' },
+            { type: 'read', path: 'file://example.com/share/SKILL.md' },
+            { type: 'read', path: 'file://%ZZ/SKILL.md' },
             { type: 'read', path: 'alpha/SKILL.md' },
           ],
           status: 'completed', exit_code: 0,
@@ -685,7 +680,7 @@ test('corrupt or malformed JSONL records latch a permanent history error and dro
     assert.equal(urlReader.attributable, true)
     assert.equal(urlReader.collector.snapshot()!.session.counts.tokens, 3201)
     assert.equal(urlReader.collector.snapshot()!.session.counts.tools, 1)
-    assert.equal(urlReader.collector.snapshot()!.session.counts.skills, 0)
+    assert.equal(urlReader.collector.snapshot()!.session.counts.skills, process.platform === 'win32' ? 1 : 0)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 

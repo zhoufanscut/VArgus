@@ -1,5 +1,6 @@
 import { describe, expect, mock, test, type Engine, type MockClock } from 'claude-code/testing'
 import type { ConfigRow, On, TurnStepChunk, TurnStepInput, TurnStepServerToolUse } from 'claude-code'
+import { fixtureFsPath } from './fixture-path'
 
 // The session collector (src/hosts/claude/collect/session.ts), driven through the mod's own
 // hooks; what it collected is read off the line it writes.
@@ -620,9 +621,9 @@ describe('session collector', () => {
     }
     let file = '{}\n'
     let staged = ''
-    on('fs.exists', async ($, e) => ({ value: e.path.endsWith('/vargus.jsonc') }))
+    on('fs.exists', async ($, e) => ({ value: fixtureFsPath(e.path).endsWith('/vargus.jsonc') }))
     on('fs.read', async ($, e) => {
-      if (e.path.endsWith('/vargus.jsonc')) return { value: file }
+      if (fixtureFsPath(e.path).endsWith('/vargus.jsonc')) return { value: file }
       throw new Error('ENOENT')
     })
     on('fs.stat', async ($, e) => ({

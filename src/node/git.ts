@@ -48,7 +48,7 @@ async function readTrimmed(path: string): Promise<string | null> {
 // still exits 0 and records its 10x hold-off rather than counting as a failure.
 const GIT_TIMEOUT_MS = 4000
 
-function runGit(cwd: string, args: string[], timeout: number): Promise<{ stdout: string; stderr: string }> {
+async function runGit(cwd: string, args: string[], timeout: number): Promise<{ stdout: string; stderr: string }> {
   return exec('git', ['-c', 'core.fsmonitor=false', ...args], {
     cwd,
     windowsHide: true,
@@ -132,10 +132,11 @@ export async function readGit(cwd: string, timeout = GIT_TIMEOUT_MS): Promise<Vc
   if (!cwd) return out
   try {
     const [statusRun, dirRun, remoteRun] = await Promise.all([
-      runGit(cwd, ['status', '--porcelain=v2', '--branch'], timeout),
+      runGit(cwd, ['status', '--porcelain=v2', '--branch'], timeout).catch(() => null),
       runGit(cwd, ['rev-parse', '--absolute-git-dir'], timeout).catch(() => null),
       runGit(cwd, ['remote', 'get-url', '--push', 'origin'], timeout).catch(() => null),
     ])
+    if (!statusRun) return out
     out.kind = 'git'
     out.repo = remoteRun ? repoNameFromUrl(remoteRun.stdout.trim()) : null
     const gitDir = dirRun?.stdout.trim() ?? ''

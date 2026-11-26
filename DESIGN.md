@@ -272,7 +272,10 @@ is shared by Codex, OmO and Antigravity. Claude uses its own
 Pure Git porcelain and SVN XML/URL parsers live in [src/core/vcs.ts](src/core/vcs.ts).
 Both Git readers use porcelain status with `GIT_OPTIONAL_LOCKS=0` and
 `core.fsmonitor=false` to avoid rewriting the user's index or invoking its
-filesystem monitor. When porcelain reports `# branch.head (detached)`, the
+filesystem monitor. The Node reader runs status, directory and remote checks in
+parallel and waits for each before returning, even when status fails outside
+Git. A Windows regression checks that the non-repository working directory can
+then be removed immediately. When porcelain reports `# branch.head (detached)`, the
 branch fragment uses the actual worktree's metadata to name the checkout and
 show any in-progress operation. The `branch` switch controls this fragment
 for both attached and detached checkouts. Older `detachedHead` settings are
@@ -485,9 +488,11 @@ the saved selection.
 Tools count completed visible items and exclude user-shell controls. Agents
 count recorded starts. [Skill counting](src/hosts/codex/skills.ts) uses marked
 instruction injections or successful recognised reads of catalogued
-`SKILL.md` files, deduplicated by path and turn. By default (`includeSubagents: true`), the viewed thread sums attributable
-descendants (Main shows the whole saved family; a child view shows its own
-subtree); `includeSubagents: false` keeps parent and child counts separate.
+`SKILL.md` files, deduplicated by path and turn. Replay interprets `file://`
+paths on the current platform, including UNC paths on Windows. By default
+(`includeSubagents: true`), the viewed thread sums attributable descendants
+(Main shows the whole saved family; a child view shows its own subtree);
+`includeSubagents: false` keeps parent and child counts separate.
 
 ### Opt-in tmux row
 
@@ -998,12 +1003,13 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   `WSLENV` vs `WSL_DISTRO_NAME` to check icons/text counts and stale markers in
   tmux. Model choice,
   billing and different provider timing need their own evidence.
-- `npm run test:claude` validates the plugin, type-checks against generated
-  types, runs Claude engine fixtures and checks the documented reader and
-  manifest. The Claude Code 2.1.323 validator also scans Node tests and warns
-  about their TypeScript imports, even when the separate Node type check
-  passes. The 2026-11-19 probe saw normal validation exit 0 and strict
-  validation exit 1 for those warnings.
+- `npm run test:claude` type-checks against generated types. The
+  [runner](tests/run-claude.mjs) stages the plugin sources, Claude fixtures
+  and reader guide under a temporary directory for validation and tests.
+  This keeps the checkout's `tmp/` out of engine discovery. Pointing Claude
+  Code 2.1.332 at `tests/claude` directly reports “no hooks module to load,”
+  so the stage keeps the plugin manifest. The engine fixtures mock filesystem
+  hooks; the shell checks exercise the documented reader and manifest separately.
 
 ### Live evidence and limits
 
@@ -1012,9 +1018,11 @@ On Linux, an attached tmux client with `status-interval 1` displayed
 or redraw commands while waiting. Publishing the identical reading again
 cleared the marker in the expanded status format. The reported Windows
 psmux 3.4.0 test observed automatic expiry and recovery in the appended row;
-with `status-interval 0`, expiry became visible on manual redraw. The Windows
-scalar header has a command-contract fixture and a native regression test;
-the reported Windows probe covered the appended layout.
+with `status-interval 0`, expiry became visible on manual redraw. A 2026-11-26
+detached Windows smoke test with psmux 3.4.0 covered the scalar header:
+`dump-state` showed the stale row after setting an expired deadline, and
+detach restored the original bar height and `status-left`. That smoke test
+did not start Codex.
 
 On Linux on 2026-11-20, a checkout installed with `vargus install claude`
 ran in Claude Code 2.1.323 with a saved native `model: true` and a shared

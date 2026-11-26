@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { chmod, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, delimiter, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -227,31 +227,24 @@ test('codexLine preserves whole fragments containing ` | ` when fitting stale ro
   const dir = await mkdtemp(join(tmpdir(), 'vargus-line-pipe-'))
   try {
     const repoDir = await repository(dir, 'main-base')
-    await exec('git', ['add', 'changed.txt'], { cwd: repoDir })
-    await exec('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com',
-      'commit', '--no-gpg-sign', '-m', 'initial'], { cwd: repoDir })
-    const wtDir = join(dir, 'alpha | beta_long_suffix')
-    await exec('git', ['worktree', 'add', '-b', 'main', wtDir], { cwd: repoDir })
-    const newAdmin = join(repoDir, '.git', 'worktrees', 'alpha | beta_long_suffix')
-    await rename(join(repoDir, '.git', 'worktrees', 'alpha-|-beta_long_suffix'), newAdmin)
-    await writeFile(join(wtDir, '.git'), `gitdir: ${newAdmin}\n`)
+    const repoName = 'alpha | beta_long_suffix'
+    await exec('git', ['remote', 'set-url', 'origin', `https://example.invalid/${repoName}.git`], { cwd: repoDir })
 
-    const collector = new CodexCollector(wtDir, undefined)
-    collector.start(wtDir, 0)
+    const collector = new CodexCollector(repoDir, undefined)
+    collector.start(repoDir, 0)
     collector.snapshot()!.session.model = 'gpt-6.1-sol'
     collector.snapshot()!.session.effort = 'high'
-    const opts = resolveCodexOptions({ session: false, callCounts: false, tokens: false, rateLimits: false })
+    const opts = resolveCodexOptions({ session: false, callCounts: false, tokens: false, rateLimits: false, branch: false, status: false })
     const line = codexLine(collector, opts, theme)
     await line(500)
-    await ready(collector, 'main-base')
+    await ready(collector, repoName)
 
     const liveParts = await line.parts(500)
-    assert.ok(liveParts.some(part => part.includes('wt:alpha | beta_long_suffix')))
-    const beforeBranch = liveParts.slice(0, -1).join(' | ')
+    assert.equal(liveParts.at(-1), `repo:${repoName}`)
+    const beforeRepo = liveParts.slice(0, -1).join(' | ')
     const budget = stringWidth(liveParts.join(' | '))
     const staleHeld = line.paused(budget, true)
-    assert.equal(staleHeld, `${beforeBranch} | ⌛stale`)
-    assert.equal(staleHeld.includes('(wt:alpha'), false)
+    assert.equal(staleHeld, `${beforeRepo} | ⌛stale`)
 
     // Folder path containing ` | ` is also dropped as a whole fragment under NO_COLOR.
     const pipeFolderCollector = new CodexCollector('/a | b', undefined)

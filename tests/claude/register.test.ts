@@ -1,6 +1,7 @@
 import { describe, expect, mock, test, type Engine, type MockClock } from 'claude-code/testing'
 import type { ConfigRow, On, TurnStepInput } from 'claude-code'
 import { makeTheme } from '../../src/theme'
+import { fixtureFsPath } from './fixture-path'
 
 // src/hosts/claude/register.ts, the wiring: each hook passes the event on and returns
 // what the hooks beneath it answered, untouched; the width from the
@@ -84,7 +85,8 @@ function sharedPicker($: Engine, on: On, profile = '/home/u/.claude') {
   ]
   const edits: string[] = []
   const state: { file?: string; backup?: string; rewrite: boolean } = { rewrite: false }
-  const read = (path: string) => {
+  const read = (input: string) => {
+    const path = fixtureFsPath(input)
     if (path.endsWith('/vargus.jsonc')) return state.file
     if (path.endsWith('/picker-backups.json')) return state.backup
   }
@@ -240,7 +242,7 @@ describe('register: the line as the host sets it up', () => {
       const clock = mock.clock(on, { now: 0 })
       const w = world(on, clock, c.env)
       on('fs.read', async ($, e, next) => {
-        if (e.path !== '/proc/version') return next(e)
+        if (fixtureFsPath(e.path) !== '/proc/version') return next(e)
         if (c.procVersion instanceof Error) throw c.procVersion
         return { value: c.procVersion }
       })
@@ -281,7 +283,7 @@ describe('register: the line as the host sets it up', () => {
       const clock = mock.clock(on, { now: 0 })
       const w = world(on, clock, c.env)
       on('fs.read', async ($, e, next) => {
-        if (e.path !== '/proc/version') return next(e)
+        if (fixtureFsPath(e.path) !== '/proc/version') return next(e)
         return { value: c.procVersion }
       })
       await $.session.start(start)
@@ -312,9 +314,9 @@ describe('register: the line as the host sets it up', () => {
     let file = '{ /* shared */ "model": false, "codexAutoStart": false }\n'
     let staged = ''
     const operations: string[] = []
-    on('fs.exists', async ($, e) => ({ value: e.path.endsWith('/vargus.jsonc') }))
+    on('fs.exists', async ($, e) => ({ value: fixtureFsPath(e.path).endsWith('/vargus.jsonc') }))
     on('fs.read', async ($, e) => {
-      if (e.path.endsWith('/vargus.jsonc')) return { value: file }
+      if (fixtureFsPath(e.path).endsWith('/vargus.jsonc')) return { value: file }
       throw new Error('ENOENT')
     })
     on('fs.stat', async ($, e) => ({ value: { kind: 'file', isLink: false, realPath: e.path, size: file.length, mtimeMs: 0 } }))
@@ -422,12 +424,14 @@ describe('register: the line as the host sets it up', () => {
     let backup: string | undefined
     const edits: string[] = []
     const operations: string[] = []
-    on('fs.exists', async ($, e) => ({
-      value: e.path.endsWith('/vargus.jsonc') || (e.path.endsWith('/picker-backups.json') && backup !== undefined),
-    }))
+    on('fs.exists', async ($, e) => {
+      const path = fixtureFsPath(e.path)
+      return { value: path.endsWith('/vargus.jsonc') || (path.endsWith('/picker-backups.json') && backup !== undefined) }
+    })
     on('fs.read', async ($, e) => {
-      if (e.path.endsWith('/vargus.jsonc')) return { value: file }
-      if (e.path.endsWith('/picker-backups.json') && backup !== undefined) return { value: backup }
+      const path = fixtureFsPath(e.path)
+      if (path.endsWith('/vargus.jsonc')) return { value: file }
+      if (path.endsWith('/picker-backups.json') && backup !== undefined) return { value: backup }
       throw new Error('ENOENT')
     })
     on('fs.stat', async ($, e) => ({
