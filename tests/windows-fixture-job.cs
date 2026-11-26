@@ -43,7 +43,6 @@ public sealed class FixtureJob : IDisposable {
     }
     public void Assign(Process process) {
         Check(AssignProcessToJobObject(job, process.Handle));
-        if (Active() != 1) throw new InvalidOperationException("Job did not see its gated shell");
     }
     public void StopAndWait() {
         if (Active() == 0) return;
@@ -56,21 +55,27 @@ public sealed class FixtureJob : IDisposable {
     }
     public void Dispose() { job.Dispose(); }
     public static int Main(string[] args) {
-        using (var job = new FixtureJob())
+        using (var job = new FixtureJob()) return job.Supervise(args, job.Assign);
+    }
+    public int Supervise(string[] args, Action<Process> assign) {
         using (var shell = new Process()) {
-            bool started = false;
+            bool started = false, assigned = false;
             int code = 1;
             try {
                 string comspec = Environment.GetEnvironmentVariable("ComSpec");
                 shell.StartInfo.FileName = String.IsNullOrEmpty(comspec) ? "cmd.exe" : comspec;
-                shell.StartInfo.Arguments = "/d /q /s /c \"set /p VARGUS_READY= >nul && " + args[0] + "\"";
+                shell.StartInfo.Arguments = "/d /q /v:on /k @echo off";
                 shell.StartInfo.UseShellExecute = false;
                 shell.StartInfo.CreateNoWindow = true;
                 shell.StartInfo.RedirectStandardInput = true;
+                shell.StartInfo.EnvironmentVariables["VARGUS_FIXTURE_SHELL"] = shell.StartInfo.FileName;
+                shell.StartInfo.EnvironmentVariables["VARGUS_FIXTURE_COMMAND"] = args[0];
                 started = shell.Start();
+                assign(shell);
+                if (Active() != 1) throw new InvalidOperationException("Job did not see its gated shell");
+                assigned = true;
                 var identity = String.Format("PID {0}, started {1:o}", shell.Id, shell.StartTime.ToUniversalTime());
-                job.Assign(shell);
-                shell.StandardInput.WriteLine("run");
+                shell.StandardInput.WriteLine("\"!VARGUS_FIXTURE_SHELL!\" /d /q /v:off /s /c \"!VARGUS_FIXTURE_COMMAND!\"& exit");
                 shell.StandardInput.Close();
                 if (!shell.WaitForExit(Int32.Parse(args[1]))) {
                     code = 124;
@@ -83,9 +88,9 @@ public sealed class FixtureJob : IDisposable {
             } finally {
                 try {
                     if (started) shell.StandardInput.Close();
-                    job.StopAndWait();
+                    StopAndWait();
                     if (started && !shell.WaitForExit(5000)) throw new TimeoutException("Gated shell did not exit");
-                    System.IO.File.WriteAllText(args[2], "");
+                    if (assigned) System.IO.File.WriteAllText(args[2], "");
                 } catch (Exception error) {
                     Console.Error.WriteLine("Fixture cleanup: " + error.Message);
                     if (code == 0) code = 1;

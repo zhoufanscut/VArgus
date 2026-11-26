@@ -1018,12 +1018,23 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   Pointing Claude Code 2.1.332 at `tests/claude` directly reports “no hooks module to load,”
   so the stage keeps the plugin manifest. The engine fixtures mock filesystem
   hooks; the shell checks exercise the documented reader and manifest separately.
-  Each command starts behind a gate. On Windows a private Job Object owns the
-  shell and descendants before the gate opens; cleanup checks its active-process
-  count, not command-line markers. On POSIX the runner checks that `ps` sees
-  the marker on the gated shell itself, and keeps the group leader alive until
-  cleanup. Interrupt and termination signals during a command go through the
-  same bounded group cleanup as a timeout.
+  On Windows the supervisor starts an idle shell. Only after a private Job
+  Object confirms assignment does the supervisor send the instruction to run
+  the command. An empty job alone cannot certify cleanup: the receipt requires
+  confirmed assignment, an empty job and shell exit.
+  On POSIX `ps` must see the marker on the gated group leader. Closing the
+  control pipe asks the leader or a second member to stop its own group, so
+  losing the leader does not require signaling a possibly reused group ID.
+  The payload shell is started by Node, not directly as a shell background
+  job, so a payload-directed `SIGINT` still interrupts it. On POSIX, interrupts
+  and termination during a command use the same bounded exit check as a timeout.
+  Cleanup resumes the owned leader so it can act on EOF even when suspended.
+  On POSIX the runner relays stdout and stderr through its own pipes. If exit
+  cannot be confirmed, it closes its pipe ends; surviving processes do not
+  hold the caller's captured output open. A successful command is not reported
+  until its final writes finish. If a reader closes early, the caller receives
+  the write error after cleanup; a command failure already observed takes
+  precedence over a later write error.
   A failed exit check retains the fixture rather than deleting its home.
 
 ### Live evidence and limits

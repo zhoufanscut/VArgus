@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { channel } from 'node:diagnostics_channel'
+import { once } from 'node:events'
 import { access, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, delimiter, dirname, join } from 'node:path'
 import { test } from 'node:test'
+import { setImmediate as nextTurn } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import { processIsRunning } from '../../src/node/process.ts'
 import { runFixtureCommand, withCleanup } from '../fixture-commands.mts'
+import { checkStoppedOutput } from '../posix-stopped-fixture.mts'
 
 test('fixture cleanup preserves the command error and the independent cleanup error', async () => {
   const command = new Error('command failed'), cleanup = new Error('cleanup failed')
@@ -14,17 +18,28 @@ test('fixture cleanup preserves the command error and the independent cleanup er
     error => error instanceof AggregateError && error.errors[0] === command && error.errors[1] === cleanup)
 })
 
-const signals = process.platform === 'win32' ? [] : ['SIGINT', 'SIGTERM']
-for (const mode of ['success', 'failure', 'timeout', ...signals]) {
-  test(`the fixture runner stops an unmarked descendant after ${mode}`, async () => {
+const signals = ['SIGINT', 'SIGTERM']
+const posixModes = process.platform === 'win32' ? [] : ['anchor-exit', ...signals]
+for (const mode of ['success', 'failure', 'timeout', ...posixModes]) {
+  test(`the fixture runner stops an unmarked descendant after ${mode}`, async context => {
     const temp = await realpath(tmpdir())
     const dir = await mkdtemp(join(temp, 'vargus-runner-')), stopped = join(dir, 'stopped')
-    const env = { ...process.env, VARGUS_CLAUDE_FIXTURE: basename(dir), TMP: dir, TEMP: dir, TMPDIR: dir }
-    const run = () => runFixtureCommand(`node parent.cjs ${mode}`, dir, env, stopped, mode === 'timeout' ? 2500 : 15_000)
+    const env: NodeJS.ProcessEnv = { ...process.env, VARGUS_CLAUDE_FIXTURE: basename(dir), VARGUS_TEST_NODE: process.execPath, TMP: dir, TEMP: dir, TMPDIR: dir }
+    const node = process.platform === 'win32' ? '"%VARGUS_TEST_NODE%"' : '"$VARGUS_TEST_NODE"'
+    const command = `${node} parent.cjs ${mode}`
+    const run = () => runFixtureCommand(command, dir, env, stopped, mode === 'timeout' ? 2500 : 15_000)
+    const groupSignals: number[] = []
+    if (mode === 'anchor-exit') {
+      const kill = process.kill.bind(process)
+      context.mock.method(process, 'kill', (pid: number, signal?: NodeJS.Signals | number) => {
+        if (pid < 0 && signal !== 0) { groupSignals.push(pid); return true }
+        return kill(pid, signal)
+      })
+    }
     let started = false
     await withCleanup(async () => {
       await writeFile(join(dir, 'parent.cjs'), `
-const { spawn } = require('node:child_process')
+const { execFileSync, spawn } = require('node:child_process')
 const { writeFileSync } = require('node:fs')
 const env = { ...process.env }
 delete env.VARGUS_CLAUDE_FIXTURE
@@ -34,10 +49,20 @@ leaf.once('message', message => {
   process.kill(leaf.pid, 0)
   writeFileSync('live-pid', String(leaf.pid))
   leaf.unref()
-  if (['timeout', 'SIGINT', 'SIGTERM'].includes(process.argv[2])) setTimeout(() => {}, 15000)
+  if (process.argv[2] === 'anchor-exit') {
+    const leader = Number(process.env.VARGUS_TEST_LEADER)
+    const group = Number(execFileSync('ps', ['-p', String(process.pid), '-o', 'pgid='], { encoding: 'utf8' }))
+    if (!(leader > 1 && leader === group)) throw new Error('could not verify the recorded fixture group leader')
+    process.kill(leader, 'SIGKILL')
+  }
+  if (['timeout', 'anchor-exit', 'SIGINT', 'SIGTERM'].includes(process.argv[2])) setTimeout(() => {}, 15000)
   else process.exitCode = process.argv[2] === 'failure' ? 37 : 0
 })
 `)
+      if (mode === 'anchor-exit') {
+        await writeFile(join(dir, 'sh'), '#!/bin/sh\nif [ "$3" = fixture-shell ]; then export VARGUS_TEST_LEADER=$$; fi\nexec /bin/sh "$@"\n', { mode: 0o755 })
+        env.PATH = [dir, env.PATH].join(delimiter)
+      }
       started = true
       if (signals.includes(mode)) {
         const driver = `
@@ -46,13 +71,17 @@ import { runFixtureCommand } from ${JSON.stringify(new URL('../fixture-commands.
 watchFile('live-pid', { interval: 20 }, stat => {
   if (stat.size) { unwatchFile('live-pid'); process.kill(process.pid, ${JSON.stringify(mode)}) }
 })
-try { await runFixtureCommand('node parent.cjs ${mode}', process.cwd(), process.env, ${JSON.stringify(stopped)}, 10000) }
+try { await runFixtureCommand(${JSON.stringify(command)}, process.cwd(), process.env, ${JSON.stringify(stopped)}, 10000) }
 catch (error) { console.error(error.message); process.exitCode = 1 }
 finally { unwatchFile('live-pid') }
 `
         await assert.rejects(promisify(execFile)(process.execPath, ['--input-type=module', '-e', driver], { cwd: dir, env, timeout: 20_000 }),
           (error: Error & { code?: number; stderr?: string }) => error.code === 1 && !!error.stderr?.includes(`interrupted by ${mode}`))
       } else if (mode === 'success') await run()
+      else if (mode === 'anchor-exit') {
+        await assert.rejects(run, /exited with no status/)
+        assert.deepEqual(groupSignals, [], 'the controller must not signal a numeric process group')
+      }
       else await assert.rejects(run, mode === 'failure' ? /exited with 37|failed \(37;/ : /timed out \(|failed \(124;/)
       await access(stopped)
       const pid = Number(await readFile(join(dir, 'live-pid'), 'utf8'))
@@ -72,6 +101,159 @@ finally { unwatchFile('live-pid') }
     })
   })
 }
+
+for (const leader of ['live', 'lost'] as const) {
+  test(`captured POSIX output closes before rescue with a stopped group and ${leader} leader`,
+    { skip: process.platform === 'win32' }, () => checkStoppedOutput(leader))
+}
+
+for (const stream of ['stdout', 'stderr'] as const) {
+  test(`a POSIX reader closing ${stream} reports EPIPE after fixture cleanup`, { skip: process.platform === 'win32' }, async () => {
+    const temp = await realpath(tmpdir()), dir = await mkdtemp(join(temp, 'vargus-pipe-'))
+    const stopped = join(dir, 'stopped'), release = join(dir, 'release')
+    const env = { ...process.env, VARGUS_CLAUDE_FIXTURE: basename(dir), TMP: dir, TEMP: dir, TMPDIR: dir }
+    const output = stream === 'stdout' ? '' : ' >&2'
+    const command = `printf 'ready\\n'${output}; while [ ! -f release ]; do sleep 0.02; done; printf 'last\\n'${output}${stream === 'stderr' ? '; sleep 10' : ''}`
+    const driver = `
+import { runFixtureCommand } from ${JSON.stringify(new URL('../fixture-commands.mts', import.meta.url).href)}
+import { existsSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
+const listeners = process.${stream}.listenerCount('error')
+try { await runFixtureCommand(${JSON.stringify(command)}, process.cwd(), process.env, ${JSON.stringify(stopped)}, 5000) }
+catch (error) {
+  await writeFile('caught', JSON.stringify({ code: error.code, stopped: existsSync(${JSON.stringify(stopped)}),
+    restored: process.${stream}.listenerCount('error') === listeners }))
+  process.exitCode = 1
+}
+`
+    let finished: Promise<unknown[]> | undefined
+    await withCleanup(async () => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', driver], { cwd: dir, env, timeout: 15_000, killSignal: 'SIGKILL',
+        stdio: ['ignore', stream === 'stdout' ? 'pipe' : 'ignore', stream === 'stderr' ? 'pipe' : 'ignore'] })
+      finished = once(child, 'close')
+      const reader = child[stream]!
+      const [first] = await Promise.race([once(reader, 'data'), finished.then(() => { throw new Error('driver exited before the first write') })])
+      assert.deepEqual(first, Buffer.from('ready\n'))
+      const readerClosed = once(reader, 'close')
+      reader.destroy()
+      await readerClosed
+      await writeFile(release, '')
+      assert.deepEqual(await finished, [1, null])
+      assert.deepEqual(JSON.parse(await readFile(join(dir, 'caught'), 'utf8')), { code: 'EPIPE', stopped: true, restored: true })
+    }, async () => {
+      if (finished) { await writeFile(release, ''); await finished; await access(stopped) }
+      if (await realpath(dir) !== dir || dirname(dir) !== temp) throw new Error(`Fixture path changed: ${dir}`)
+      await rm(dir, { recursive: true })
+    })
+  })
+}
+
+for (const status of [0, 37]) {
+  test(`POSIX cleanup waits for the last output write after command exit ${status}`, { skip: process.platform === 'win32' }, async context => {
+    const temp = await realpath(tmpdir()), dir = await mkdtemp(join(temp, 'vargus-last-write-')), marker = basename(dir)
+    const env = { ...process.env, VARGUS_CLAUDE_FIXTURE: marker, TMP: dir, TEMP: dir, TMPDIR: dir }
+    const stopped = join(dir, 'stopped'), command = `printf %s ${marker}; exit ${status}`
+    let writeStarted!: () => void, shellClosed!: () => void
+    const pending = new Promise<void>(resolve => { writeStarted = resolve }), write = process.stdout.write.bind(process.stdout)
+    const closed = new Promise<void>(resolve => { shellClosed = resolve })
+    let afterClose = false, released = false
+    const exitChecks: boolean[] = [], spawns = channel('child_process')
+    const observe = (message: unknown) => {
+      const { process: child } = message as { process: ChildProcess }
+      child.once('spawn', () => {
+        if (child.spawnargs[3] === 'fixture-shell' && child.spawnargs[4] === command) {
+          child.once('close', () => { afterClose = true; shellClosed() })
+        } else if (afterClose && child.spawnfile === 'ps') exitChecks.push(released)
+      })
+    }
+    spawns.subscribe(observe)
+    context.after(() => { spawns.unsubscribe(observe) })
+    let acknowledge: ((error: Error) => void) | undefined
+    context.mock.method(process.stdout, 'write', (chunk: unknown, ...args: unknown[]) => {
+      if (!Buffer.isBuffer(chunk) || !chunk.equals(Buffer.from(marker))) return Reflect.apply(write, process.stdout, [chunk, ...args])
+      acknowledge = args.at(-1) as (error: Error) => void
+      writeStarted()
+      return false
+    })
+    const failure = Object.assign(new Error('controlled final write failed'), { code: 'EPIPE' })
+    const failWrite = () => { const done = acknowledge; acknowledge = undefined; released = true; done?.(failure) }
+    let returned = false
+    const outcome = runFixtureCommand(command, dir, env, stopped, 5000)
+      .then(() => null, (error: Error) => error).finally(() => { returned = true })
+    await withCleanup(async () => {
+      await Promise.race([Promise.all([pending, closed]), outcome.then(() => { throw new Error('command returned before the final write') })])
+      await nextTurn()
+      assert.equal(exitChecks.length, 0, 'final process check started before the last write was acknowledged')
+      assert.equal(returned, false, 'command returned before its last write was acknowledged')
+      await assert.rejects(access(stopped), { code: 'ENOENT' })
+      failWrite()
+      const error = await outcome
+      if (status === 0) assert.equal((error as NodeJS.ErrnoException)?.code, 'EPIPE')
+      else assert.match(error?.message ?? '', /exited with 37/)
+      assert.ok(exitChecks.includes(true), 'did not observe the final process check after acknowledgement')
+    }, async () => {
+      failWrite()
+      await outcome
+      await access(stopped)
+      if (await realpath(dir) !== dir || dirname(dir) !== temp) throw new Error(`Fixture path changed: ${dir}`)
+      await rm(dir, { recursive: true })
+    })
+  })
+}
+
+test('a POSIX payload interrupted by SIGINT reports 130 and does not continue', { skip: process.platform === 'win32' }, async () => {
+  const temp = await realpath(tmpdir()), dir = await mkdtemp(join(temp, 'vargus-interrupt-'))
+  const env = { ...process.env, VARGUS_CLAUDE_FIXTURE: basename(dir) }, stopped = join(dir, 'stopped')
+  const marker = join(dir, 'continued'), write = 'printf reached >continued'
+  await withCleanup(async () => {
+    await runFixtureCommand(write, dir, env, stopped)
+    assert.equal(await readFile(marker, 'utf8'), 'reached')
+    await rm(marker)
+    await assert.rejects(runFixtureCommand(`kill -s INT "$$"; ${write}`, dir, env, stopped), /exited with 130/)
+    await assert.rejects(access(marker), { code: 'ENOENT' })
+  }, async () => {
+    await access(stopped)
+    if (await realpath(dir) !== dir || dirname(dir) !== temp) throw new Error(`Fixture path changed: ${dir}`)
+    await rm(dir, { recursive: true })
+  })
+})
+
+test('Windows keeps the command gated and withholds the receipt when assignment fails', { skip: process.platform !== 'win32' }, async () => {
+  const temp = await realpath(tmpdir()), dir = await mkdtemp(join(temp, 'vargus-job-'))
+  const stopped = join(dir, 'stopped'), ran = join(dir, 'ran')
+  const env = { ...process.env, VARGUS_CLAUDE_FIXTURE: basename(dir), TMP: dir, TEMP: dir, TMPDIR: dir }
+  const command = 'ver >nul && >ran echo first& >>ran echo second'
+  const rejection = `
+$ErrorActionPreference = 'Stop'
+[void][Reflection.Assembly]::LoadFrom((Join-Path $PWD 'fixture-job.exe'))
+$job = New-Object FixtureJob
+try {
+  $deny = [Action[Diagnostics.Process]]{ param($shell)
+    if ($shell.HasExited) { throw 'gate already exited' }
+    [IO.File]::WriteAllText((Join-Path $PWD 'gated-pid'), [string]$shell.Id)
+  }
+  exit $job.Supervise(@($env:VARGUS_TEST_COMMAND, '5000', $env:VARGUS_TEST_STOPPED), $deny)
+} finally { $job.Dispose() }
+`
+  await withCleanup(async () => {
+    await runFixtureCommand('ver >nul', dir, env, stopped)
+    await rm(stopped)
+    await assert.rejects(promisify(execFile)('powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(rejection, 'utf16le').toString('base64')],
+      { cwd: dir, env: { ...env, VARGUS_TEST_COMMAND: command, VARGUS_TEST_STOPPED: stopped }, windowsHide: true, timeout: 15_000 }),
+      (error: Error & { code?: number; stderr?: string }) => error.code === 1 && !!error.stderr?.includes('Job did not see its gated shell'))
+    await assert.rejects(access(stopped), { code: 'ENOENT' })
+    await assert.rejects(access(ran), { code: 'ENOENT' })
+  }, async () => {
+    const pid = Number(await readFile(join(dir, 'gated-pid'), 'utf8'))
+    if (!(pid > 0) || await processIsRunning(pid)) throw new Error(`Could not confirm gated shell exit; retained ${dir}`)
+    await runFixtureCommand(command, dir, env, stopped)
+    await access(stopped)
+    assert.equal(await readFile(ran, 'utf8'), 'first\r\nsecond\r\n')
+    if (await realpath(dir) !== dir || dirname(dir) !== temp) throw new Error(`Fixture path changed: ${dir}`)
+    await rm(dir, { recursive: true })
+  })
+})
 
 test('a marker visible only on ps cannot release the gate or certify cleanup', { skip: process.platform === 'win32' }, async () => {
   const temp = await realpath(tmpdir()), dir = await mkdtemp(join(temp, 'vargus-gate-'))

@@ -2,11 +2,25 @@ import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { access, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import type { Readable } from 'node:stream'
 import { text } from 'node:stream/consumers'
-import { setTimeout as delay } from 'node:timers/promises'
+import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 
 const exec = promisify(execFile)
+
+async function relayOutput(source: Readable, destination: NodeJS.WriteStream, cancellation: AbortController): Promise<void> {
+  const failed = (error: unknown) => { cancellation.abort(error); source.destroy() }
+  destination.on('error', failed)
+  try {
+    for await (const chunk of source) {
+      await new Promise<void>((resolve, reject) => destination.write(chunk, error => error ? reject(error) : resolve()))
+    }
+  } catch (error) {
+    failed(error)
+    await nextTurn()
+  } finally { destination.off('error', failed) }
+}
 
 export async function withCleanup(work: () => Promise<void>, cleanup: () => Promise<void>): Promise<void> {
   try { await work() } catch (failure) {
@@ -44,7 +58,9 @@ export async function runFixtureCommand(command: string, cwd: string, env: NodeJ
     const supervisor = join(dirname(stopped), 'fixture-job.exe')
     await access(supervisor).catch(async (error: NodeJS.ErrnoException) => {
       if (error.code !== 'ENOENT') throw error
-      const compiler = join(process.env.SystemRoot!, 'Microsoft.NET', 'Framework', 'v4.0.30319', 'csc.exe')
+      const systemRoot = process.env.SystemRoot
+      if (!systemRoot) throw new Error('SystemRoot is required to locate the Windows .NET Framework compiler (csc.exe)')
+      const compiler = join(systemRoot, 'Microsoft.NET', 'Framework', 'v4.0.30319', 'csc.exe')
       await exec(compiler, ['/nologo', `/out:${supervisor}`, join(import.meta.dirname, 'windows-fixture-job.cs')], { cwd, env, windowsHide: true, timeout: 15_000 })
     })
     const child = spawn(supervisor, [command, String(timeout), stopped], {
@@ -55,33 +71,45 @@ export async function runFixtureCommand(command: string, cwd: string, env: NodeJ
     return
   }
 
-  const anchor = 'IFS= read -r start || exit 1; sh -c "$1" </dev/null 3>&-; printf "%s\\n" "$?" >&3; exec 3>&-; IFS= read -r stop'
-  const child = spawn('sh', ['-c', anchor, 'fixture-shell', command], { cwd, env, detached: true, stdio: ['pipe', 'inherit', 'inherit', 'pipe'] })
-  const closed = new Promise<void>(resolve => child.once('close', () => resolve()))
+  const stopGroup = 'IFS= read -r stop; kill -s KILL 0'
+  const anchor = `IFS= read -r start || exit 1
+exec 4<&0
+(${stopGroup}) <&4 3>&- 4<&- &
+"$2" "$3" "$1" </dev/null 4<&- &
+exec 3>&- 4<&-
+${stopGroup}`
+  const child = spawn('sh', ['-c', anchor, 'fixture-shell', command, process.execPath, join(import.meta.dirname, 'posix-fixture-status.mjs')],
+    { cwd, env, detached: true, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
   const cancellation = new AbortController()
+  const closed = Promise.all([new Promise<void>(resolve => child.once('close', () => resolve())),
+    relayOutput(child.stdout, process.stdout, cancellation), relayOutput(child.stderr, process.stderr, cancellation)])
   const interrupt = (signal: NodeJS.Signals) => cancellation.abort(new Error(`${command} interrupted by ${signal} (PID ${child.pid}, started ${started})`))
   process.on('SIGINT', interrupt).on('SIGTERM', interrupt)
   try {
     await once(child, 'spawn')
     const group = child.pid!
-    const status = text(child.stdio[3] as NodeJS.ReadableStream)
+    const lostAnchor = new Promise<string>(resolve => {
+      child.once('exit', () => resolve(''))
+      child.stdin!.once('error', () => resolve(''))
+    })
     let timer: NodeJS.Timeout | undefined
     let visible = false
     await withCleanup(async () => {
       visible = (await processes(group, env)).some(row => row.pid === group && row.group === group && row.marked)
       if (!visible) throw new Error(`ps did not see the marked gated shell (PID ${group})`)
       cancellation.signal.throwIfAborted()
+      const status = text(child.stdio[3] as NodeJS.ReadableStream)
       child.stdin!.write('run\n')
-      const result = await Promise.race([status, new Promise<never>((_, reject) => {
+      const result = await Promise.race([status, lostAnchor, new Promise<never>((_, reject) => {
         cancellation.signal.addEventListener('abort', () => reject(cancellation.signal.reason), { once: true })
         timer = setTimeout(() => reject(new Error(`${command} timed out (PID ${group}, started ${started})`)), timeout)
       })])
       if (result.trim() !== '0') throw new Error(`${command} exited with ${result.trim() || 'no status'} (PID ${group}, started ${started})`)
     }, async () => {
       clearTimeout(timer)
-      if (child.exitCode === null && child.signalCode === null) process.kill(-group, 'SIGKILL')
       child.stdin!.destroy()
-      await Promise.race([closed, delay(5000, undefined, { ref: false }).then(() => { throw new Error(`Shell PID ${group} did not close`) })])
+      child.kill('SIGCONT')
+      await Promise.race([closed, delay(5000, undefined, { ref: false }).then(() => { throw new Error(`Fixture shell or its pipes did not close (PID ${group})`) })])
       const until = Date.now() + 5000
       let rows = await processes(group, env)
       while (rows.length && Date.now() < until) { await delay(50); rows = await processes(group, env) }
@@ -90,6 +118,10 @@ export async function runFixtureCommand(command: string, cwd: string, env: NodeJ
     })
     cancellation.signal.throwIfAborted()
   } finally {
+    child.stdout.destroy()
+    child.stderr.destroy()
+    child.stdio[3]?.destroy()
+    child.unref()
     process.off('SIGINT', interrupt).off('SIGTERM', interrupt)
   }
 }

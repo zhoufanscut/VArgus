@@ -39,8 +39,9 @@ then `---` and `**Full changelog**: <compare link>` (see VantageHUD's GitHub rel
   Node source and runs the shared renderer and local host tests with Node and Git.
   The fixture supervisor used by the Node and Claude suites also needs the
   Windows .NET Framework 4.x compiler (`csc.exe`) on Windows, or `sh` and a
-  `ps` that shows same-user process environments on POSIX. These are test
-  prerequisites, not VArgus install steps.
+  `ps` that shows same-user process environments on POSIX. The Windows
+  assignment-failure test uses Windows PowerShell. These are test prerequisites,
+  not VArgus install steps.
   `npm test` adds native Codex and tmux checks, or Codex and psmux checks on Windows.
 - For Claude development, start `claude --plugin-dir .` interactively from the repository
   root on a fresh checkout or after upgrading Claude Code. Let Claude load the plugin and
