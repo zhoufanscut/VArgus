@@ -13,6 +13,7 @@ import { applicationProcesses, applicationArguments } from '../../src/outputs/tm
 import { applicationTargets } from '../../src/outputs/tmux/target.ts'
 import { PaneInput } from '../../src/outputs/tmux/input.ts'
 import { TmuxOutput } from '../../src/outputs/tmux/client.ts'
+import { REFRESH_GRACE_MS } from '../../src/render/freshness.ts'
 
 const exec = promisify(execFile)
 const windows = process.platform === 'win32'
@@ -262,7 +263,7 @@ test('Windows hook restoration preserves literal indexed names beside real comma
   }
 })
 
-test('Windows updates publish only changed cells in one batch without forced refresh and keep shell formatters asynchronous', { skip: !windows, timeout: 90000 }, async () => {
+test('Windows updates publish only changed cells in one batch without forced refresh and keep shell formatters asynchronous', { skip: !windows, timeout: 90000 }, async t => {
   for (const scenario of ['steady', 'shell', 'bare-alias', 'separator']) {
     const dir = await mkdtemp(join(tmpdir(), 'vargus-windows-diff-test-')), socket = join(dir, 'server')
     const run = async (...args: string[]) => (await exec('tmux', ['-S', socket, ...args],
@@ -275,8 +276,12 @@ test('Windows updates publish only changed cells in one batch without forced ref
       class CountedOutput extends TmuxOutput {
         mutations = 0
         refreshes = 0
+        mutationArgs: string[][] = []
         override async command(...args: string[]): Promise<string> {
-          if (args.includes('set-option')) this.mutations++
+          if (args.includes('set-option')) {
+            this.mutations++
+            this.mutationArgs.push(args)
+          }
           if (args[0] === 'refresh-client') this.refreshes++
           return super.command(...args)
         }
@@ -284,13 +289,29 @@ test('Windows updates publish only changed cells in one batch without forced ref
       const counted = output = new CountedOutput(socket, pane, join(dir, 'state'))
       if (scenario === 'steady') {
         await run('set-option', 'status-right', 'RIGHT CONSTANT')
-        await output.attach(); await output.update('UNCHANGED HEADER')
-        const before = counted.mutations, refreshes = counted.refreshes
-        await output.update('UNCHANGED HEADER')
-        assert.equal(counted.mutations, before)
-        assert.equal(counted.refreshes, refreshes)
-        await output.update('CHANGED HEADER')
-        assert.equal(counted.mutations, before + 1, 'publish changed values in one command batch')
+        await output.attach()
+        let now = Date.now()
+        const clock = t.mock.method(Date, 'now', () => now)
+        try {
+          await output.update('UNCHANGED HEADER')
+          const before = counted.mutations, refreshes = counted.refreshes
+          await output.update('UNCHANGED HEADER')
+          assert.equal(counted.mutations, before, JSON.stringify(counted.mutationArgs.slice(before)))
+          assert.equal(counted.refreshes, refreshes)
+          now += 1000
+          await output.update('UNCHANGED HEADER')
+          assert.equal(counted.mutations, before + 1, 'renew only the deadline across a Unix-second boundary')
+          assert.deepEqual(counted.mutationArgs[before], ['set-option', '-p', '-t', pane, '@vargus_header_deadline', String(Math.ceil((now + REFRESH_GRACE_MS) / 1000))])
+          assert.equal(counted.refreshes, refreshes)
+          await output.update('CHANGED HEADER')
+          assert.equal(counted.mutations, before + 2, 'publish changed values in one command batch')
+          const batch = counted.mutationArgs[before + 1]
+          assert.equal(batch?.filter(arg => arg === 'set-option').length, 2, JSON.stringify(batch))
+          assert.ok(batch?.includes('@vargus_header') && batch.includes('@vargus_stale'), JSON.stringify(batch))
+          assert.equal(counted.refreshes, refreshes)
+        } finally {
+          clock.mock.restore()
+        }
       } else {
         const encoded = Buffer.from('Start-Sleep -Milliseconds 5200; Write-Output ASYNC_FORMATTER', 'utf16le').toString('base64')
         const format = `#(powershell.exe -NoProfile -EncodedCommand ${encoded})`
@@ -476,7 +497,8 @@ trust_level = "trusted"
   }
   const control = async (action: string) => exec(process.execPath, [join(checkout, 'src/cli.ts'), action, '--socket', socket, '--pane', pane],
     { cwd: project, windowsHide: true, env: { ...env, VARGUS_CLI_MAIN: '1', CODEX_THREAD_ID: thread }, timeout: 25000 })
-  const row = async () => { try { return await run('show-options', '-p', '-v', '-t', pane, '@vargus_line') } catch { return '' } }
+  const rawRow = async () => { try { return await run('show-options', '-p', '-v', '-t', pane, '@vargus_line') } catch { return '' } }
+  const row = async () => (await rawRow()).replace(/#\[[^\]]*\]/g, '')
   try {
     // Trust bypass is confined to this isolated home and these vetted test hooks.
     const script = `& codex --no-daemon --no-alt-screen --dangerously-bypass-hook-trust -C ${quote(project)}`
@@ -503,7 +525,13 @@ trust_level = "trusted"
     await delay(500)
     const afterPrompt = posts
     assert.ok(afterPrompt > 0)
-    await wait(row, /token:3\.2k/)
+    const rendered = await wait(row, /token:3\.2k/)
+    assert.match(rendered, /token:3\.2k\(94\.3%\)/)
+    if (!process.env.NO_COLOR) {
+      assert.match(await rawRow(), /#\[fg=#[0-9a-f]{6},nobold\]token:#\[fg=#[0-9a-f]{6},nobold\]3\.2k/)
+    } else {
+      assert.doesNotMatch(await rawRow(), /#\[fg=#/)
+    }
     console.log('WINDOWS_HOOK_ACTIVATED', thread)
     assert.match((await control('on')).stdout, /VArgus is (?:already )?on/)
     await wait(row, /token:3\.2k/)
@@ -513,7 +541,7 @@ trust_level = "trusted"
     assert.match((await control('reload')).stdout, /reloaded/)
     await wait(row, /token:3\.2k/)
     assert.match((await control('off')).stdout, /VArgus is off/)
-    await wait(row, /^$/)
+    await wait(rawRow, /^$/)
     await wait(screen, new RegExp(thread))
     assert.equal(await run('show-options', '-v', 'status'), 'on')
     assert.equal(JSON.parse(await run('dump-state')).status_format[0], before.status_format[0])

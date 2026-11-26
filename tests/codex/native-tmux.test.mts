@@ -4,6 +4,7 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TmuxOutput } from '../../src/outputs/tmux/client.ts'
+import { REFRESH_GRACE_MS } from '../../src/render/freshness.ts'
 import { makeTheme } from '../../src/theme/index.ts'
 
 // Exercise the Windows branch on every platform. Commands use the psmux 3.4.0
@@ -310,5 +311,47 @@ test('native window-local bar overrides retain psmux rendering before attachment
       await second.detach()
       assert.equal(r.server.options.get('status'), 'on')
     } finally { await first.detach(); await second.detach(); await r.close() }
+  }
+})
+
+test('native updates suppress identical publishes within one second, renew only the deadline across seconds, and batch changed cells', async t => {
+  let now = 100000
+  const clock = t.mock.method(Date, 'now', () => now)
+  try {
+    for (const scalar of [true, false]) {
+      const r = await rig()
+      if (!scalar) r.server.formats.push('ORIGINAL')
+      const mutationArgs: string[][] = []
+      class CountedOutput extends TmuxOutput {
+        override async command(...args: string[]): Promise<string> {
+          if (args.includes('set-option')) mutationArgs.push(args)
+          return r.server.command(...args)
+        }
+      }
+      const output = new CountedOutput('native-test', '%0', r.root)
+      const deadlineOption = scalar ? '@vargus_header_deadline' : '@vargus_deadline'
+      const textOption = scalar ? '@vargus_header' : '@vargus_line'
+      try {
+        await output.attach()
+        await output.update('UNCHANGED HEADER')
+        const before = mutationArgs.length
+        await output.update('UNCHANGED HEADER')
+        assert.equal(mutationArgs.length, before, JSON.stringify(mutationArgs.slice(before)))
+        now += 1000
+        await output.update('UNCHANGED HEADER')
+        assert.equal(mutationArgs.length, before + 1)
+        assert.deepEqual(mutationArgs[before], ['set-option', '-p', '-t', '%0', deadlineOption, String(Math.ceil((now + REFRESH_GRACE_MS) / 1000))])
+        await output.update('CHANGED HEADER')
+        assert.equal(mutationArgs.length, before + 2)
+        const batch = mutationArgs[before + 1]
+        assert.equal(batch?.filter(arg => arg === 'set-option').length, 2, JSON.stringify(batch))
+        assert.ok(batch?.includes(textOption) && batch.includes('@vargus_stale'), JSON.stringify(batch))
+      } finally {
+        await output.detach()
+        await r.close()
+      }
+    }
+  } finally {
+    clock.mock.restore()
   }
 })
