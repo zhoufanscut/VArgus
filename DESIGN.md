@@ -1018,10 +1018,11 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   Pointing Claude Code 2.1.332 at `tests/claude` directly reports “no hooks module to load,”
   so the stage keeps the plugin manifest. The engine fixtures mock filesystem
   hooks; the shell checks exercise the documented reader and manifest separately.
-  On Windows the supervisor starts an idle shell. Only after a private Job
-  Object confirms assignment does the supervisor send the instruction to run
-  the command. An empty job alone cannot certify cleanup: the receipt requires
-  confirmed assignment, an empty job and shell exit.
+  On Windows, Node runs commands through `cmd.exe`. Before and after each command,
+  a PowerShell CIM query checks for the fixture marker in process command lines;
+  the query must see its own PID. A timeout stops the direct child only. An empty
+  scan after the shell exits cannot rule out unmarked descendants, so the Windows
+  runner does not write a cleanup receipt or automatically delete the staged home.
   On POSIX `ps` must see the marker on the gated group leader. Closing the
   control pipe asks the leader or a second member to stop its own group, so
   losing the leader does not require signaling a possibly reused group ID.

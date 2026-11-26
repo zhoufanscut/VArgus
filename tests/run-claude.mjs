@@ -20,8 +20,11 @@ const env = {
   TMP: temporary,
   TMPDIR: temporary,
   VARGUS_CLAUDE_FIXTURE: marker,
+  VARGUS_CLAUDE_CHECKOUT: checkout,
 }
-const shell = process.platform === 'win32' ? 'git -c "alias.vargus-test=!sh" vargus-test' : 'sh'
+const windows = process.platform === 'win32'
+const plugin = windows ? '"%VARGUS_CLAUDE_CHECKOUT%"' : '.'
+const shell = windows ? 'git -c "alias.vargus-test=!sh" vargus-test' : 'sh'
 let testsStarted = false
 
 await withCleanup(async () => {
@@ -31,11 +34,15 @@ await withCleanup(async () => {
     await cp(join(source, name), join(checkout, name), { recursive: true, filter: path => !path.endsWith('.test.mts') })
   }
   testsStarted = true
-  for (const command of ['claude plugin validate .', 'claude plugin test .', `${shell} tests/claude/reader.test.sh`, `${shell} tests/claude/manifest.test.sh`]) {
+  for (const command of [`claude plugin validate ${plugin}`, `claude plugin test ${plugin}`, `${shell} tests/claude/reader.test.sh`, `${shell} tests/claude/manifest.test.sh`]) {
     await runFixtureCommand(command, checkout, env, stopped)
-    await access(stopped)
+    if (!windows) await access(stopped)
   }
 }, async () => {
+  if (windows && testsStarted) {
+    console.error(`Retained Claude test fixture at ${directory}: Windows CIM cannot verify exit of unmarked descendants.`)
+    return
+  }
   try {
     if (testsStarted) await access(stopped)
     if (await realpath(directory) !== directory || dirname(directory) !== temp) throw new Error('Fixture path changed')

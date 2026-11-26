@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { access, rm, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { Readable } from 'node:stream'
 import { text } from 'node:stream/consumers'
 import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises'
@@ -32,6 +32,27 @@ export async function withCleanup(work: () => Promise<void>, cleanup: () => Prom
   await cleanup()
 }
 
+async function waitForWindowsFixture(env: NodeJS.ProcessEnv): Promise<void> {
+  const marker = env.VARGUS_CLAUDE_FIXTURE
+  if (!marker) throw new Error('Missing Windows fixture marker')
+  const query = `$ErrorActionPreference = 'Stop'
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${marker.replaceAll("'", "''")}') } |
+  ForEach-Object { "$($_.ProcessId) $($_.Name)" }`
+  const deadline = Date.now() + 5000
+  for (;;) {
+    const scan = exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', query],
+      { env, windowsHide: true, timeout: 5000 })
+    const { stdout } = await scan
+    const rows = stdout.trim().split(/\r?\n/)
+    const scanner = rows.find(row => row.startsWith(`${scan.child.pid} `))
+    if (!scanner) throw new Error('CIM did not see its fixture marker')
+    const remaining = rows.filter(row => row !== scanner)
+    if (!remaining.length) return
+    if (Date.now() >= deadline) throw new Error(`Fixture processes still active: ${remaining.join(', ')}`)
+    await delay(100)
+  }
+}
+
 async function processes(group: number, env: NodeJS.ProcessEnv) {
   const scan = exec('ps', ['xeww', '-o', 'pid=,pgid=,stat=,lstart=,comm=,args='], {
     env: { ...env, LC_ALL: 'C' }, timeout: 5000, maxBuffer: 8 * 1024 * 1024,
@@ -53,24 +74,22 @@ async function processes(group: number, env: NodeJS.ProcessEnv) {
 
 export async function runFixtureCommand(command: string, cwd: string, env: NodeJS.ProcessEnv, stopped: string, timeout = 120_000): Promise<void> {
   await rm(stopped, { force: true })
-  const started = new Date().toISOString()
   if (process.platform === 'win32') {
-    const supervisor = join(dirname(stopped), 'fixture-job.exe')
-    await access(supervisor).catch(async (error: NodeJS.ErrnoException) => {
-      if (error.code !== 'ENOENT') throw error
-      const systemRoot = process.env.SystemRoot
-      if (!systemRoot) throw new Error('SystemRoot is required to locate the Windows .NET Framework compiler (csc.exe)')
-      const compiler = join(systemRoot, 'Microsoft.NET', 'Framework', 'v4.0.30319', 'csc.exe')
-      await exec(compiler, ['/nologo', `/out:${supervisor}`, join(import.meta.dirname, 'windows-fixture-job.cs')], { cwd, env, windowsHide: true, timeout: 15_000 })
-    })
-    const child = spawn(supervisor, [command, String(timeout), stopped], {
-      cwd, env, stdio: 'inherit', windowsHide: true, timeout: timeout + 15_000, killSignal: 'SIGKILL',
-    })
-    const [code, signal] = await once(child, 'close')
-    if (code !== 0) throw new Error(`${command} failed (${signal ?? code}; supervisor PID ${child.pid}, started ${started})`)
-    return
+    await waitForWindowsFixture(env)
+    return withCleanup(async () => {
+      const started = new Date().toISOString()
+      const child = spawn(env.ComSpec ?? 'cmd.exe', ['/d', '/v:off', '/s', '/c', `"${command}"`], {
+        cwd, env, stdio: 'inherit', windowsHide: true, windowsVerbatimArguments: true, timeout, killSignal: 'SIGKILL',
+      })
+      const [code, signal] = await once(child, 'close')
+      if (code !== 0) {
+        const outcome = child.killed ? 'timed out' : `exited with ${signal ?? code}`
+        throw new Error(`${command} ${outcome} (PID ${child.pid}, started ${started})`)
+      }
+    }, () => waitForWindowsFixture(env))
   }
 
+  const started = new Date().toISOString()
   const stopGroup = 'IFS= read -r stop; kill -s KILL 0'
   const anchor = `IFS= read -r start || exit 1
 exec 4<&0

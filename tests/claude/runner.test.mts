@@ -19,14 +19,12 @@ test('fixture cleanup preserves the command error and the independent cleanup er
 })
 
 const signals = ['SIGINT', 'SIGTERM']
-const posixModes = process.platform === 'win32' ? [] : ['anchor-exit', ...signals]
-for (const mode of ['success', 'failure', 'timeout', ...posixModes]) {
-  test(`the fixture runner stops an unmarked descendant after ${mode}`, async context => {
+for (const mode of ['success', 'failure', 'timeout', 'anchor-exit', ...signals]) {
+  test(`the POSIX fixture runner stops an unmarked descendant after ${mode}`, { skip: process.platform === 'win32' }, async context => {
     const temp = await realpath(tmpdir())
     const dir = await mkdtemp(join(temp, 'vargus-runner-')), stopped = join(dir, 'stopped')
     const env: NodeJS.ProcessEnv = { ...process.env, VARGUS_CLAUDE_FIXTURE: basename(dir), VARGUS_TEST_NODE: process.execPath, TMP: dir, TEMP: dir, TMPDIR: dir }
-    const node = process.platform === 'win32' ? '"%VARGUS_TEST_NODE%"' : '"$VARGUS_TEST_NODE"'
-    const command = `${node} parent.cjs ${mode}`
+    const command = `"$VARGUS_TEST_NODE" parent.cjs ${mode}`
     const run = () => runFixtureCommand(command, dir, env, stopped, mode === 'timeout' ? 2500 : 15_000)
     const groupSignals: number[] = []
     if (mode === 'anchor-exit') {
@@ -82,7 +80,7 @@ finally { unwatchFile('live-pid') }
         await assert.rejects(run, /exited with no status/)
         assert.deepEqual(groupSignals, [], 'the controller must not signal a numeric process group')
       }
-      else await assert.rejects(run, mode === 'failure' ? /exited with 37|failed \(37;/ : /timed out \(|failed \(124;/)
+      else await assert.rejects(run, mode === 'failure' ? /exited with 37/ : /timed out \(/)
       await access(stopped)
       const pid = Number(await readFile(join(dir, 'live-pid'), 'utf8'))
       assert.ok(pid > 0)
@@ -218,38 +216,29 @@ test('a POSIX payload interrupted by SIGINT reports 130 and does not continue', 
   })
 })
 
-test('Windows keeps the command gated and withholds the receipt when assignment fails', { skip: process.platform !== 'win32' }, async () => {
-  const temp = await realpath(tmpdir()), dir = await mkdtemp(join(temp, 'vargus-job-'))
-  const stopped = join(dir, 'stopped'), ran = join(dir, 'ran')
-  const env = { ...process.env, VARGUS_CLAUDE_FIXTURE: basename(dir), TMP: dir, TEMP: dir, TMPDIR: dir }
-  const command = 'ver >nul && >ran echo first& >>ran echo second'
-  const rejection = `
-$ErrorActionPreference = 'Stop'
-[void][Reflection.Assembly]::LoadFrom((Join-Path $PWD 'fixture-job.exe'))
-$job = New-Object FixtureJob
-try {
-  $deny = [Action[Diagnostics.Process]]{ param($shell)
-    if ($shell.HasExited) { throw 'gate already exited' }
-    [IO.File]::WriteAllText((Join-Path $PWD 'gated-pid'), [string]$shell.Id)
-  }
-  exit $job.Supervise(@($env:VARGUS_TEST_COMMAND, '5000', $env:VARGUS_TEST_STOPPED), $deny)
-} finally { $job.Dispose() }
-`
+test('Windows checks marked processes and reports command status without certifying the whole tree', { skip: process.platform !== 'win32' }, async () => {
+  const temp = await realpath(tmpdir()), dir = await mkdtemp(join(temp, 'vargus runner-'))
+  const marker = basename(dir), stopped = join(dir, 'stopped'), ran = join(dir, 'ran with spaces')
+  const env = { ...process.env, VARGUS_CLAUDE_FIXTURE: marker, TMP: dir, TEMP: dir, TMPDIR: dir }
+  const command = 'ver >nul && >"ran with spaces" echo first& >>"ran with spaces" echo second'
+  const blocker = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)', marker], { cwd: dir, env, windowsHide: true, stdio: 'ignore' })
+  const closed = new Promise<void>(resolve => blocker.once('close', () => resolve()))
   await withCleanup(async () => {
-    await runFixtureCommand('ver >nul', dir, env, stopped)
-    await rm(stopped)
-    await assert.rejects(promisify(execFile)('powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(rejection, 'utf16le').toString('base64')],
-      { cwd: dir, env: { ...env, VARGUS_TEST_COMMAND: command, VARGUS_TEST_STOPPED: stopped }, windowsHide: true, timeout: 15_000 }),
-      (error: Error & { code?: number; stderr?: string }) => error.code === 1 && !!error.stderr?.includes('Job did not see its gated shell'))
+    await once(blocker, 'spawn')
+    await writeFile(stopped, 'stale')
+    await assert.rejects(runFixtureCommand(command, dir, env, stopped), new RegExp(`Fixture processes still active: ${blocker.pid} `))
     await assert.rejects(access(stopped), { code: 'ENOENT' })
     await assert.rejects(access(ran), { code: 'ENOENT' })
-  }, async () => {
-    const pid = Number(await readFile(join(dir, 'gated-pid'), 'utf8'))
-    if (!(pid > 0) || await processIsRunning(pid)) throw new Error(`Could not confirm gated shell exit; retained ${dir}`)
+    blocker.kill()
+    await closed
     await runFixtureCommand(command, dir, env, stopped)
-    await access(stopped)
     assert.equal(await readFile(ran, 'utf8'), 'first\r\nsecond\r\n')
+    await assert.rejects(access(stopped), { code: 'ENOENT' })
+    await assert.rejects(runFixtureCommand('exit /b 37', dir, env, stopped), /exited with 37/)
+    await assert.rejects(runFixtureCommand('for /l %n in (1,1,2147483647) do @rem wait', dir, env, stopped, 150), /timed out/)
+  }, async () => {
+    blocker.kill()
+    await closed
     if (await realpath(dir) !== dir || dirname(dir) !== temp) throw new Error(`Fixture path changed: ${dir}`)
     await rm(dir, { recursive: true })
   })

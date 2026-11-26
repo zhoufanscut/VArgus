@@ -37,18 +37,16 @@ then `---` and `**Full changelog**: <compare link>` (see VantageHUD's GitHub rel
 
 - Run `npm ci` for development tools. `npm run test:local` type-checks the
   Node source and runs the shared renderer and local host tests with Node and Git.
-  The fixture supervisor used by the Node and Claude suites also needs the
-  Windows .NET Framework 4.x compiler (`csc.exe`) on Windows, or `sh` and a
-  `ps` that shows same-user process environments on POSIX. The Windows
-  assignment-failure test uses Windows PowerShell. These are test prerequisites,
-  not VArgus install steps.
+  The fixture runner uses Windows PowerShell with CIM on Windows, or `sh` and
+  a `ps` that shows same-user process environments on POSIX.
   `npm test` adds native Codex and tmux checks, or Codex and psmux checks on Windows.
 - For Claude development, start `claude --plugin-dir .` interactively from the repository
   root on a fresh checkout or after upgrading Claude Code. Let Claude load the plugin and
   write its TypeScript declarations to `.claude-plugin/types/`, then exit the session.
   Run `npm run test:claude` for type-checking, staged plugin validation, engine tests
   and the reader and manifest checks. On Windows the shell checks use Git for Windows.
-  If the runner reports a retained fixture, inspect the command and cleanup errors
+  Native Windows runs retain the staged fixture even after a pass.
+  If the runner prints a retained path, confirm fixture processes have exited
   before removing that directory.
   See [test and verification details](../DESIGN.md#tests).
 
