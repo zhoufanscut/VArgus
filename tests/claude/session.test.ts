@@ -211,7 +211,7 @@ describe('session collector', () => {
     expect(await line(clock, w)).toBe('opus | ctx:3% | token:1.5k(91.8%) | session:0m')
   })
 
-  test('a usage response from before /clear cannot restore the old session start', MINE, async ($, on) => {
+  test('a usage response from before /clear cannot restore old context or session start', MINE, async ($, on) => {
     const clock = mock.clock(on, { now: 10 * 3_600_000 })
     const w = world(on, clock)
     await $.session.start(start)
@@ -428,6 +428,7 @@ describe('session collector', () => {
 
     // Hot reload restores the rate from $.state.
     await clock.settle()
+    expect((w.saved as { tokensPerSecond?: number }).tokensPerSecond).toBe(250)
     w.restore = { ...(w.saved as Record<string, unknown>), tokensPerSecond: 125 }
     await $.session.start(start)
     expect(await line(clock, w)).toContain('token:6.0k(91.8%, 125t/s)')

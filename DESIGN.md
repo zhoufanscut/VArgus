@@ -1027,8 +1027,9 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   the child to close. Stop and close-wait failures are propagated without losing
   the original command error; a non-128 `taskkill` failure remains visible after
   the root-kill fallback. The staged directory is removed in `finally` after a
-  confirmed child exit. Unconfirmed exit retains the directory; retained paths
-  and removal failures are reported and make the run non-zero.
+  successful tree stop (when needed) and confirmed child exit. Tree-stop
+  failures or unconfirmed exit retain the directory; retained paths and removal
+  failures are reported and make the run non-zero.
 
 ### Live evidence and limits
 

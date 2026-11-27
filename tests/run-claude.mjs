@@ -31,10 +31,10 @@ function windowsEnvValue(map, name) {
   return undefined
 }
 
-async function withCleanup(work, cleanup) {
+async function withCleanup(work, cleanup, message = 'Command and cleanup both failed') {
   try { await work() } catch (failure) {
     try { await cleanup() } catch (cleanupError) {
-      throw new AggregateError([failure, cleanupError], 'Command and cleanup both failed')
+      throw new AggregateError([failure, cleanupError], message)
     }
     throw failure
   }
@@ -56,7 +56,7 @@ async function stopTree(child) {
   try { process.kill(-child.pid, 'SIGKILL') } catch (error) { if (error?.code !== 'ESRCH') throw error }
 }
 
-let childExitUnconfirmed = false
+let retainReason = null
 
 async function runCommand(file, args, timeout = 120_000) {
   const label = [file, ...args].join(' ')
@@ -65,7 +65,7 @@ async function runCommand(file, args, timeout = 120_000) {
   const exited = new Promise(resolve => {
     child.once('close', (code, signal) => { closed = true; resolve([code, signal]) })
   })
-  const failed = new Promise((_, reject) => { child.once('error', reject) })
+  const failed = new Promise((_, reject) => { child.on('error', reject) })
   failed.catch(() => {})
   let timer
   let onSignal
@@ -83,15 +83,31 @@ async function runCommand(file, args, timeout = 120_000) {
       clearTimeout(timer)
       process.off('SIGINT', onSignal).off('SIGTERM', onSignal)
       if (!closed && child.pid) {
+        let stopFailed = false
         try {
-          await withCleanup(() => stopTree(child), async () => {
-            const closeTimeout = delay(5_000, undefined, { ref: false }).then(() => {
+          await withCleanup(async () => {
+            try {
+              await stopTree(child)
+            } catch (error) {
+              stopFailed = true
+              throw error
+            }
+          }, async () => {
+            const controller = new AbortController()
+            const closeTimeout = delay(5_000, undefined, { ref: false, signal: controller.signal }).then(() => {
               throw new Error(`${label}: child exit was not confirmed after 5000ms`)
             })
-            await Promise.race([exited, closeTimeout])
-          })
+            closeTimeout.catch(() => {})
+            try {
+              await Promise.race([exited, closeTimeout])
+            } finally {
+              controller.abort()
+            }
+          }, 'Process-tree stop and close wait both failed')
         } finally {
-          if (!closed) childExitUnconfirmed = true
+          if (stopFailed && !closed) retainReason = 'process-tree stop failed and child exit was not confirmed'
+          else if (stopFailed) retainReason = 'process-tree stop failed'
+          else if (!closed) retainReason = 'child exit was not confirmed'
         }
       }
     })
@@ -123,8 +139,8 @@ try {
   }
   for (const [file, args] of commands) await runCommand(file, args)
 } finally {
-  if (childExitUnconfirmed) {
-    console.error(`Retained Claude test fixture at ${directory}: child exit was not confirmed`)
+  if (retainReason) {
+    console.error(`Retained Claude test fixture at ${directory}: ${retainReason}`)
     process.exitCode = 1
   } else {
     try {

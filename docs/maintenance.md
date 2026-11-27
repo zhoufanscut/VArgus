@@ -28,7 +28,7 @@ These rules apply to every agent and subagent, test suite and throwaway probe, r
   `taskkill /T /F` on Windows), and a bounded wait for confirmed child close.
   Propagate stop and wait failures without losing the original command error.
   Clean up the temporary directory in `finally`, but retain and report its path
-  when child exit is unconfirmed or removal fails.
+  when tree stop fails, child exit is unconfirmed, or removal fails.
 
 ## Releases
 
