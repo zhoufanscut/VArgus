@@ -46,6 +46,12 @@ export const PALETTES: Record<string, Record<TokenName, string>> = {
     calm: '#c9d0d9', alert: '#ff7976',
     add: '#7ea989', del: '#c38d8a', track: '#a294c1',
   },
+  // warm terracotta/parchment dark (Claude Code / Anthropic family)
+  'claude-terracotta': {
+    text: '#fcf1ea', label: '#dd947d', detail: '#a38b7e', sep: '#4c3f3a',
+    calm: '#e6c8b9', alert: '#ff6b80',
+    add: '#85ac89', del: '#c08b8c', track: '#81a4c7',
+  },
   // pure neutral-gray dark, lowest VCS chroma. VArgus's default.
   graphite: {
     text: '#ededed', label: '#aeaeae', detail: '#929292', sep: '#4a4a4a',
@@ -66,6 +72,7 @@ export const PALETTE_POLARITY: Record<string, PalettePolarity> = {
   nebula: 'dark',
   'tokyo-night': 'dark',
   'codex-ink': 'dark',
+  'claude-terracotta': 'dark',
   graphite: 'dark',
   daylight: 'light',
 }

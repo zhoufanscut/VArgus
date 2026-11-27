@@ -239,6 +239,17 @@ from ChatGPT Blue 200 (`#63a8f8`), with OKLCH chroma reduced from 0.137 to
 0.107 to fit the VArgus label range.
 [Codex TUI style guide](https://github.com/openai/codex/blob/afe555b9d3e95b4f58b247212565070f1555bc5d/codex-rs/tui/styles.md) · [Codex accent definition](https://github.com/openai/codex/blob/afe555b9d3e95b4f58b247212565070f1555bc5d/codex-rs/tui/src/style.rs#L26-L30)
 
+The dark `claude-terracotta` palette follows Claude Code's documented brand-accent,
+text, success and error roles. Its `alert` uses the dark-theme error
+`rgb(255,107,128)` (`#ff6b80`) reported by a third-party theme guide; `add` keeps
+that guide's success hue, while `track` keeps Anthropic Blue's hue. Both VCS colors
+are muted to the balanced VCS chroma band. The label starts from Anthropic Orange
+`#d97757`, whose measured OKLCH lightness/chroma are 0.672/0.131; it is adjusted to
+`#dd947d` (0.734/0.095) to fit the label band. The warm neutral ramp is hue-aligned
+with terracotta rather than using Anthropic's Light and Mid Gray unchanged: their
+measured hues are about 56–58° from the orange, beyond the 35° ramp limit.
+[Claude Code colour tokens](https://code.claude.com/docs/en/terminal-config#create-a-custom-theme) · [Anthropic brand colours](https://github.com/anthropics/skills/blob/e4bb5d960d87126ff3b3a8af1a104b7db67560ba/skills/brand-guidelines/SKILL.md) · [Claude Code theme measurements (third party)](https://blog.vincentqiao.com/en/posts/claude-code-theme/)
+
 The palette registry uses own-property lookup (case-insensitive, collapsing
 internal whitespace to hyphens so `tokyo night` resolves to `tokyo-night`) and
 falls back to `graphite` for unknown names. When a host sees a non-empty
