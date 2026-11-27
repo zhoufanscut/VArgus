@@ -230,6 +230,21 @@ describe('session collector', () => {
     // A read started after the clear still fills the new session's values.
     await $.session.measure({ context: { window: 200000, percent: 64 }, rateLimits: [], changed: ['context'] })
     expect(await line(clock, w)).toBe('opus | ctx:64% | session:3h0m')
+
+    // The independent read after a main step follows the same rule.
+    w.releaseUsage = undefined
+    w.usageHeld = true
+    const pending = step($)
+    await flush()
+    await clock.advance(0)
+    const release = w.releaseUsage as (() => void) | undefined
+    expect(release).toBeDefined()
+    await $.session.end({ reason: 'clear', sessionId: 'S2', resume: { id: 'S2' } })
+    w.id = 'S3'
+    w.usageHeld = false
+    release?.()
+    await pending
+    expect(await line(clock, w)).toBe('opus | ctx:0%')
   })
 
   test('after a resume the first main response fills context and start; ticks do not poll', MINE, async ($, on) => {
@@ -413,9 +428,9 @@ describe('session collector', () => {
 
     // Hot reload restores the rate from $.state.
     await clock.settle()
-    w.restore = w.saved
+    w.restore = { ...(w.saved as Record<string, unknown>), tokensPerSecond: 125 }
     await $.session.start(start)
-    expect(await line(clock, w)).toContain('token:6.0k(91.8%, 250t/s)')
+    expect(await line(clock, w)).toContain('token:6.0k(91.8%, 125t/s)')
 
     // A model switch clears the stale rate.
     w.model = 'claude-sonnet-5'

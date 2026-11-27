@@ -23,10 +23,12 @@ These rules apply to every agent and subagent, test suite and throwaway probe, r
   can remain in use. If an owned process survives a bounded wait or visibility is insufficient,
   fail the cleanup check, retain its home and report the remaining process or verification gap
   before handing off.
-- Short-lived synchronous CLI runners (such as `tests/run-claude.mjs`) only need a timeout, a
-  process-tree stop on timeout or `SIGINT`/`SIGTERM` (`kill(-pid)` on POSIX, `taskkill /T /F` on
-  Windows), and `finally` cleanup of their temporary directory (reporting the path if removal
-  fails).
+- Short-lived synchronous CLI runners (such as `tests/run-claude.mjs`) need a timeout, a
+  process-tree stop on timeout or `SIGINT`/`SIGTERM` (`kill(-pid)` on POSIX,
+  `taskkill /T /F` on Windows), and a bounded wait for confirmed child close.
+  Propagate stop and wait failures without losing the original command error.
+  Clean up the temporary directory in `finally`, but retain and report its path
+  when child exit is unconfirmed or removal fails.
 
 ## Releases
 

@@ -1021,11 +1021,14 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   so the stage keeps the plugin manifest. The engine fixtures mock filesystem
   hooks; the shell checks exercise the documented reader and manifest separately.
   Each staged command runs with a 120 s timeout (`claude` via `ComSpec` and the
-  shell checks via Git for Windows on Windows; directly on POSIX), stops its
-  child tree on timeout or `SIGINT`/`SIGTERM` (`taskkill.exe /PID <pid> /T /F`
-  on Windows, `process.kill(-pid, 'SIGKILL')` on POSIX), and removes the staged
-  directory in `finally` (reporting the path and exiting non-zero if removal
-  fails).
+  shell checks via Git for Windows on Windows; directly on POSIX). On timeout or
+  `SIGINT`/`SIGTERM`, the runner stops its child tree (`taskkill.exe /PID <pid> /T /F`
+  on Windows, `process.kill(-pid, 'SIGKILL')` on POSIX) and waits up to 5 s for
+  the child to close. Stop and close-wait failures are propagated without losing
+  the original command error; a non-128 `taskkill` failure remains visible after
+  the root-kill fallback. The staged directory is removed in `finally` after a
+  confirmed child exit. Unconfirmed exit retains the directory; retained paths
+  and removal failures are reported and make the run non-zero.
 
 ### Live evidence and limits
 

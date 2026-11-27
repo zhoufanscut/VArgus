@@ -229,8 +229,10 @@ export async function stepDone(
   if (usage || mainResponse) save($, values)
   if (e.agentId !== undefined) return
   values.compactPending = false
+  const generation = sessionGeneration
   try {
     const usage = await $.session.usage()
+    if (generation !== sessionGeneration) return
     setContext(values, usage.context)
     if (values.startedAt === undefined) values.startedAt = usage.startedAt
   } catch {

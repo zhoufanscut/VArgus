@@ -31,28 +31,42 @@ function windowsEnvValue(map, name) {
   return undefined
 }
 
+async function withCleanup(work, cleanup) {
+  try { await work() } catch (failure) {
+    try { await cleanup() } catch (cleanupError) {
+      throw new AggregateError([failure, cleanupError], 'Command and cleanup both failed')
+    }
+    throw failure
+  }
+  await cleanup()
+}
+
 async function stopTree(child) {
   if (!child.pid) return
   if (windows) {
     try {
       await exec('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { env, windowsHide: true, timeout: 5000 })
     } catch (error) {
-      if (error?.code !== 128) child.kill('SIGKILL')
+      if (error?.code === 128) return
+      child.kill('SIGKILL')
+      throw error
     }
     return
   }
   try { process.kill(-child.pid, 'SIGKILL') } catch (error) { if (error?.code !== 'ESRCH') throw error }
 }
 
+let childExitUnconfirmed = false
+
 async function runCommand(file, args, timeout = 120_000) {
   const label = [file, ...args].join(' ')
   const child = spawn(file, args, { cwd: checkout, env, stdio: 'inherit', detached: !windows, windowsHide: true })
-  let settled = false
-  const done = new Promise((resolve, reject) => {
-    child.once('error', error => { settled = true; reject(error) })
-    child.once('close', (code, signal) => { settled = true; resolve([code, signal]) })
+  let closed = false
+  const exited = new Promise(resolve => {
+    child.once('close', (code, signal) => { closed = true; resolve([code, signal]) })
   })
-  done.catch(() => {})
+  const failed = new Promise((_, reject) => { child.once('error', reject) })
+  failed.catch(() => {})
   let timer
   let onSignal
   const cancelled = new Promise((_, reject) => {
@@ -62,15 +76,26 @@ async function runCommand(file, args, timeout = 120_000) {
   })
   cancelled.catch(() => {})
   try {
-    const [code, signal] = await Promise.race([done, cancelled])
-    if (code !== 0) throw new Error(`${label} exited with ${signal ?? code}`)
+    await withCleanup(async () => {
+      const [code, signal] = await Promise.race([exited, failed, cancelled])
+      if (code !== 0) throw new Error(`${label} exited with ${signal ?? code}`)
+    }, async () => {
+      clearTimeout(timer)
+      process.off('SIGINT', onSignal).off('SIGTERM', onSignal)
+      if (!closed && child.pid) {
+        try {
+          await withCleanup(() => stopTree(child), async () => {
+            const closeTimeout = delay(5_000, undefined, { ref: false }).then(() => {
+              throw new Error(`${label}: child exit was not confirmed after 5000ms`)
+            })
+            await Promise.race([exited, closeTimeout])
+          })
+        } finally {
+          if (!closed) childExitUnconfirmed = true
+        }
+      }
+    })
   } finally {
-    clearTimeout(timer)
-    process.off('SIGINT', onSignal).off('SIGTERM', onSignal)
-    if (!settled && child.pid) {
-      await stopTree(child).catch(() => {})
-      await Promise.race([done, delay(5_000, undefined, { ref: false })]).catch(() => {})
-    }
     child.unref()
   }
 }
@@ -98,11 +123,16 @@ try {
   }
   for (const [file, args] of commands) await runCommand(file, args)
 } finally {
-  try {
-    if (await realpath(directory) !== directory || dirname(directory) !== temp) throw new Error('Fixture path changed')
-    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
-  } catch (error) {
-    console.error(`Retained Claude test fixture at ${directory}: ${error instanceof Error ? error.message : String(error)}`)
+  if (childExitUnconfirmed) {
+    console.error(`Retained Claude test fixture at ${directory}: child exit was not confirmed`)
     process.exitCode = 1
+  } else {
+    try {
+      if (await realpath(directory) !== directory || dirname(directory) !== temp) throw new Error('Fixture path changed')
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    } catch (error) {
+      console.error(`Retained Claude test fixture at ${directory}: ${error instanceof Error ? error.message : String(error)}`)
+      process.exitCode = 1
+    }
   }
 }
