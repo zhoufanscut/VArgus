@@ -19,11 +19,16 @@ function hexToRgb(hex: string): Rgb {
   return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]
 }
 
-// Names match case- and space-insensitively, as VantageHUD's did; an unknown
-// name gives the default palette.
+// Names match case- and whitespace-insensitively (internal whitespace maps to
+// hyphens, so "tokyo night" resolves to "tokyo-night").
+export function lookupPaletteName(name: string): string | undefined {
+  const key = name.trim().toLowerCase().replace(/\s+/g, '-')
+  return Object.prototype.hasOwnProperty.call(registry, key) ? key : undefined
+}
+
+// An unknown name gives the default palette.
 export function resolvePalette(name: string): { name: string; polarity: PalettePolarity; rgb: Record<TokenName, Rgb> } {
-  const key = name.trim().toLowerCase()
-  const found = Object.prototype.hasOwnProperty.call(registry, key) ? key : DEFAULT_THEME
+  const found = lookupPaletteName(name) ?? DEFAULT_THEME
   const hex = registry[found]!
   const rgb = Object.fromEntries(Object.entries(hex).map(([k, v]) => [k, hexToRgb(v)])) as Record<TokenName, Rgb>
   return { name: found, polarity: polarities[found]!, rgb }

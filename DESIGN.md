@@ -212,7 +212,7 @@ and light (`#ffffff`–`#f6f8fa`) background ranges:
 - **5-step data-first tonal ramp (`text > calm > label > detail > sep`)**:
   strictly ordered by contrast against the worst-case background and sharing one
   theme hue family (hue spread `≤ 35°`; achromatic `C = 0` in `graphite`). In
-  the four coloured themes, `text` and `sep` stay near-neutral (`OKLCH C ≤ 0.03`),
+  the five coloured themes, `text` and `sep` stay near-neutral (`OKLCH C ≤ 0.03`),
   `calm` and `detail` carry a light highlight / soft shadow tint (`C ≤ 0.06`),
   and `label` carries the signature theme colour (`0.08 ≤ C ≤ 0.11`).
 - **Contrast floors & polarity**: every dark-theme token is brighter than
@@ -231,8 +231,10 @@ and light (`#ffffff`–`#f6f8fa`) background ranges:
   `text`–`detail`, `label`–`alert`, `calm`–`alert`, `alert`–`detail`,
   `text`–`alert`, `del`–`alert`, `add`–`del`, `add`–`track`, `del`–`track`) meet
   `OKLab ΔE ≥ 0.08`.
-The palette registry uses own-property lookup and falls back for unknown
-names. When a host sees a non-empty `NO_COLOR`, the theme returns plain text. Run
+The palette registry uses own-property lookup (case-insensitive, collapsing
+internal whitespace to hyphens so `tokyo night` resolves to `tokyo-night`) and
+falls back to `graphite` for unknown names. When a host sees a non-empty
+`NO_COLOR`, the theme returns plain text. Run
 `vargus themes [NAME]` ([themes.ts](src/cli/themes.ts)) to preview bundled palettes
 in the terminal through the shared renderer; it separates palettes into dark and
 light sections, forces each polarity's typical reference background (`#181818` for

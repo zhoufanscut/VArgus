@@ -2,7 +2,7 @@ import type { TokenName } from '../core/types.ts'
 
 export type PalettePolarity = 'dark' | 'light'
 
-// Five bundled palettes using one 3-group data-first OKLCH structure, 9 hex tokens each:
+// Six bundled palettes using one 3-group data-first OKLCH structure, 9 hex tokens each:
 //   - 5-step data-first tonal ramp (`text > calm > label > detail > sep`) in one theme hue family:
 //       text    location anchors (bold folder; plain repo and branch/ref names)
 //       calm    under-threshold readings (effort at/above default, <80% context/limits,
@@ -16,7 +16,7 @@ export type PalettePolarity = 'dark' | 'light'
 //   - 3 balanced muted VCS tokens (between `label` and `detail`):
 //       add / del / track   git/svn: staged (svn: added) and ahead / conflicts, modified and behind / untracked
 export const PALETTES: Record<string, Record<TokenName, string>> = {
-  // cool Arctic cyan dark (Nord / Tokyo Night family)
+  // cool Arctic cyan dark (Nord family)
   aurora: {
     text: '#dfeaef', label: '#69b8d0', detail: '#7898a7', sep: '#434f57',
     calm: '#add6e0', alert: '#f6808d',
@@ -33,6 +33,12 @@ export const PALETTES: Record<string, Record<TokenName, string>> = {
     text: '#e6e7f2', label: '#b2a2e4', detail: '#8c90ae', sep: '#4a4c59',
     calm: '#cacaeb', alert: '#f87f99',
     add: '#86b689', del: '#c99099', track: '#85a6d7',
+  },
+  // cobalt-indigo dark (Tokyo Night family)
+  'tokyo-night': {
+    text: '#e2e8f6', label: '#8babee', detail: '#8890b3', sep: '#474b5b',
+    calm: '#c2cbf3', alert: '#f7768e',
+    add: '#94af7b', del: '#c78c94', track: '#67aebd',
   },
   // pure neutral-gray dark, lowest VCS chroma. VArgus's default.
   graphite: {
@@ -52,6 +58,7 @@ export const PALETTE_POLARITY: Record<string, PalettePolarity> = {
   aurora: 'dark',
   ember: 'dark',
   nebula: 'dark',
+  'tokyo-night': 'dark',
   graphite: 'dark',
   daylight: 'light',
 }

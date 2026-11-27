@@ -364,6 +364,16 @@ describe('register: the line as the host sets it up', () => {
     expect(rows.map(row => row.value)).toEqual([true, 'graphite', true])
   })
 
+  test('opening the picker imports whitespace-separated theme aliases canonically', NO_VCS, async ($, on) => {
+    const { clock, w, rows, edits, state, command } = sharedPicker($, on)
+    state.file = '{"theme":" Tokyo Night "}'
+    await $.session.start(start)
+    expect(await line(clock, w)).toContain(makeTheme('tokyo-night', false).paint('sep', ' | '))
+    await command('config')
+    expect(rows[1]!.value).toBe('tokyo-night')
+    expect(edits).toEqual(['vargus.theme'])
+  })
+
   test('a clean install cannot restore a choice remembered by the previous installation', NO_VCS, async ($, on) => {
     const { rows, edits, state, command } = sharedPicker($, on, '/home/u/profile\\west')
     rows[1]!.value = 'ember'

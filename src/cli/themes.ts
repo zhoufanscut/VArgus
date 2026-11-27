@@ -7,7 +7,7 @@ import { staleParts } from '../render/freshness.ts'
 import { render, renderParts } from '../render/index.ts'
 import { displaySession, shortModelName } from '../render/session.ts'
 import { stringWidth } from '../render/width.ts'
-import { DEFAULT_THEME, makeTheme, resolvePalette } from '../theme/index.ts'
+import { DEFAULT_THEME, lookupPaletteName, makeTheme, resolvePalette } from '../theme/index.ts'
 import { PALETTES, PALETTE_POLARITY, type PalettePolarity } from '../theme/palettes.ts'
 
 const TOKEN_ORDER: readonly TokenName[] = [
@@ -119,7 +119,8 @@ export function formatThemesPreview(
 
   const byPolarity = new Map<PalettePolarity, string[]>(POLARITY_ORDER.map(p => [p, []]))
   for (const name of names) {
-    byPolarity.get(resolvePalette(name).polarity)!.push(name)
+    const palette = resolvePalette(name)
+    byPolarity.get(palette.polarity)!.push(palette.name)
   }
 
   const sections: string[] = []
@@ -187,17 +188,23 @@ export function themes(
     write(`${USAGE}\n`)
     return 0
   }
-  if (args.length > 1 || (args.length === 1 && args[0]!.startsWith('-'))) {
+  if (args.some(arg => arg.startsWith('-'))) {
     throw new Error(USAGE)
   }
   let selected: readonly string[]
   if (args.length === 0) {
     selected = THEME_NAMES
-  } else {
+  } else if (args.length === 1) {
     const raw = args[0]!
-    const key = raw.trim().toLowerCase()
-    if (!Object.prototype.hasOwnProperty.call(PALETTES, key)) {
+    const key = lookupPaletteName(raw)
+    if (!key) {
       throw new Error(`Unknown theme: ${raw}. Available themes: ${THEME_NAMES.join(', ')}.`)
+    }
+    selected = [key]
+  } else {
+    const key = args.every(arg => arg.trim() !== '') ? lookupPaletteName(args.join(' ')) : undefined
+    if (!key) {
+      throw new Error(USAGE)
     }
     selected = [key]
   }
