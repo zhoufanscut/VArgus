@@ -321,7 +321,9 @@ require `--pane`, and a non-default server requires `--socket`.
 A per-pane lock serializes controls. [State records](src/cli/codex/state.ts)
 hold the target, worker identity and recovery data under the OS temporary
 directory. Before signalling a worker, the control checks its PID and the
-private token in its command line. Attachment ends through `off` or when the
+private token in its command line. Stopping a worker sends `SIGTERM`, waits up
+to 6 s, and — after rechecking the same PID and token — escalates to `SIGKILL`
+(waiting up to 2 s) if it does not exit. Attachment ends through `off` or when the
 bound TUI exits.
 
 `reload` validates and replays the root transcript before replacing the worker.

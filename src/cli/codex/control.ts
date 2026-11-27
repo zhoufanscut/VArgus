@@ -32,14 +32,32 @@ async function readRunning(file: string): Promise<Running | undefined> {
   } catch (error) { if ((error as any).code !== 1) throw error }
 }
 
-async function stopWorker(current: Running): Promise<void> {
-  const live = await readRunning(recordPath(current.target))
-  if (!live) return
-  if (live.pid !== current.pid || live.token !== current.token) throw new Error('VArgus helper changed before it could be stopped; retry.')
-  process.kill(current.pid, 'SIGTERM')
-  const until = Date.now() + 6000
-  while (await readRunning(recordPath(current.target)) && Date.now() < until) await delay(50)
-  if (await readRunning(recordPath(current.target))) throw new Error('VArgus did not finish stopping; retry shortly.')
+export async function stopWorker(current: Running, termTimeoutMs = 6000, killTimeoutMs = 2000): Promise<void> {
+  const file = recordPath(current.target)
+  const check = async (): Promise<boolean> => {
+    const live = await readRunning(file)
+    if (!live) return false
+    if (live.pid !== current.pid || live.token !== current.token) {
+      throw new Error('VArgus helper changed before it could be stopped; retry.')
+    }
+    return true
+  }
+  const signal = async (sig: 'SIGTERM' | 'SIGKILL', timeoutMs: number): Promise<boolean> => {
+    try { process.kill(current.pid, sig) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      return false
+    }
+    const until = Date.now() + timeoutMs
+    while (await check()) {
+      if (Date.now() >= until) return true
+      await delay(50)
+    }
+    return false
+  }
+  if (!await check()) return
+  if (await signal('SIGTERM', termTimeoutMs) && await check() && await signal('SIGKILL', killTimeoutMs)) {
+    throw new Error('VArgus did not finish stopping; retry shortly.')
+  }
 }
 async function request(current: Running, action: 'on' | 'off'): Promise<Running | undefined> {
   const id = randomBytes(16).toString('hex'), path = requestPath(current)
