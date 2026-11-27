@@ -21,7 +21,6 @@ import { DEFAULTS } from '../../src/options.ts'
 import { folder } from '../../src/render/fragments/folder.ts'
 import { branch, repo, status } from '../../src/render/fragments/vcs.ts'
 import { makeTheme } from '../../src/theme/index.ts'
-import { withCleanup } from '../fixture-commands.mts'
 
 const exec = promisify(execFile)
 
@@ -30,13 +29,13 @@ test('readGit releases a non-repository working directory before returning on Wi
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'vargus-git-cwd-'))
   const previous = process.env.GIT_CEILING_DIRECTORIES
   process.env.GIT_CEILING_DIRECTORIES = dirname(directory)
-  await withCleanup(async () => {
+  try {
     assert.deepEqual(await readGit(directory), initialVcs())
-  }, async () => {
+  } finally {
     if (previous === undefined) delete process.env.GIT_CEILING_DIRECTORIES
     else process.env.GIT_CEILING_DIRECTORIES = previous
     await rmdir(directory).catch(error => { throw new Error(`Retained Git fixture at ${directory}`, { cause: error }) })
-  })
+  }
 })
 
 test('readGit waits for each sibling probe when status fails', async () => {

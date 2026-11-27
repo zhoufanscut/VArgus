@@ -1018,30 +1018,12 @@ commands and [process cleanup](docs/maintenance.md#test-process-cleanup).
   Pointing Claude Code 2.1.332 at `tests/claude` directly reports “no hooks module to load,”
   so the stage keeps the plugin manifest. The engine fixtures mock filesystem
   hooks; the shell checks exercise the documented reader and manifest separately.
-  On Windows, Node runs commands through `cmd.exe` (resolved case-insensitively
-  from `ComSpec`), passing the staged checkout path to `claude` and the fixture
-  marker to the Git-Bash shell checks so direct commands carry the marker.
-  Before and after each command, a PowerShell CIM query performs a
-  case-insensitive command-line check for the fixture marker, reporting PID,
-  start time and name; the query must see its own PID. On timeout or
-  `SIGINT`/`SIGTERM`, cleanup runs `taskkill.exe /PID <pid> /T /F` against the
-  live shell tree before scanning. Because neither `taskkill /T` nor an empty
-  CIM scan can rule out unmarked or reparented descendants, the Windows runner
-  does not write a cleanup receipt or automatically delete the staged home.
-  On POSIX `ps` must see the marker on the gated group leader. Closing the
-  control pipe asks the leader or a second member to stop its own group, so
-  losing the leader does not require signaling a possibly reused group ID.
-  The payload shell is started by Node, not directly as a shell background
-  job, so a payload-directed `SIGINT` still interrupts it. On POSIX, interrupts
-  and termination during a command use the same bounded exit check as a timeout.
-  Cleanup resumes the owned leader so it can act on EOF even when suspended.
-  On POSIX the runner relays stdout and stderr through its own pipes. If exit
-  cannot be confirmed, it closes its pipe ends; surviving processes do not
-  hold the caller's captured output open. A successful command is not reported
-  until its final writes finish. If a reader closes early, the caller receives
-  the write error after cleanup; a command failure already observed takes
-  precedence over a later write error.
-  A failed exit check retains the fixture rather than deleting its home.
+  Each staged command runs with a 120 s timeout (`claude` via `ComSpec` and the
+  shell checks via Git for Windows on Windows; directly on POSIX), stops its
+  child tree on timeout or `SIGINT`/`SIGTERM` (`taskkill.exe /PID <pid> /T /F`
+  on Windows, `process.kill(-pid, 'SIGKILL')` on POSIX), and removes the staged
+  directory in `finally` (reporting the path and exiting non-zero if removal
+  fails).
 
 ### Live evidence and limits
 

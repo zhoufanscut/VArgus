@@ -17,13 +17,16 @@ These rules apply to every agent and subagent, test suite and throwaway probe, r
   helpers and providers. A successful daemon stop is not proof that `pid-update-loop` exited.
   Revalidate executable path, arguments, PID and start time against the recorded test home
   before signalling a remaining process. Never use broad `pkill -f` or stop normal user sessions.
-- Verify exit in a process namespace that can see the spawned processes, with a positive control.
-  Wait for confirmed exit before deleting any test home; deleted executables can remain in use.
-  If an owned process survives a bounded wait or visibility is insufficient, fail the cleanup check,
-  retain its home and report the remaining process or verification gap before handing off.
-  For `npm run test:claude` on native Windows, CIM still fails the check if any marked process
-  survives or its positive control misses its own PID, and retains and prints the staged
-  directory even after a pass because CIM cannot rule out unmarked descendants.
+- For tests that start background servers, daemons, or TUIs (`tmux`/`psmux`, Codex app-server,
+  live TUIs), verify exit in a process namespace that can see the spawned processes, with a
+  positive control. Wait for confirmed exit before deleting any test home; deleted executables
+  can remain in use. If an owned process survives a bounded wait or visibility is insufficient,
+  fail the cleanup check, retain its home and report the remaining process or verification gap
+  before handing off.
+- Short-lived synchronous CLI runners (such as `tests/run-claude.mjs`) only need a timeout, a
+  process-tree stop on timeout or `SIGINT`/`SIGTERM` (`kill(-pid)` on POSIX, `taskkill /T /F` on
+  Windows), and `finally` cleanup of their temporary directory (reporting the path if removal
+  fails).
 
 ## Releases
 
@@ -40,18 +43,14 @@ then `---` and `**Full changelog**: <compare link>` (see VantageHUD's GitHub rel
 
 - Run `npm ci` for development tools. `npm run test:local` type-checks the
   Node source and runs the shared renderer and local host tests with Node and Git.
-  The fixture runner uses Windows PowerShell with CIM on Windows, or `sh` and
-  a `ps` that shows same-user process environments on POSIX.
   `npm test` adds native Codex and tmux checks, or Codex and psmux checks on Windows.
 - For Claude development, start `claude --plugin-dir .` interactively from the repository
   root on a fresh checkout or after upgrading Claude Code. Let Claude load the plugin and
   write its TypeScript declarations to `.claude-plugin/types/`, then exit the session.
   Run `npm run test:claude` for type-checking, staged plugin validation, engine tests
   and the reader and manifest checks. On Windows the shell checks use Git for Windows.
-  Native Windows runs retain the staged fixture even after a pass, so
-  `%TEMP%\vargus-claude-test-*` directories accumulate across runs until removed manually.
-  If the runner prints a retained path, confirm fixture processes have exited
-  before removing that directory.
+  If the runner reports a retained temporary directory after a cleanup failure, confirm fixture
+  processes have exited before removing it.
   See [test and verification details](../DESIGN.md#tests).
 
 ## Add a host
