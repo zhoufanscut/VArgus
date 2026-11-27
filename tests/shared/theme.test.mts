@@ -70,13 +70,14 @@ function oklabDist(x: Rgb, y: Rgb): number {
 }
 
 describe('theme', () => {
-  test('six bundled palettes of the same 9 tokens with explicit polarity; graphite is the default', () => {
-    assert.deepEqual(Object.keys(PALETTES), ['aurora', 'ember', 'nebula', 'tokyo-night', 'graphite', 'daylight'])
+  test('bundled palettes share 9 tokens with explicit polarity; graphite is the default', () => {
+    assert.deepEqual(Object.keys(PALETTES), ['aurora', 'ember', 'nebula', 'tokyo-night', 'codex-ink', 'graphite', 'daylight'])
     assert.deepEqual(PALETTE_POLARITY, {
       aurora: 'dark',
       ember: 'dark',
       nebula: 'dark',
       'tokyo-night': 'dark',
+      'codex-ink': 'dark',
       graphite: 'dark',
       daylight: 'light',
     })
@@ -99,6 +100,7 @@ describe('theme', () => {
       ember: '#eee7db #d3a067 #a58d78 #544b44 #e1caa6 #fe7768 #93ad78 #c78c83 #72a9c2',
       nebula: '#e6e7f2 #b2a2e4 #8c90ae #4a4c59 #cacaeb #f87f99 #86b689 #c99099 #85a6d7',
       'tokyo-night': '#e2e8f6 #8babee #8890b3 #474b5b #c2cbf3 #f7768e #94af7b #c78c94 #67aebd',
+      'codex-ink': '#eceff2 #74a8e6 #8e949c #45484b #c9d0d9 #ff7976 #7ea989 #c38d8a #a294c1',
       graphite: '#ededed #aeaeae #929292 #4a4a4a #d1d1d1 #f47e7c #8aaa8b #bc908e #86a1c0',
       daylight: '#181d24 #20548a #5b6e81 #c3c8ce #253a4e #bb1423 #3f764c #945451 #676099',
     }

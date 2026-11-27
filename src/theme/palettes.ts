@@ -2,7 +2,7 @@ import type { TokenName } from '../core/types.ts'
 
 export type PalettePolarity = 'dark' | 'light'
 
-// Six bundled palettes using one 3-group data-first OKLCH structure, 9 hex tokens each:
+// Bundled palettes use one 3-group data-first OKLCH structure, 9 hex tokens each:
 //   - 5-step data-first tonal ramp (`text > calm > label > detail > sep`) in one theme hue family:
 //       text    location anchors (bold folder; plain repo and branch/ref names)
 //       calm    under-threshold readings (effort at/above default, <80% context/limits,
@@ -40,6 +40,12 @@ export const PALETTES: Record<string, Record<TokenName, string>> = {
     calm: '#c2cbf3', alert: '#f7768e',
     add: '#94af7b', del: '#c78c94', track: '#67aebd',
   },
+  // Cool grays and blue labels inspired by the Codex conversation UI.
+  'codex-ink': {
+    text: '#eceff2', label: '#74a8e6', detail: '#8e949c', sep: '#45484b',
+    calm: '#c9d0d9', alert: '#ff7976',
+    add: '#7ea989', del: '#c38d8a', track: '#a294c1',
+  },
   // pure neutral-gray dark, lowest VCS chroma. VArgus's default.
   graphite: {
     text: '#ededed', label: '#aeaeae', detail: '#929292', sep: '#4a4a4a',
@@ -59,6 +65,7 @@ export const PALETTE_POLARITY: Record<string, PalettePolarity> = {
   ember: 'dark',
   nebula: 'dark',
   'tokyo-night': 'dark',
+  'codex-ink': 'dark',
   graphite: 'dark',
   daylight: 'light',
 }

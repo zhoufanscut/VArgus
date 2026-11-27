@@ -24,6 +24,6 @@
   // Codex
   // "codexAutoStart": true,   // Let the installed startup hooks activate VArgus.
 
-  // Choose graphite, aurora, ember, nebula, tokyo-night or daylight (run `vargus themes` to preview).
+  // Choose graphite, aurora, ember, nebula, tokyo-night, codex-ink or daylight (run `vargus themes` to preview).
   "theme": "graphite"
 }

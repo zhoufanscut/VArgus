@@ -212,7 +212,7 @@ and light (`#ffffff`–`#f6f8fa`) background ranges:
 - **5-step data-first tonal ramp (`text > calm > label > detail > sep`)**:
   strictly ordered by contrast against the worst-case background and sharing one
   theme hue family (hue spread `≤ 35°`; achromatic `C = 0` in `graphite`). In
-  the five coloured themes, `text` and `sep` stay near-neutral (`OKLCH C ≤ 0.03`),
+  the coloured themes, `text` and `sep` stay near-neutral (`OKLCH C ≤ 0.03`),
   `calm` and `detail` carry a light highlight / soft shadow tint (`C ≤ 0.06`),
   and `label` carries the signature theme colour (`0.08 ≤ C ≤ 0.11`).
 - **Contrast floors & polarity**: every dark-theme token is brighter than
@@ -231,6 +231,14 @@ and light (`#ffffff`–`#f6f8fa`) background ranges:
   `text`–`detail`, `label`–`alert`, `calm`–`alert`, `alert`–`detail`,
   `text`–`alert`, `del`–`alert`, `add`–`del`, `add`–`track`, `del`–`track`) meet
   `OKLab ΔE ≥ 0.08`.
+
+The Codex TUI uses the terminal foreground for primary text, green for additions
+and red for errors. The dark `codex-ink` palette uses cool gray for primary
+text and follows those green and red roles. Its blue label (`#74a8e6`) takes its hue
+from ChatGPT Blue 200 (`#63a8f8`), with OKLCH chroma reduced from 0.137 to
+0.107 to fit the VArgus label range.
+[Codex TUI style guide](https://github.com/openai/codex/blob/afe555b9d3e95b4f58b247212565070f1555bc5d/codex-rs/tui/styles.md) · [Codex accent definition](https://github.com/openai/codex/blob/afe555b9d3e95b4f58b247212565070f1555bc5d/codex-rs/tui/src/style.rs#L26-L30)
+
 The palette registry uses own-property lookup (case-insensitive, collapsing
 internal whitespace to hyphens so `tokyo night` resolves to `tokyo-night`) and
 falls back to `graphite` for unknown names. When a host sees a non-empty

@@ -81,7 +81,7 @@ describe('vargus themes', () => {
     assert.equal(sections.length, 2)
 
     const expectedSections = [
-      { title: 'Dark themes', hex: '#181818', bgSgr: '24;24;24', names: ['aurora', 'ember', 'nebula', 'tokyo-night', 'graphite'] },
+      { title: 'Dark themes', hex: '#181818', bgSgr: '24;24;24', names: ['aurora', 'ember', 'nebula', 'tokyo-night', 'codex-ink', 'graphite'] },
       { title: 'Light themes', hex: '#ffffff', bgSgr: '255;255;255', names: ['daylight'] },
     ] as const
 
@@ -213,7 +213,7 @@ describe('vargus themes', () => {
 
   test('rejects unknown names including Object prototype properties', () => {
     for (const bad of ['nope', 'constructor', 'toString', '__proto__', '', 'day light', 'tokyo--night']) {
-      assert.throws(() => runThemes([bad]), /Unknown theme.*aurora, ember, nebula, tokyo-night, graphite, daylight/)
+      assert.throws(() => runThemes([bad]), /Unknown theme.*aurora, ember, nebula, tokyo-night, codex-ink, graphite, daylight/)
     }
   })
 
@@ -222,7 +222,7 @@ describe('vargus themes', () => {
     assert.equal(code, 0)
     assert.match(out, /vargus themes \[NAME\]/)
     assert.match(out, /#181818.*#ffffff/)
-    assert.match(out, /Dark themes: aurora, ember, nebula, tokyo-night, graphite\./)
+    assert.match(out, /Dark themes: aurora, ember, nebula, tokyo-night, codex-ink, graphite\./)
     assert.match(out, /Light themes: daylight\./)
     assert.throws(() => runThemes(['--unknown']), /Usage:/)
     assert.throws(() => runThemes(['graphite', 'ember']), /Usage:/)
