@@ -73,13 +73,15 @@ Runtime controls by host:
   Claude Code:     /config for options, /plugin to enable/disable, /reload-plugins after code updates
   Antigravity CLI: /statusline on|off|delete (picks up code and config updates automatically)
 
-See docs/setup-<host>.md for host setup, override files, and troubleshooting.`
+See docs/setup-<host>.md for host setup, override files, and troubleshooting.
+For LLM agents: run \`vargus agent-guide\` for checkout paths, host guides, and rules.`
 
 export async function main(argv: string[]): Promise<number> {
   const [command, host] = argv
   if (command === undefined || command === '--help') { console.log(HELP); return 0 }
   if (command === 'statusline') return (await import('./cli/antigravity.ts')).statusline(argv.slice(1))
   if (command === 'themes') return (await import('./cli/themes.ts')).themes(argv.slice(1))
+  if (command === 'agent-guide') return (await import('./cli/agent-guide.ts')).agentGuide(argv.slice(1))
   if (command === 'install' || command === 'remove') {
     const usage = `Usage:\n${command === 'install' ? INSTALL_COMMANDS : REMOVE_COMMANDS}`
     if (host === '--help' && argv.length === 2) {

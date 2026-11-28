@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -11,8 +11,9 @@ import { DEFAULTS, resolveOptions } from '../../src/options.ts'
 const exec = promisify(execFile)
 const cli = resolve('src/cli.ts')
 
-async function runCli(args: string[], extraEnv: NodeJS.ProcessEnv = {}) {
+async function runCli(args: string[], extraEnv: NodeJS.ProcessEnv = {}, cwd?: string) {
   return exec(process.execPath, [cli, ...args], {
+    cwd,
     env: { ...process.env, ...extraEnv, VARGUS_CLI_MAIN: '1' },
     timeout: 10000,
     killSignal: 'SIGKILL',
@@ -48,6 +49,7 @@ test('top-level help merges install and remove while subcommand help lists per-h
     assert.match(stdout, /^Runtime controls by host:$/m)
     assert.match(stdout, /!vargus on\|off\|status\|reload/)
     assert.match(stdout, /docs\/setup-<host>\.md/)
+    assert.match(stdout, /For LLM agents: run `vargus agent-guide`/)
     assert.match(stdout, /Run `vargus install --help`, `vargus remove --help`, or `vargus themes --help` for options\./)
     assert.doesNotMatch(stdout, /vargus statusline/)
     assert.doesNotMatch(stdout, /vargus hook/)
@@ -105,6 +107,35 @@ test('top-level help merges install and remove while subcommand help lists per-h
 
   await assert.rejects(runCli(['install', 'unknown', '--help']))
   await assert.rejects(runCli(['remove', 'toString', '--help']))
+})
+
+test('agent-guide prints resolved checkout paths from any working directory and handles --help', async () => {
+  const checkout = resolve('.')
+  const { stdout } = await runCli(['agent-guide'], {}, tmpdir())
+  assert.match(stdout, /^# VArgus agent guide$/m)
+  assert.ok(stdout.includes(`Checkout:        ${checkout}`))
+  assert.ok(stdout.includes(join(checkout, 'vargus.jsonc')))
+  for (const rel of [
+    'vargus.sample.jsonc',
+    'README.md',
+    'DESIGN.md',
+    join('docs', 'setup-antigravity.md'),
+    join('docs', 'setup-claude.md'),
+    join('docs', 'setup-codex.md'),
+    join('docs', 'setup-omo.md'),
+  ]) {
+    const abs = join(checkout, rel)
+    assert.ok(stdout.includes(abs), `expected ${abs} in agent-guide output`)
+    assert.ok((await stat(abs)).isFile(), `expected ${abs} to exist`)
+  }
+  assert.match(stdout, /Do not run `vargus statusline` or `vargus hook` interactively/)
+  assert.match(stdout, /`vargus on\|off\|status\|reload` and `vargus tmux-reset` are Codex CLI only/)
+  assert.match(stdout, /all four hosts pick up edits\s+automatically while running/)
+
+  const help = (await runCli(['agent-guide', '--help'], {}, tmpdir())).stdout
+  assert.match(help, /^  vargus agent-guide$/m)
+
+  await assert.rejects(runCli(['agent-guide', 'extra'], {}, tmpdir()))
 })
 
 test('CLI dispatches install and remove for antigravity against the default home settings path', async () => {
