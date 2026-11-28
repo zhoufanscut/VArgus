@@ -6,12 +6,128 @@ Notable changes to this project. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-28
+
+### Added
+
+- Automatic host-matched default theme (`theme: "auto"`) with four new dark
+  palettes — `agy-tokyonight` (Antigravity CLI), `codex-ink` (Codex CLI),
+  `claude-terracotta` (Claude Code) and `omo-violet` (OmO Native) — alongside
+  rebuilt `graphite` (neutral dark; fallback for unknown or removed names) and
+  `daylight` (light). All six palettes follow one 9-token, data-first 3-group
+  OKLCH model (`text`, `calm`, `label`, `detail`, `sep`, `alert`, `add`, `del`,
+  `track`) with WCAG AA contrast (`≥ 4.5:1` for readable tokens and `≥ 5.0:1`
+  for `alert` against worst-case `#282828` / `#f6f8fa` backgrounds) and
+  `OKLab ΔE ≥ 0.08` across 14 adjacent token pairs, plus case- and
+  whitespace-insensitive theme lookup (for example `"agy tokyonight"`).
+- `vargus themes [NAME]` CLI preview command grouping palettes into dark
+  (`#181818`) and light (`#ffffff`) sections with forced reference backgrounds,
+  9 token swatches, calm and alert sample rows, `vargus themes auto` (tagged
+  `(auto: <Host>)`), and `NO_COLOR`/WSL support.
+- Shared `includeSubagents` option (default `true`) across all four hosts to
+  fold attributable subagent tokens, tool calls, agents and skills into session
+  totals while keeping context, cache-hit %, decode speed (`t/s`), model,
+  effort, session age, rate limits and VCS on the active/main conversation;
+  setting `includeSubagents: false` restricts totals to the active conversation
+  without folding child totals (zero child-store or child-transcript I/O on OmO
+  and Antigravity, and skipping descendant rollout reads and `.jsonl.zst`
+  decompression on Codex):
+  - **Claude Code**: splits main-loop and in-process subagent tokens and
+    tool/agent/skill counts so toggling **Include subagents** reflects recorded
+    session activity immediately.
+  - **Codex CLI**: folds attributable saved descendant threads (including RFC
+    8878-validated `.jsonl.zst` compressed rollouts and live `.jsonl` →
+    `.jsonl.zst` transitions) into the displayed view's subtree, skipping
+    ephemeral, ambiguous, corrupt, replaced and mixed-history logs.
+  - **OmO Native**: asynchronously reads `senpi-task` state (honouring
+    `omo.jsonc`/`omo.json` `task.state_dir`, profile overlays and legacy
+    `.omo/senpi-task`) to fold subagent tokens, tools, deduplicated agent IDs
+    and explicitly resolved child task skills (`skills.resolved` on accepted
+    spawn receipts), excluding pre-launch and fallback-chain admission refusals
+    (reconciling provisional receipts and remembering confirmed refusals across
+    task-record expiry).
+  - **Antigravity CLI**: recursively folds `invoke_subagent` child and nested
+    descendant transcripts (bounded at depth 8, 64 child transcripts and 400 ms
+    per refresh; resolving isolated-worktree children's custom skills against
+    their recorded `workspaceUris`), excluding `swarm` and `run_workflow`
+    children.
+- Shared `folderFoldThreshold` option (default `24` terminal columns; Claude
+  `/config` **Folder fold threshold**) folding deeper home-shortened paths to
+  `.../<parent>/<leaf>` when folding omits at least one ancestor and strictly
+  shortens the label, keeping both trailing folder names in full.
+- Local SVN working-copy support on Codex CLI, OmO Native and Antigravity CLI
+  (matching Claude Code; Git wins ties when nested), completing SVN support
+  across all four hosts.
+
 ### Changed
 
+- Replaced the three-tier gradient with two flat status tiers (`calm` and
+  `alert`) and unified the visual grammar across all four hosts: only `folder`
+  is bold `text` (`repo`, `branch` and detached refs use plain `text`);
+  `<icon><text>` call counts and `⌛stale` paint in `label`; secondary
+  parentheticals attach without a leading space in `detail` (including
+  Antigravity `orchestrator(<variant>)`, `(wt:x)`, and Git operation
+  parentheticals in `alert` such as `branch:feat(rebase 2/3)(wt:w)`); VCS
+  conflicts (`✗`) paint in `del`.
+- `ctx:` now defaults to `ctx:0%` across all four hosts when context usage is
+  not yet reported, omits `COMPRESS?`/`CRITICAL` text suffixes, and flips from
+  `calm` to `alert` at `80%`. Rate limits flip at `80%`, `session:` flips at
+  `12h`, and `token:` flips at `4.00M` (`3,995,000` tokens) when
+  `includeSubagents` is `true` (default) or `1.00M` (`999,950` tokens) when
+  `includeSubagents` is `false`.
+- Whole-row freshness warning changed from `| ⚠ stale` to `| ⌛stale`
+  (`| !:stale` on WSL) with `sep`-coloured dividers. Codex `/btw` and `/side`
+  side chats mark held snapshots `stale`, while ordinary typing drafts remain
+  unmarked.
+- Rate-limit labels and badges: Kimi Code's monthly window is now `1mo` (was
+  `1m`), Codex's missing or non-positive window-duration fallbacks are
+  `1st`/`2nd` (were `primary`/`secondary`), and API error badges are
+  `[API AUTH]`, `[API ERR]` and `[API 429]` in `alert`. Quota failures retain
+  the silent 15-minute grace cache without per-window `*` or `~` markers.
+- Aligned OmO Native's `NO_COLOR` check with the other hosts so an empty
+  `NO_COLOR=""` keeps ANSI colours.
 - Claude Code: if you upgrade from VArgus 0.8.1 with `/reload-plugins`, the
-  existing token total retains any earlier subagent usage. New usage follows
-  the Include subagents setting immediately. Starting a new session or using
-  `/clear` starts a fresh total.
+  existing session totals retain any earlier subagent usage. New usage follows
+  the **Include subagents** setting immediately. Starting a new session or using
+  `/clear` starts fresh totals.
+- Replaced the Claude test harness with a self-contained cross-platform staging
+  runner (`tests/run-claude.mjs`) with process-tree cleanup and bounded close
+  confirmation, and trimmed `README.md` to a concise overview.
+
+### Fixed
+
+- Ignored `WSLENV` and gated WSL text fallback (`T:`, `A:`, `S:`, `!:stale`) on
+  Linux WSL signals (and non-drive-path checks in Claude Code) across all four
+  hosts, fixing false text fallback on native Windows under Windows Terminal.
+- Fitted stale rows by whole rendered fragment parts (`renderParts` /
+  `staleParts`, Antigravity v2 row cache) so `NO_COLOR` trimming never splits
+  inside folder, repo or worktree names containing ` | `.
+- Mapped SVN deleted (`svn rm`) and replaced items to modified (`!`) instead of
+  staged (`+`), reserving `+` for SVN added items.
+- Guarded Claude Code `stepDone` usage reads with `sessionGeneration` so a
+  response held across `/clear` or in-session resume cannot restore stale
+  `ctx:` or `session:` readings.
+- Latched corrupt and replaced JSONL errors in Codex rollout replay, guarded
+  malformed or non-local `file://` skill URLs without losing attribution, and
+  drained buffered/mixed `.jsonl` and `.jsonl.zst` records across polls.
+- Escalated Codex worker shutdown (`stopWorker`) from `SIGTERM` (6 s timeout)
+  to `SIGKILL` (2 s wait) after re-verifying the recorded PID and command-line
+  token.
+- Waited for parallel Git probes before returning after a failed `git status`,
+  fixing Windows `EBUSY` locks when removing non-repository directories.
+
+### Removed
+
+- The `aurora`, `ember` and `nebula` palettes (replaced by the four host themes
+  plus `graphite` and `daylight`; configs referencing removed names fall back to
+  `graphite`).
+- Claude Code's `extra:` dollar usage and Anthropic OAuth `/api/oauth/usage`
+  polling (`$.session.authorize()`); engine `5h`/`7d` windows and direct Kimi
+  Code usage polling remain.
+- The `spend:` fragment and `spendLimit` option (legacy `vargus.jsonc` entries
+  with `spendLimit` are ignored).
+- Context text suffixes (`COMPRESS?`, `CRITICAL`) and per-window rate-limit
+  staleness markers (`*`, `~`).
 
 ## [0.8.1] - 2026-11-22
 
@@ -472,7 +588,8 @@ or subagents work. Needs Claude Code 2.1.299 or later.
   limit's dollars, 256/16-colour conversion, bar gauges, custom themes, label overrides and the
   zh-CN labels.
 
-[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/zhoufanscut/VArgus/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/zhoufanscut/VArgus/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/zhoufanscut/VArgus/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/zhoufanscut/VArgus/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/zhoufanscut/VArgus/compare/v0.6.0...v0.7.0
