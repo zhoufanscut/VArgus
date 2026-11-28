@@ -93,8 +93,9 @@
       "type": "string",
       "title": "Theme",
       "description": "Colour theme",
-      "default": "graphite",
+      "default": "auto",
       "options": [
+        "auto",
         "agy-tokyonight",
         "codex-ink",
         "claude-terracotta",

@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { addCounts, type Counts } from '../../core/session.ts'
 import { restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, savedFooterSettings, FooterSettings } from '../../hosts/codex/footer.ts'
 import { cachedModelDefault, type ModelDefault } from '../../hosts/codex/model-defaults.ts'
-import { resolveCodexOptions } from '../../hosts/codex/options.ts'
+import { CODEX_THEME, resolveCodexOptions } from '../../hosts/codex/options.ts'
 import { RolloutReader } from '../../hosts/codex/rollout.ts'
 import { Views, readingHold, selectedView, type View, type ViewScreen } from '../../hosts/codex/views.ts'
 import { en } from '../../i18n/en.ts'
@@ -63,11 +63,15 @@ export async function foldDescendantCounts(
   return extraCounts
 }
 
+export function codexTheme(theme: string, noColor: boolean) {
+  return makeTheme(theme, noColor, CODEX_THEME)
+}
+
 export async function rowWorker(spec: Spec): Promise<number> {
   const { target, thread } = spec
   const file = recordPath(target), views = new Views(spec.home, thread, spec.transcript), input = new PaneInput(target)
   const output = new TmuxOutput(target.socket, target.pane)
-  const options = resolveCodexOptions(spec.options), theme = makeTheme(options.theme, !!process.env.NO_COLOR)
+  const options = resolveCodexOptions(spec.options), theme = codexTheme(options.theme, !!process.env.NO_COLOR)
   const isWsl = detectWsl()
   const staleStyle = { t: theme, l: en, isWsl }
   const footerSettings = new FooterSettings(cwd => savedFooterSettings(cwd, spec.home))

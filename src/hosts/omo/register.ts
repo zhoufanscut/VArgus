@@ -25,6 +25,8 @@ import { makeTheme } from '../../theme/index.ts'
 import { REFRESH_GRACE_MS, staleParts } from '../../render/freshness.ts'
 import { joinParts, renderParts } from '../../render/index.ts'
 
+export const OMO_THEME = 'omo-violet'
+
 const STREAM_START_EVENTS = new Set([
   'thinking_start', 'thinking_delta', 'text_start', 'text_delta', 'toolcall_start', 'toolcall_delta',
 ])
@@ -138,7 +140,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     const subagents = options.includeSubagents && (options.tokens || options.callCounts)
       ? new OmoSubagents() : undefined
     const kimi = new OmoKimi(() => instance.ctx.modelRegistry.getProviderAuth('kimi-coding'))
-    const theme = makeTheme(options.theme, Boolean(process.env.NO_COLOR))
+    const theme = makeTheme(options.theme, Boolean(process.env.NO_COLOR), OMO_THEME)
     const labels = resolveLabels('en')
     const isWsl = detectWsl()
     let disposed = false

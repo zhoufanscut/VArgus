@@ -40,7 +40,7 @@ export const PALETTES: Record<string, Record<TokenName, string>> = {
     calm: '#cfcae3', alert: '#ff7d80',
     add: '#79a88d', del: '#c18c8b', track: '#78a1c1',
   },
-  // pure neutral-gray dark, lowest VCS chroma. VArgus's default.
+  // pure neutral-gray dark, lowest VCS chroma. Fallback for unknown names.
   graphite: {
     text: '#ededed', label: '#aeaeae', detail: '#929292', sep: '#4a4a4a',
     calm: '#d1d1d1', alert: '#f47e7c',

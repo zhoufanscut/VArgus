@@ -24,6 +24,6 @@
   // Codex
   // "codexAutoStart": true,   // Let the installed startup hooks activate VArgus.
 
-  // Choose graphite, agy-tokyonight, codex-ink, claude-terracotta, omo-violet or daylight (run `vargus themes` to preview).
-  "theme": "graphite"
+  // Choose auto (matches each host), agy-tokyonight, codex-ink, claude-terracotta, omo-violet, graphite or daylight (run `vargus themes` to preview).
+  "theme": "auto"
 }

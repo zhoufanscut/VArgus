@@ -104,7 +104,7 @@ test('OmO warns on a redraw after missed updates and clears the warning after re
   const savedNoColor = process.env.NO_COLOR
   delete process.env.NO_COLOR
   const isWsl = detectWsl()
-  const theme = makeTheme('graphite', false)
+  const theme = makeTheme('omo-violet', false)
   const staleMark = isWsl ? '!:stale' : '⌛stale'
   const styledSuffix = theme.paint('sep', ' | ') + theme.paint('label', staleMark)
   h.load(); h.event('session_start')
@@ -1529,7 +1529,7 @@ test('OmO token alert threshold switches from 4M (default) to 1M when toggling i
     h.load()
     h.event('session_start')
 
-    const colored = makeTheme('graphite', false)
+    const colored = makeTheme('omo-violet', false)
     const tokenText = (tone: 'calm' | 'alert', value: string) =>
       colored.paint('label', 'token:') + colored.paint(tone, value)
 
@@ -1569,5 +1569,30 @@ test('OmO token alert threshold switches from 4M (default) to 1M when toggling i
     if (savedHome === undefined) delete process.env.HOME
     else process.env.HOME = savedHome
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('OmO auto theme defaults to omo-violet, supports explicit overrides, and falls back to graphite', async () => {
+  const savedNoColor = process.env.NO_COLOR
+  const h = host()
+  try {
+    delete process.env.NO_COLOR
+    const omo = makeTheme('omo-violet', false)
+    const graphite = makeTheme('graphite', false)
+    h.load(); h.event('session_start')
+    assert.ok((h.row?.render(200).join('') ?? '').includes(omo.paint('sep', ' | ')))
+
+    await h.command('config {"theme":" Auto "}')
+    assert.ok((h.row?.render(200).join('') ?? '').includes(omo.paint('sep', ' | ')))
+
+    await h.command('config {"theme":"graphite"}')
+    assert.ok((h.row?.render(200).join('') ?? '').includes(graphite.paint('sep', ' | ')))
+
+    await h.command('config {"theme":"nope"}')
+    assert.ok((h.row?.render(200).join('') ?? '').includes(graphite.paint('sep', ' | ')))
+  } finally {
+    h.event('session_shutdown')
+    if (savedNoColor === undefined) delete process.env.NO_COLOR
+    else process.env.NO_COLOR = savedNoColor
   }
 })

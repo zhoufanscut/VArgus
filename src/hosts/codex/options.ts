@@ -1,5 +1,7 @@
 import { resolveOptions } from '../../options.ts'
 
+export const CODEX_THEME = 'codex-ink'
+
 export function resolveCodexOptions(given: Record<string, unknown>) {
   return {
     ...resolveOptions(given),

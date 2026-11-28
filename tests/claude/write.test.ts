@@ -174,7 +174,7 @@ describe('line file', () => {
   test('CLAUDE_CONFIG_DIR picks the data folder and styles line.live with the active theme', FOLDER_ONLY, async ($, on) => {
     const clock = mock.clock(on, { now: 3 })
     const w = world(on, clock, { HOME: '/home/u', CLAUDE_CONFIG_DIR: '/cfg' })
-    const theme = makeTheme('graphite', false)
+    const theme = makeTheme('claude-terracotta', false)
     await $.session.start(start)
     await clock.settle()
     expect(w.writes[0]?.path).toBe('/cfg/plugins/data/vargus-vargus/S1/line.3.tmp')
@@ -199,10 +199,10 @@ describe('line file', () => {
     await writeLine(stub, writer, '~/proj/x', undefined, { t: theme, isWsl: false })
     await writeLine(stub, writer, '~/proj/x', undefined, { t: theme, isWsl: false })
     expect(liveWrites).toHaveLength(1)
-    const terracotta = makeTheme('claude-terracotta', false)
-    await writeLine(stub, writer, '~/proj/x', undefined, { t: terracotta, isWsl: true })
+    const codex = makeTheme('codex-ink', false)
+    await writeLine(stub, writer, '~/proj/x', undefined, { t: codex, isWsl: true })
     expect(liveWrites).toHaveLength(2)
-    expect(liveWrites[1]).toBe(`6\n~/proj/x${terracotta.paint('sep', ' | ')}${terracotta.paint('label', '!:stale')}\n`)
+    expect(liveWrites[1]).toBe(`6\n~/proj/x${codex.paint('sep', ' | ')}${codex.paint('label', '!:stale')}\n`)
   })
 
   test('NO_COLOR preserves whole fragments containing ` | ` in line.live and across coalesced writeLine retries', FOLDER_ONLY, async ($, on) => {

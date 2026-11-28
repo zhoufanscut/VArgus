@@ -80,7 +80,7 @@ function sharedPicker($: Engine, on: On, profile = '/home/u/.claude') {
   const provider = { plugin: 'vargus@vargus', tier: 'user' } as const
   const rows: ConfigRow[] = [
     { key: 'vargus.model', label: 'Model', kind: 'boolean', value: true, provider, isLocked: false },
-    { key: 'vargus.theme', label: 'Theme', kind: 'choice', value: 'graphite', provider, isLocked: false },
+    { key: 'vargus.theme', label: 'Theme', kind: 'choice', value: 'auto', provider, isLocked: false },
     { key: 'vargus.folder', label: 'Folder', kind: 'boolean', value: true, provider, isLocked: true },
   ]
   const edits: string[] = []
@@ -152,18 +152,18 @@ describe('register: the line as the host sets it up', () => {
     expect(await line(clock, w)).toBe('~/x | opus | ctx:20%')
   })
 
-  test('without NO_COLOR the line carries colour codes, graphite by default', NO_VCS, async ($, on) => {
+  test('without NO_COLOR the line carries colour codes, claude-terracotta by default via auto', NO_VCS, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock, { HOME: '/home/u' })
     await $.session.start(start)
-    // graphite's sep #4a4a4a
-    expect(await line(clock, w)).toContain('\x1b[38;2;74;74;74m | \x1b[0m')
+    // claude-terracotta's sep #4c3f3a
+    expect(await line(clock, w)).toContain('\x1b[38;2;76;63;58m | \x1b[0m')
   })
 
   test('effort colour follows the main step model default or high cutoff', NO_VCS, async ($, on) => {
     const clock = mock.clock(on, { now: 0 })
     const w = world(on, clock, { HOME: '/home/u' })
-    const theme = makeTheme('graphite', false)
+    const theme = makeTheme('claude-terracotta', false)
     await $.session.start(start)
     await step($, { model: 'claude-opus-5-5[1m]', effort: 'medium' })
     expect(await line(clock, w)).toContain(theme.paint('calm', 'medium'))
@@ -180,7 +180,7 @@ describe('register: the line as the host sets it up', () => {
   })
 
   test('startup requests closure of the old detail pane and applies the saved theme',
-    { options: { ...NO_VCS.options, theme: 'claude-terracotta', detailView: true } }, async ($, on) => {
+    { options: { ...NO_VCS.options, theme: 'codex-ink', detailView: true } }, async ($, on) => {
       const clock = mock.clock(on, { now: 0 })
       const w = world(on, clock, { HOME: '/home/u' })
       const commands: string[] = []
@@ -194,8 +194,8 @@ describe('register: the line as the host sets it up', () => {
         return { value: undefined }
       })
       await $.session.start(start)
-      // claude-terracotta's sep #4c3f3a
-      expect(await line(clock, w)).toContain('\x1b[38;2;76;63;58m | \x1b[0m')
+      // codex-ink's sep #45484b
+      expect(await line(clock, w)).toContain('\x1b[38;2;69;72;75m | \x1b[0m')
       expect(closedPanes).toEqual(['vargus'])
       expect(commands).not.toContain('vargus')
     })
@@ -361,7 +361,24 @@ describe('register: the line as the host sets it up', () => {
     await command('reload-plugins')
     expect(await line(clock, w)).toContain('opus')
     await command('config')
-    expect(rows.map(row => row.value)).toEqual([true, 'graphite', true])
+    expect(rows.map(row => row.value)).toEqual([true, 'auto', true])
+  })
+
+  test('opening the picker imports auto canonically and falls back to graphite for unknown themes', NO_VCS, async ($, on) => {
+    const { clock, w, rows, edits, state, command } = sharedPicker($, on)
+    rows[1]!.value = 'daylight'
+    state.file = '{"theme":" Auto "}'
+    await $.session.start(start)
+    expect(await line(clock, w)).toContain(makeTheme('claude-terracotta', false).paint('sep', ' | '))
+    await command('config')
+    expect(rows[1]!.value).toBe('auto')
+    expect(edits).toEqual(['vargus.theme'])
+
+    state.file = '{"theme":"nope"}'
+    await command('reload-plugins')
+    expect(await line(clock, w)).toContain(makeTheme('graphite', false).paint('sep', ' | '))
+    await command('config')
+    expect(rows[1]!.value).toBe('graphite')
   })
 
   test('opening the picker imports whitespace-separated theme aliases canonically', NO_VCS, async ($, on) => {
@@ -510,7 +527,7 @@ describe('register: the line as the host sets it up', () => {
       key: 'vargus.includeSubagents', label: 'Include subagents', kind: 'boolean', value: true,
       provider, isLocked: false,
     })
-    const theme = makeTheme('graphite', false)
+    const theme = makeTheme('claude-terracotta', false)
     const tokenText = (tone: 'calm' | 'alert', value: string) =>
       theme.paint('label', 'token:') + theme.paint(tone, value)
 

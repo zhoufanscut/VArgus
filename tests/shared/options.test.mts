@@ -6,7 +6,7 @@ import { resolveCodexOptions, workerOptions } from '../../src/hosts/codex/option
 
 test('the sample lists shared defaults in order and each switch can be enabled on its own', async () => {
   const example = await readFile('vargus.sample.jsonc', 'utf8')
-  assert.deepEqual(parseOptions(example), { theme: 'graphite' })
+  assert.deepEqual(parseOptions(example), { theme: 'auto' })
   assert.equal(DEFAULTS.includeSubagents, true)
   assert.equal(resolveOptions({}).includeSubagents, true)
   assert.equal(resolveOptions({ includeSubagents: false }).includeSubagents, false)
@@ -50,5 +50,5 @@ test('Codex reload follows edited or removed checkout defaults and retains expli
   const reload = workerOptions({ model: true, folder: false }, { theme: 'daylight' }, first)
   assert.deepEqual(reload.options, { ...resolveCodexOptions({}), theme: 'daylight' })
   assert.deepEqual(new Set(reload.overrideKeys), new Set(['theme', 'folder']))
-  assert.equal(workerOptions({ theme: 'codex-ink' }, {}, { options: DEFAULTS }).options.theme, 'graphite')
+  assert.equal(workerOptions({ theme: 'codex-ink' }, {}, { options: DEFAULTS }).options.theme, 'auto')
 })

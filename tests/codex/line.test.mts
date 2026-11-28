@@ -8,6 +8,7 @@ import { basename, delimiter, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { CodexCollector } from '../../src/hosts/codex/collect.ts'
 import { codexLine } from '../../src/cli/codex/line.ts'
+import { codexTheme } from '../../src/cli/codex/worker.ts'
 import { initialVcs } from '../../src/core/vcs.ts'
 import { resolveCodexOptions } from '../../src/hosts/codex/options.ts'
 import { stringWidth } from '../../src/render/width.ts'
@@ -258,4 +259,11 @@ test('codexLine preserves whole fragments containing ` | ` when fitting stale ro
     assert.deepEqual(folderLine.pausedParts(20), ['/a | b'])
     assert.equal(folderLine.paused(14, true), '⌛stale')
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('codexTheme resolves auto and default options to codex-ink, allows explicit overrides, and falls back to graphite', () => {
+  assert.equal(codexTheme(resolveCodexOptions({}).theme, false).name, 'codex-ink')
+  assert.equal(codexTheme(' Auto ', false).name, 'codex-ink')
+  assert.equal(codexTheme('graphite', false).name, 'graphite')
+  assert.equal(codexTheme('nope', false).name, 'graphite')
 })

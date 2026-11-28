@@ -200,7 +200,9 @@ All hosts select the WSL text fallback (`T:`, `A:`, `S:`, `!:stale`) only on WSL
 
 ### Colours
 
-[Themes](src/theme/index.ts) use 24-bit SGR styles and default to `graphite`.
+[Themes](src/theme/index.ts) use 24-bit SGR styles and default to `auto`
+(`agy-tokyonight` in Antigravity CLI, `codex-ink` in Codex CLI,
+`claude-terracotta` in Claude Code, `omo-violet` in OmO Native).
 Each palette in [palettes.ts](src/theme/palettes.ts) defines 9 tokens: `text`,
 `label`, `detail`, `sep`, `calm`, `alert`, `add`, `del` and `track`, and
 `PALETTE_POLARITY` (surfaced via `resolvePalette`) tags each bundled palette as
@@ -266,10 +268,13 @@ is shifted from 232° to about 242° so its OKLab distance from `add` is 0.086,
 above the 0.08 floor (the 232° candidate measured 0.077).
 
 The palette registry uses own-property lookup (case-insensitive, collapsing
-internal whitespace to hyphens so `agy tokyonight` resolves to `agy-tokyonight`) and
-falls back to `graphite` for unknown names. When a host sees a non-empty
+internal whitespace to hyphens so `agy tokyonight` resolves to `agy-tokyonight`).
+`auto` resolves to the running host's palette (`graphite` when no host palette
+is given), `resolveThemeOption` keeps `"auto"` canonical in Claude's `/config`
+picker, and unknown names fall back to `graphite`. When a host sees a non-empty
 `NO_COLOR`, the theme returns plain text. Run
 `vargus themes [NAME]` ([themes.ts](src/cli/themes.ts)) to preview bundled palettes
+(`vargus themes auto` previews the four host palettes, tagged `(auto: <Host>)`)
 in the terminal through the shared renderer; it separates palettes into dark and
 light sections, forces each polarity's typical reference background (`#181818` for
 dark, `#ffffff` for light) on swatch and sample rows with per-line SGR resets

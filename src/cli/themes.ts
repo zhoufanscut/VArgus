@@ -7,13 +7,21 @@ import { staleParts } from '../render/freshness.ts'
 import { render, renderParts } from '../render/index.ts'
 import { displaySession, shortModelName } from '../render/session.ts'
 import { stringWidth } from '../render/width.ts'
-import { DEFAULT_THEME, lookupPaletteName, makeTheme, resolvePalette } from '../theme/index.ts'
+import { AUTO_THEME, lookupPaletteName, makeTheme, resolvePalette } from '../theme/index.ts'
 import { PALETTES, PALETTE_POLARITY, type PalettePolarity } from '../theme/palettes.ts'
 
 const TOKEN_ORDER: readonly TokenName[] = [
   'text', 'calm', 'label', 'detail', 'sep', 'alert', 'add', 'del', 'track',
 ]
 const THEME_NAMES = Object.keys(PALETTES)
+const AUTO_HOST_LABELS: Record<string, string> = {
+  'agy-tokyonight': 'Antigravity',
+  'codex-ink': 'Codex',
+  'claude-terracotta': 'Claude',
+  'omo-violet': 'OmO',
+}
+const AUTO_THEMES = Object.keys(AUTO_HOST_LABELS)
+const AVAILABLE_THEMES = [AUTO_THEME, ...THEME_NAMES]
 const POLARITY_ORDER: readonly PalettePolarity[] = ['dark', 'light']
 const SECTION_TITLE: Record<PalettePolarity, string> = {
   dark: 'Dark themes',
@@ -31,6 +39,7 @@ const USAGE = `Usage:
   vargus themes [NAME]
 
 Preview all bundled themes (or one named theme) on a dark (#181818) or light (#ffffff) background.
+Default: ${AUTO_THEME} (uses ${AUTO_THEMES.join(', ')} by host).
 Dark themes: ${DARK_THEMES.join(', ')}.
 Light themes: ${LIGHT_THEMES.join(', ')}.
 Respects NO_COLOR.`
@@ -117,8 +126,9 @@ export function formatThemesPreview(
       ? opts.columns
       : undefined
 
+  const expandedNames = names.flatMap(name => (name.trim().toLowerCase() === AUTO_THEME ? AUTO_THEMES : [name]))
   const byPolarity = new Map<PalettePolarity, string[]>(POLARITY_ORDER.map(p => [p, []]))
-  for (const name of names) {
+  for (const name of expandedNames) {
     const palette = resolvePalette(name)
     byPolarity.get(palette.polarity)!.push(palette.name)
   }
@@ -135,7 +145,8 @@ export function formatThemesPreview(
 
     const blocks = group.map(name => {
       const t = makeTheme(name, noColor)
-      const header = name === DEFAULT_THEME ? `${name} (default)` : name
+      const hostLabel = AUTO_HOST_LABELS[name]
+      const header = hostLabel ? `${name} (auto: ${hostLabel})` : name
       const swatches = TOKEN_ORDER.map(token => t.paint(token, token)).join('  ')
       const calmRow = render({
         v: samples.calm,
@@ -196,11 +207,15 @@ export function themes(
     selected = THEME_NAMES
   } else if (args.length === 1) {
     const raw = args[0]!
-    const key = lookupPaletteName(raw)
-    if (!key) {
-      throw new Error(`Unknown theme: ${raw}. Available themes: ${THEME_NAMES.join(', ')}.`)
+    if (raw.trim().toLowerCase() === AUTO_THEME) {
+      selected = AUTO_THEMES
+    } else {
+      const key = lookupPaletteName(raw)
+      if (!key) {
+        throw new Error(`Unknown theme: ${raw}. Available themes: ${AVAILABLE_THEMES.join(', ')}.`)
+      }
+      selected = [key]
     }
-    selected = [key]
   } else {
     const key = args.every(arg => arg.trim() !== '') ? lookupPaletteName(args.join(' ')) : undefined
     if (!key) {

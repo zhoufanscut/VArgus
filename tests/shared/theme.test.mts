@@ -2,7 +2,7 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import type { Rgb, TokenName } from '../../src/core/types.ts'
-import { DEFAULT_THEME, lookupPaletteName, makeTheme, resolvePalette } from '../../src/theme/index.ts'
+import { AUTO_THEME, FALLBACK_THEME, lookupPaletteName, makeTheme, resolvePalette, resolveThemeOption } from '../../src/theme/index.ts'
 import { PALETTES, PALETTE_POLARITY } from '../../src/theme/palettes.ts'
 
 // Themes (DESIGN, "Colours", "Rules carried over from VantageHUD", Themes).
@@ -70,7 +70,7 @@ function oklabDist(x: Rgb, y: Rgb): number {
 }
 
 describe('theme', () => {
-  test('bundled palettes share 9 tokens with explicit polarity; graphite is the default', () => {
+  test('bundled palettes share 9 tokens with explicit polarity; auto and graphite fallback constants are defined', () => {
     assert.deepEqual(Object.keys(PALETTES), ['agy-tokyonight', 'codex-ink', 'claude-terracotta', 'omo-violet', 'graphite', 'daylight'])
     assert.deepEqual(PALETTE_POLARITY, {
       'agy-tokyonight': 'dark',
@@ -85,7 +85,8 @@ describe('theme', () => {
       assert.deepEqual(Object.keys(p), tokens)
       for (const hex of Object.values(p)) assert.match(hex, /^#[0-9a-f]{6}$/)
     }
-    assert.equal(DEFAULT_THEME, 'graphite')
+    assert.equal(AUTO_THEME, 'auto')
+    assert.equal(FALLBACK_THEME, 'graphite')
     assert.equal(resolvePalette('codex-ink').polarity, 'dark')
     assert.equal(resolvePalette('agy-tokyonight').polarity, 'dark')
     assert.equal(resolvePalette('daylight').polarity, 'light')
@@ -243,6 +244,29 @@ describe('theme', () => {
       assert.equal(makeTheme(alias, false).name, 'agy-tokyonight')
     }
     assert.deepEqual(makeTheme('constructor', false).rgb.text, [0xed, 0xed, 0xed])
+  })
+
+  test('auto resolves to a valid host palette, keeps auto canonical in resolveThemeOption, and falls back to graphite otherwise', () => {
+    assert.equal(lookupPaletteName('auto'), undefined)
+    assert.equal(resolveThemeOption('auto'), 'auto')
+    assert.equal(resolveThemeOption(' Auto '), 'auto')
+    assert.equal(resolveThemeOption('AUTO'), 'auto')
+    assert.equal(resolveThemeOption(' Agy  TokyoNight '), 'agy-tokyonight')
+    for (const unknown of ['nope', 'constructor', 'ember', '']) {
+      assert.equal(resolveThemeOption(unknown), 'graphite')
+    }
+
+    for (const host of ['agy-tokyonight', 'codex-ink', 'claude-terracotta', 'omo-violet'] as const) {
+      assert.equal(resolvePalette('auto', host).name, host)
+      assert.equal(makeTheme(' Auto ', false, host).name, host)
+    }
+    assert.equal(resolvePalette('auto').name, 'graphite')
+    assert.equal(resolvePalette('auto', 'constructor').name, 'graphite')
+    assert.equal(resolvePalette('auto', 'nope').name, 'graphite')
+    assert.equal(resolvePalette('daylight', 'agy-tokyonight').name, 'daylight')
+    assert.equal(resolvePalette('graphite', 'codex-ink').name, 'graphite')
+    assert.equal(resolvePalette('nope', 'agy-tokyonight').name, 'graphite')
+    assert.equal(resolvePalette('ember', 'codex-ink').name, 'graphite')
   })
 
   test('paint is a 24-bit SGR code and a reset; bold ends bold alone', () => {

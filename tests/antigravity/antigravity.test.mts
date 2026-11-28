@@ -71,7 +71,7 @@ test('a failed Antigravity refresh retains the same conversation’s last row un
     const healthyWsl = await renderAntigravityStatusLine(payload, wslRuntime)
     await writeFile(transcriptCache, JSON.stringify({ ...JSON.parse(saved), seenSkillsInTurn: 42 }))
     await appendFile(transcript, '{}\n')
-    const theme = makeTheme('graphite', false)
+    const theme = makeTheme('agy-tokyonight', false)
     assert.equal(
       await renderAntigravityStatusLine(payload, wslRuntime),
       healthyWsl + theme.paint('sep', ' | ') + theme.paint('label', '!:stale'),
@@ -2485,7 +2485,7 @@ test('Antigravity token alert threshold switches from 4M (default) to 1M (includ
       JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-24T00:00:01Z', input_tokens: 1_500_000, output_tokens: 0 }),
     ].join('\n') + '\n')
 
-    const colored = makeTheme('graphite', false)
+    const colored = makeTheme('agy-tokyonight', false)
     const baseOpts = { folder: false, model: false, rateLimits: false, context: false, session: false, callCounts: false, repo: false, branch: false, status: false }
     const payload: AntigravityPayload = { conversation_id: 'conv-alert', transcript_path: transcriptPath, cwd: root }
 
@@ -2534,5 +2534,41 @@ test('Antigravity token alert threshold switches from 4M (default) to 1M (includ
     assert.equal(subAlertRow, '  ' + colored.paint('label', 'token:') + colored.paint('alert', '4.00M'))
   } finally {
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Antigravity auto theme resolves to agy-tokyonight on healthy and stale rows, allows overrides, and falls back to graphite', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-agy-auto-theme-'))
+  const cacheDir = join(dir, 'cache'), brain = join(dir, 'brain', 'alpha')
+  const transcript = join(brain, 'transcript.jsonl')
+  const baseOpts = { model: true, folder: false, rateLimits: false, context: false, tokens: false, session: true, callCounts: false, repo: false, branch: false, status: false }
+  const payload = { conversation_id: 'alpha', model: 'gemini-4-carbon', cwd: dir, transcript_path: transcript }
+  try {
+    await mkdir(brain, { recursive: true })
+    await writeFile(transcript, '{}\n')
+    const agy = makeTheme('agy-tokyonight', false)
+    const graphite = makeTheme('graphite', false)
+
+    const defaultRow = await renderAntigravityStatusLine(payload, { cacheDir, home: dir, noColor: false, isWsl: false, givenOptions: baseOpts })
+    assert.equal(defaultRow, '  ' + agy.paint('label', 'carbon'))
+
+    const autoRow = await renderAntigravityStatusLine(payload, { cacheDir, home: dir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, theme: ' Auto ' } })
+    assert.equal(autoRow, defaultRow)
+
+    const transcriptCache = cachePath(cacheDir, 'transcript', transcript)
+    const saved = await readFile(transcriptCache, 'utf8')
+    await writeFile(transcriptCache, JSON.stringify({ ...JSON.parse(saved), seenSkillsInTurn: 42 }))
+    await appendFile(transcript, '{}\n')
+    const staleRow = await renderAntigravityStatusLine(payload, { cacheDir, home: dir, noColor: false, isWsl: false, givenOptions: baseOpts })
+    assert.equal(staleRow, defaultRow + agy.paint('sep', ' | ') + agy.paint('label', '⌛stale'))
+
+    await writeFile(transcriptCache, saved)
+    const explicitRow = await renderAntigravityStatusLine(payload, { cacheDir, home: dir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, theme: 'graphite' } })
+    assert.equal(explicitRow, '  ' + graphite.paint('label', 'carbon'))
+
+    const unknownRow = await renderAntigravityStatusLine(payload, { cacheDir, home: dir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, theme: 'nope' } })
+    assert.equal(unknownRow, explicitRow)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
   }
 })

@@ -14,7 +14,7 @@ export const DEFAULTS = {
   repo: true,
   branch: true,
   status: true,
-  theme: 'graphite',
+  theme: 'auto',
 }
 
 export type Options = typeof DEFAULTS

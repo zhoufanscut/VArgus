@@ -17,6 +17,8 @@ import { makeTheme } from '../../theme'
 import { DRIVE_PATH } from './paths'
 import { createWriter, endSession, homeDir, pruneOld, writeLine, type Writer } from './write'
 
+export const CLAUDE_THEME = 'claude-terracotta'
+
 // Wiring only. Module values start over on a hot reload, which runs register
 // and session.start again (DESIGN, "The host"); what must survive one lives in
 // $.state, kept by the collectors.
@@ -65,7 +67,7 @@ async function isWsl(
 
 function configure($: EngineInterface, e: SessionStartInput, next: Options, noColor: boolean, previous?: Options): void {
   options = next
-  theme = makeTheme(next.theme, noColor)
+  theme = makeTheme(next.theme, noColor, CLAUDE_THEME)
   const hasVcs = next.repo || next.branch || next.status
   const hadVcs = previous?.repo || previous?.branch || previous?.status
   if (hasVcs && !hadVcs) startVcs($, values.vcs, e)

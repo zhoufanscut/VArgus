@@ -88,7 +88,7 @@ describe('render', () => {
 })
 
 describe('options and labels', () => {
-  test('defaults as VantageHUD, theme graphite; wrong types keep the default', () => {
+  test('defaults as VantageHUD, theme auto; wrong types keep the default', () => {
     assert.deepEqual(resolveOptions({}), DEFAULTS)
     assert.deepEqual(resolveOptions({ effort: false, theme: 'codex-ink', folder: 'no' }), {
       ...DEFAULTS, effort: false, theme: 'codex-ink',

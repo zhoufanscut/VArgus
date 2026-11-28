@@ -1,5 +1,5 @@
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
-import { resolvePalette } from '../../theme'
+import { resolveThemeOption } from '../../theme'
 import { DEFAULTS, editOption, parseOptions, resolveOptions, validOption, type Options } from '../../options'
 import { DRIVE_PATH, shellPath } from './paths'
 import { pluginDataDir } from './write'
@@ -24,7 +24,7 @@ async function sharedValues($: EngineInterface): Promise<Record<string, PickerVa
   for (const [key, value] of Object.entries(file)) {
     if (!Object.hasOwn(DEFAULTS, key)) continue
     if (!validOption(key as keyof Options, value)) continue
-    values[key] = key === 'theme' ? resolvePalette(String(value)).name : value
+    values[key] = key === 'theme' ? resolveThemeOption(String(value)) : value
   }
   return values
 }

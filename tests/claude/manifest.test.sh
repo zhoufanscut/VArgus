@@ -1,7 +1,7 @@
 #!/bin/sh
 # plugin.json's userConfig matches the shared and Claude-specific DEFAULTS in
 # src/options.ts; every line of the DEFAULTS block is one this test reads; the theme
-# picker's options are the palettes in src/theme/palettes.ts, in order.
+# picker's options are `auto` followed by the palettes in src/theme/palettes.ts, in order.
 # Run: sh tests/claude/manifest.test.sh   (exits 1 on a failure)
 cd "$(dirname "$0")/../.." || exit 1
 node --input-type=module -e '
@@ -22,7 +22,7 @@ if (Object.keys(defaults).length < 10 || a !== b) fail("options.ts " + a + "\n  
 const palettes = readFileSync("src/theme/palettes.ts", "utf8").replace(/\r\n/g, "\n")
 const names = [...palettes.matchAll(/^  (?:\x27([a-z0-9-]+)\x27|(\w+)): \{$/gm)].map(m => m[1] ?? m[2])
 const picker = manifest.userConfig.theme.options
-if (names.length < 5 || JSON.stringify(names) !== JSON.stringify(picker))
-  fail("palettes.ts " + JSON.stringify(names) + "\n      plugin.json theme options " + JSON.stringify(picker))
-console.log("manifest: all pass (" + Object.keys(defaults).length + " options, " + names.length + " themes)")
+if (names.length < 5 || JSON.stringify(["auto", ...names]) !== JSON.stringify(picker))
+  fail("palettes.ts " + JSON.stringify(["auto", ...names]) + "\n      plugin.json theme options " + JSON.stringify(picker))
+console.log("manifest: all pass (" + Object.keys(defaults).length + " options, auto + " + names.length + " palettes)")
 '

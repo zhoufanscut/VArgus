@@ -14,6 +14,7 @@ import { resolveOptions } from '../options.ts'
 import { joinParts, renderParts } from '../render/index.ts'
 import { makeTheme } from '../theme/index.ts'
 
+export const ANTIGRAVITY_THEME = 'agy-tokyonight'
 export const STATUSLINE_PADDING = '  '
 
 type CachedRow = { version: 2; parts: string[] }
@@ -62,7 +63,7 @@ export async function renderAntigravityStatusLine(
   } catch (error) {
     const width = payload.terminal_width
     const columns = width && width > 0 ? Math.max(0, width - STATUSLINE_PADDING.length) : undefined
-    const style = { t: makeTheme(options.theme, noColor), l: resolveLabels('en'), isWsl }
+    const style = { t: makeTheme(options.theme, noColor, ANTIGRAVITY_THEME), l: resolveLabels('en'), isWsl }
     if (isCachedRow(previous)) {
       const stale = staleParts(previous.parts, columns, style)
       if (stale) return STATUSLINE_PADDING + stale
@@ -87,7 +88,7 @@ async function collectLine(payload: AntigravityPayload, runtime: StatuslineRunti
   const noColor = runtime.noColor ?? Boolean(process.env.NO_COLOR)
   const cacheDir = runtime.cacheDir ?? defaultCacheDir()
   const options = resolveOptions(runtime.givenOptions ?? {})
-  const theme = makeTheme(options.theme, noColor)
+  const theme = makeTheme(options.theme, noColor, ANTIGRAVITY_THEME)
   const labels = resolveLabels('en')
   const values = collectAntigravityPayload(payload, {
     labels,
