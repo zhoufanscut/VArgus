@@ -90,3 +90,8 @@ export function resolveOptions(given: Record<string, unknown>): Options {
   }
   return out as Options
 }
+
+export function sameOptions<T extends Record<string, unknown>>(a: T, b: T): boolean {
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && Object.is(a[key], b[key]))
+}

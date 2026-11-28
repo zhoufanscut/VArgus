@@ -1596,3 +1596,104 @@ test('OmO auto theme defaults to omo-violet, supports explicit overrides, and fa
     else process.env.NO_COLOR = savedNoColor
   }
 })
+
+test('OmO live-reloads checkout vargus.jsonc edits and deletions in place, preserves t/s and overrides, and isolates explicit fileOptions', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-live-config-'))
+  const savedNoColor = process.env.NO_COLOR
+  const savedAgentDir = process.env.OMO_CODING_AGENT_DIR
+  const savedHome = process.env.HOME
+  const sessions: Array<ReturnType<typeof host>> = []
+  try {
+    delete process.env.NO_COLOR
+    process.env.HOME = dir
+    process.env.OMO_CODING_AGENT_DIR = join(dir, 'agent')
+    const checkout = await fixtureCheckout(dir)
+    const sharedConfig = join(checkout, 'vargus.jsonc')
+    const explicitConfig = join(dir, 'explicit.jsonc')
+    await writeFile(sharedConfig, '{"theme":"omo-violet"}')
+    await writeFile(explicitConfig, '{"theme":"graphite"}')
+
+    t.mock.timers.enable({ apis: ['setInterval'] })
+    const mod = await import(pathToFileURL(join(checkout, 'src/hosts/omo/register.ts')).href + '?live')
+    const omo = makeTheme('omo-violet', false)
+    const graphite = makeTheme('graphite', false)
+    const daylight = makeTheme('daylight', false)
+
+    // 1. Default loader polls checkout vargus.jsonc every 1s, reconfigures in place, and keeps live t/s.
+    const live = host('tui', dir)
+    sessions.push(live)
+    live.load(mod.default)
+    live.event('session_start')
+    const row = () => live.row?.render(200).join('') ?? ''
+    assert.equal(live.listeners, 1)
+    assert.ok(row().includes(omo.paint('sep', ' | ')))
+    assert.match(row(), /sol/)
+
+    // Establish a live decode t/s reading.
+    let perf = 1000
+    t.mock.method(performance, 'now', () => perf)
+    const msg = { role: 'assistant', usage: { input: 100, output: 120, cacheRead: 400, cacheWrite: 0 }, stopReason: 'stop' }
+    live.event('message_start', { message: { role: 'assistant' } })
+    perf += 200
+    live.event('message_update', { message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_start' } })
+    perf += 800
+    live.event('message_update', { message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_end' } })
+    live.append({ id: 'm1', type: 'message', timestamp: '', message: msg })
+    live.event('message_end', { message: msg })
+    assert.match(row(), /150t\/s/)
+
+    // Edit vargus.jsonc without /reload -> applies on next 1s tick and preserves 150t/s.
+    await writeFile(sharedConfig, '{"theme":"graphite","model":false,"rateLimits":false}')
+    t.mock.timers.tick(1000)
+    assert.ok(row().includes(graphite.paint('sep', ' | ')))
+    assert.doesNotMatch(row(), /sol/)
+    assert.equal(live.listeners, 0)
+    assert.match(row(), /150t\/s/)
+
+    // Broken JSONC mid-edit retains the last valid options.
+    await writeFile(sharedConfig, '{broken')
+    t.mock.timers.tick(1000)
+    assert.ok(row().includes(graphite.paint('sep', ' | ')))
+    assert.doesNotMatch(row(), /sol/)
+    assert.match(row(), /150t\/s/)
+
+    // Deleting vargus.jsonc reverts to defaults on next 1s tick and preserves 150t/s.
+    await rm(sharedConfig)
+    t.mock.timers.tick(1000)
+    assert.ok(row().includes(omo.paint('sep', ' | ')))
+    assert.match(row(), /sol/)
+    assert.equal(live.listeners, 1)
+    assert.match(row(), /150t\/s/)
+
+    // 2. configuredVargus keeps precedence: /vargus config > --config > vargus.jsonc > defaults.
+    const layered = host('tui', dir)
+    sessions.push(layered)
+    layered.load(mod.configuredVargus(explicitConfig))
+    layered.event('session_start')
+    await layered.command('config {"model":false}')
+    await writeFile(sharedConfig, '{"model":true,"context":false,"theme":"daylight"}')
+    t.mock.timers.tick(1000)
+    const layeredRow = layered.row?.render(200).join('') ?? ''
+    assert.ok(layeredRow.includes(graphite.paint('sep', ' | ')))
+    assert.doesNotMatch(layeredRow, /sol/)
+    assert.doesNotMatch(layeredRow, /ctx:/)
+    assert.equal(layeredRow.includes(daylight.paint('sep', ' | ')), false)
+
+    // 3. Explicit fileOptions in vargus(api, {}) does not read or poll checkout vargus.jsonc.
+    const explicitOnly = host('tui', dir)
+    sessions.push(explicitOnly)
+    explicitOnly.load(api => mod.default(api, {}))
+    explicitOnly.event('session_start')
+    t.mock.timers.tick(1000)
+    assert.match(explicitOnly.row?.render(200).join('') ?? '', /sol/)
+  } finally {
+    for (const s of sessions) s.event('session_shutdown')
+    if (savedNoColor === undefined) delete process.env.NO_COLOR
+    else process.env.NO_COLOR = savedNoColor
+    if (savedAgentDir === undefined) delete process.env.OMO_CODING_AGENT_DIR
+    else process.env.OMO_CODING_AGENT_DIR = savedAgentDir
+    if (savedHome === undefined) delete process.env.HOME
+    else process.env.HOME = savedHome
+    await rm(dir, { recursive: true, force: true })
+  }
+})

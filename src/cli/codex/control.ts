@@ -95,8 +95,23 @@ function description(r: Running): string {
   return `VArgus is on in ${r.target.pane} (thread ${r.selected ?? 'unknown'}).${r.error ? ' ' + r.error : ''}`
 }
 
+const CODEX_CONTROL_HELP = `Usage (Codex CLI only):
+  vargus on|off|status|reload [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
+
+Controls VArgus's tmux/psmux helper for Codex CLI (run as !vargus ... inside Codex).
+Edits to vargus.jsonc apply automatically across all four hosts.
+
+Other hosts use their native controls:
+  OmO Native:      /vargus on|off|status|config, /reload after code updates
+  Claude Code:     /config for options, /plugin to toggle, /reload-plugins after code updates
+  Antigravity CLI: /statusline on|off|delete (refreshes code and config automatically)`
+
 export async function standalone(args: string[], automatic = false): Promise<number> {
   const [action, ...flags] = args
+  if (flags.length === 1 && flags[0] === '--help') {
+    console.log(CODEX_CONTROL_HELP)
+    return 0
+  }
   let socket: string | undefined, pane: string | undefined
   let options: Record<string, unknown> = {}
   for (let i = 0; i < flags.length; i++) {
@@ -112,7 +127,9 @@ export async function standalone(args: string[], automatic = false): Promise<num
   if (automatic && !resolveCodexOptions({ ...checkout, ...options }).codexAutoStart) return 0
   const thread = process.env.CODEX_THREAD_ID
   const home = process.env.CODEX_HOME ?? join(homedir(), '.codex')
-  if (action === 'on' && !thread) throw new Error('Inside Codex, run !vargus on. CODEX_THREAD_ID identifies the conversation.')
+  if (action === 'on' && !thread) {
+    throw new Error('Inside Codex, run !vargus on. CODEX_THREAD_ID identifies the conversation. This command is for Codex CLI only; other hosts use /vargus (OmO), /statusline (Antigravity), or /plugin and /config (Claude).')
+  }
   await mkdir(footerRoot(), { recursive: true, mode: 0o700 })
   const bindings = new Map<string, { target: Target; thread: string }>()
   if (thread && !pane && !socket) {
@@ -134,9 +151,15 @@ export async function standalone(args: string[], automatic = false): Promise<num
   if (bindings.size > 1) throw new Error('This thread has multiple rows; select one with --pane and --socket.')
   const existing = [...bindings.values()][0]
   if (action !== 'on' && !existing && !pane && !socket) {
+    if (!thread) {
+      if (action === 'reload') {
+        throw new Error("vargus reload is for Codex CLI's tmux/psmux helper only (run !vargus reload inside Codex, or pass --pane and --socket). Edits to vargus.jsonc apply automatically across all four hosts; after code updates, use /reload in OmO, /reload-plugins in Claude Code, or wait for the next refresh in Antigravity CLI.")
+      }
+      throw new Error(`vargus ${action} is for Codex CLI's tmux/psmux helper only (run !vargus ${action} inside Codex, or pass --pane and --socket). Other hosts use /vargus ${action} in OmO, /statusline in Antigravity CLI, or /config in Claude Code.`)
+    }
     // Off can arrive before the first automatic attachment. Once opted in,
     // remember that intent even though no worker/backup exists to find yet.
-    if (action === 'off' && thread && await hasStartupState(home)) {
+    if (action === 'off' && await hasStartupState(home)) {
       const target = await startupTarget(thread) ?? await applicationTarget('codex')
       await startupControl(home, target, thread, 'off', false, async () => 0)
     }

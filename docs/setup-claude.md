@@ -131,9 +131,10 @@ If the row stays empty, check the effective reader and plugin in that session.
 
 Open the VArgus options in `/config`. With a shared checkout, a change here
 updates that key in the checkout's `vargus.jsonc`, creating the file on the
-first change. The other hosts using this checkout pick it up on their next
-load or refresh. You can also edit the file by hand and run `/reload-plugins`
-or open a new session. [Shared configuration](../README.md#shared-configuration)
+first change. The other hosts using this checkout pick it up automatically.
+Hand edits to `vargus.jsonc` also take effect in Claude Code on the next tick
+(within a second) without reloading the plugin; opening `/config` syncs the
+picker, while `/reload-plugins` is for code updates. [Shared configuration](../README.md#shared-configuration)
 
 Opening `/config` copies shared choices into the native picker. When a key is
 removed from the file, the row and picker use the previous native value again.

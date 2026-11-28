@@ -42,8 +42,10 @@ after drawing resumes.
 
 ## Configure
 
-The extension reads `vargus.jsonc` from the VArgus checkout each time it
-loads. Run `/reload` after editing it. [Shared configuration](../README.md#shared-configuration)
+The extension reads `vargus.jsonc` from the VArgus checkout when it loads and
+polls it every second while active, so hand edits apply automatically to any key
+not overridden by an install-time `--config` file or session `/vargus config`.
+Run `/reload` after editing an explicit `--config` file or updating VArgus code. [Shared configuration](../README.md#shared-configuration)
 
 For a separate JSON or JSONC file, create it before running the installer, or reuse the one you pass
 to Codex or Antigravity CLI. For example, save this JSON as `~/.config/vargus.json`.

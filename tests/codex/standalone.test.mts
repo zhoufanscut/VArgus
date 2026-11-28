@@ -185,11 +185,26 @@ trust_level = "trusted"
     if (selection === null) {
       const controlDir = join(footerDir, '..')
       const record = (await readdir(controlDir)).find(name => name.endsWith('.json'))!
-      const callCounts = async () => JSON.parse(await readFile(join(controlDir, record), 'utf8')).reload.options.callCounts
+      const runtimeRecord = async () => JSON.parse(await readFile(join(controlDir, record), 'utf8'))
+      const callCounts = async () => (await runtimeRecord()).reload.options.callCounts
       assert.equal(await callCounts(), false)
       await writeFile(sharedFile, '{}')
       await exec(entry, ['reload'], { cwd: project, env: controlEnv })
       assert.equal(await callCounts(), true)
+
+      // Live vargus.jsonc edits and deletions apply within ~1s without reload,
+      // keeping the same worker PID and surviving broken JSONC mid-edit.
+      const beforeLivePid = (await runtimeRecord()).pid
+      await writeFile(sharedFile, '{"callCounts":false}')
+      await wait(async () => String(await callCounts()), /^false$/)
+      assert.equal((await runtimeRecord()).pid, beforeLivePid)
+      await writeFile(sharedFile, '{broken')
+      await delay(1200)
+      assert.equal(await callCounts(), false)
+      assert.equal((await runtimeRecord()).pid, beforeLivePid)
+      await rm(sharedFile)
+      await wait(async () => String(await callCounts()), /^true$/)
+      assert.equal((await runtimeRecord()).pid, beforeLivePid)
     }
     assert.match((await exec(entry, ['status'], { cwd: project, env: controlEnv })).stdout, /VArgus is on/)
     assert.match((await exec(entry, ['on'], { cwd: project, env: controlEnv })).stdout, /already on/)

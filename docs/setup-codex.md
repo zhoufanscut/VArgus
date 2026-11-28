@@ -116,7 +116,9 @@ With periodic redraws disabled, the marker can appear on the next redraw.
 ## Configure
 
 The installed hooks and manual activation both read `vargus.jsonc` from the
-VArgus checkout. Edit it and run `!vargus reload` to update a running helper.
+VArgus checkout. A running helper polls `vargus.jsonc` every second, so edits
+take effect automatically for keys not overridden by `--theme` or `--config`.
+Run `!vargus reload` to change explicit flags or upgrade after code updates.
 To override individual shared settings, pass `--theme NAME` or
 `--config /absolute/path/to/vargus.json` on first activation.
 [Shared configuration](../README.md#shared-configuration)

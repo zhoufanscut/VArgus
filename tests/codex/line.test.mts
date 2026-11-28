@@ -267,3 +267,47 @@ test('codexTheme resolves auto and default options to codex-ink, allows explicit
   assert.equal(codexTheme('graphite', false).name, 'graphite')
   assert.equal(codexTheme('nope', false).name, 'graphite')
 })
+
+test('codexLine.reconfigure updates theme, fragment switches, VCS polling and paused drafts in place', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-line-reconfigure-'))
+  try {
+    const cwd = await repository(dir, 'project')
+    const collector = new CodexCollector(cwd, undefined)
+    collector.start(cwd, 0)
+    const snap = collector.snapshot()!
+    snap.session.model = 'gpt-6.1-sol'
+    snap.session.effort = 'high'
+
+    const line = codexLine(collector, resolveCodexOptions({ session: false, theme: 'graphite' }), codexTheme('graphite', false))
+    await line(500)
+    await ready(collector, 'project')
+    const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
+    const initial = await line(500)
+    assert.match(plain(initial), /sol.*repo:project.*branch:project.*\?1/)
+    assert.ok(initial.includes(codexTheme('graphite', false).paint('sep', ' | ')))
+
+    // Disable model and VCS and switch theme to codex-ink.
+    line.reconfigure(
+      resolveCodexOptions({ session: false, model: false, repo: false, branch: false, status: false, theme: 'codex-ink' }),
+      codexTheme('codex-ink', false),
+    )
+    assert.deepEqual(collector.snapshot()!.vcs, initialVcs())
+    const reconfiguredPaused = line.paused(500)
+    assert.doesNotMatch(plain(reconfiguredPaused), /sol|repo:|branch:|\?1/)
+    assert.ok(reconfiguredPaused.includes(codexTheme('codex-ink', false).paint('sep', ' | ')))
+    const liveDisabled = await line(500)
+    assert.doesNotMatch(plain(liveDisabled), /sol|repo:|branch:|\?1/)
+    assert.ok(liveDisabled.includes(codexTheme('codex-ink', false).paint('sep', ' | ')))
+
+    // Re-enable model and VCS polling and switch back to plain graphite.
+    line.reconfigure(
+      resolveCodexOptions({ session: false, model: true, repo: true, branch: true, status: true, theme: 'graphite' }),
+      theme,
+    )
+    await line(500)
+    await ready(collector, 'project')
+    const restored = await line(500)
+    assert.match(restored, /sol.*repo:project.*branch:project.*\?1/)
+    assert.equal(restored.includes('\x1b['), false)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})

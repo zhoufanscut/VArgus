@@ -4,10 +4,12 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { addCounts, type Counts } from '../../core/session.ts'
 import { restoreFooter, clearFooter, codexComposer, footerCommandError, footerIdentity, savedFooterSettings, FooterSettings } from '../../hosts/codex/footer.ts'
 import { cachedModelDefault, type ModelDefault } from '../../hosts/codex/model-defaults.ts'
-import { CODEX_THEME, resolveCodexOptions } from '../../hosts/codex/options.ts'
+import { CODEX_THEME, resolveCodexOptions, workerOptions, type SavedOptions } from '../../hosts/codex/options.ts'
 import { RolloutReader } from '../../hosts/codex/rollout.ts'
 import { Views, readingHold, selectedView, type View, type ViewScreen } from '../../hosts/codex/views.ts'
 import { en } from '../../i18n/en.ts'
+import { OptionsPoller } from '../../node/options.ts'
+import { sameOptions } from '../../options.ts'
 import { TmuxOutput } from '../../outputs/tmux/client.ts'
 import { PaneInput } from '../../outputs/tmux/input.ts'
 import { applicationTarget } from '../../outputs/tmux/target.ts'
@@ -71,19 +73,25 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const { target, thread } = spec
   const file = recordPath(target), views = new Views(spec.home, thread, spec.transcript), input = new PaneInput(target)
   const output = new TmuxOutput(target.socket, target.pane)
-  const options = resolveCodexOptions(spec.options), theme = codexTheme(options.theme, !!process.env.NO_COLOR)
+  let options = resolveCodexOptions(spec.options), theme = codexTheme(options.theme, !!process.env.NO_COLOR)
   const isWsl = detectWsl()
-  const staleStyle = { t: theme, l: en, isWsl }
+  let staleStyle = { t: theme, l: en, isWsl }
   const footerSettings = new FooterSettings(cwd => savedFooterSettings(cwd, spec.home))
-  const modelDefault = options.model && options.effort
-    ? cachedModelDefault(spec.home, cwd => footerSettings.modelCatalog(cwd)) : undefined
-  const foldSubagents = options.includeSubagents && (options.tokens || options.callCounts)
+  let modelDefaultCache: ModelDefault | undefined
+  const modelDefault: ModelDefault = async (model, cwd) => {
+    if (!(options.model && options.effort)) return undefined
+    modelDefaultCache ??= cachedModelDefault(spec.home, dir => footerSettings.modelCatalog(dir))
+    return modelDefaultCache(model, cwd)
+  }
+  let foldSubagents = options.includeSubagents && (options.tokens || options.callCounts)
+  const savedOverrides: SavedOptions = { options: spec.options, overrideKeys: spec.overrideKeys }
+  const checkoutPoller = new OptionsPoller()
   const lines = new Map<string, ReturnType<typeof codexLine>>()
   const readers = new RolloutReaderCache(homedir(), modelDefault, threadId => { lines.delete(threadId) })
   const getReader = (targetView: View): RolloutReader => readers.get(targetView)
   const suppressed = new Set<string>()
   let mode = spec.mode, selected: string | undefined, error: string | undefined
-  let stopping = false, attached = false, refreshAt = 0, renderAt = 0
+  let stopping = false, attached = false, optionsAt = 0, refreshAt = 0, renderAt = 0
   let lastConfirmed: string | undefined, readingError: string | undefined, published = ''
   let lastReadings: { thread: string; label: string; readFailed: boolean; line: ReturnType<typeof codexLine> } | undefined
   let paused: Running['paused']
@@ -92,10 +100,33 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const select = (screen: ViewScreen) => selectedView(screen, candidates, thread, identity)
   const stop = () => { stopping = true }
   process.on('SIGTERM', stop); process.on('SIGHUP', stop)
+  const syncCheckoutOptions = () => {
+    const polled = checkoutPoller.poll()
+    if (!polled.changed || !polled.ok) return
+    const next = resolveCodexOptions(workerOptions(polled.options, {}, savedOverrides).options)
+    if (sameOptions(options, next)) return
+    options = next
+    theme = codexTheme(options.theme, !!process.env.NO_COLOR)
+    staleStyle = { t: theme, l: en, isWsl }
+    const nextFold = options.includeSubagents && (options.tokens || options.callCounts)
+    if (nextFold && !foldSubagents) refreshAt = 0
+    foldSubagents = nextFold
+    let updatedLast = false
+    for (const viewLine of lines.values()) {
+      viewLine.reconfigure(options, theme)
+      if (lastReadings && viewLine === lastReadings.line) updatedLast = true
+    }
+    if (lastReadings && !updatedLast) lastReadings.line.reconfigure(options, theme)
+    renderAt = 0
+  }
   const state = async (): Promise<Running> => ({ pid: process.pid, thread, transcript: spec.transcript, target, token: spec.token, version: workerVersion,
     reload: { version: 1, home: spec.home, options, overrideKeys: spec.overrideKeys },
     mode, selected, paused, pending: (await backups(target)).length, error })
   const step = async () => {
+    if (Date.now() >= optionsAt) {
+      syncCheckoutOptions()
+      optionsAt = Date.now() + 1000
+    }
     if (Date.now() >= refreshAt) {
       await views.refresh(mode === 'on' && foldSubagents)
       if (mode === 'on') await footerSettings.preload(views.family().map(view => view.cwd))
@@ -226,7 +257,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
           mode = request.action === 'on' ? 'on' : 'restore'
           readingError = undefined
           if (mode === 'on') {
-            footerSettings.reset(); refreshAt = 0
+            footerSettings.reset(); optionsAt = 0; refreshAt = 0
             suppressed.clear(); renderAt = 0
             if (!attached) { await output.attach(); attached = true }
           } else if (attached) { await output.detach(); attached = false }

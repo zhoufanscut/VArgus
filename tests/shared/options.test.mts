@@ -1,7 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
-import { DEFAULTS, editOption, parseOptions, resolveOptions } from '../../src/options.ts'
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DEFAULTS, editOption, parseOptions, resolveOptions, sameOptions } from '../../src/options.ts'
+import { OptionsPoller } from '../../src/node/options.ts'
 import { resolveCodexOptions, workerOptions } from '../../src/hosts/codex/options.ts'
 
 test('the sample lists shared defaults in order and each switch can be enabled on its own', async () => {
@@ -51,4 +54,55 @@ test('Codex reload follows edited or removed checkout defaults and retains expli
   assert.deepEqual(reload.options, { ...resolveCodexOptions({}), theme: 'daylight' })
   assert.deepEqual(new Set(reload.overrideKeys), new Set(['theme', 'folder']))
   assert.equal(workerOptions({ theme: 'codex-ink' }, {}, { options: DEFAULTS }).options.theme, 'auto')
+})
+
+test('sameOptions compares keys and values with Object.is', () => {
+  assert.equal(sameOptions(DEFAULTS, { ...DEFAULTS }), true)
+  assert.equal(sameOptions(DEFAULTS, { ...DEFAULTS, model: false }), false)
+  assert.equal(sameOptions({ a: 1 }, { a: 1, b: undefined }), false)
+  assert.equal(sameOptions({ a: undefined }, { b: undefined } as Record<string, unknown>), false)
+})
+
+test('OptionsPoller tracks creation, equal-length edits, invalid JSONC, deletion, and symlinks', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-options-poller-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+
+  const file = join(dir, 'vargus.jsonc')
+  const poller = new OptionsPoller(file)
+  assert.deepEqual(poller.readInitial(), {})
+  assert.deepEqual(poller.poll(), { changed: false })
+
+  await writeFile(file, '{"theme":"daylight"}')
+  assert.deepEqual(poller.poll(), { changed: true, ok: true, options: { theme: 'daylight' } })
+  assert.deepEqual(poller.poll(), { changed: false })
+
+  // Same byte length ("daylight" vs "graphite") still triggers a change.
+  await writeFile(file, '{"theme":"graphite"}')
+  assert.deepEqual(poller.poll(), { changed: true, ok: true, options: { theme: 'graphite' } })
+
+  // Broken JSONC reports ok: false once until the file changes again.
+  await writeFile(file, '{broken')
+  const broken = poller.poll()
+  assert.equal(broken.changed, true)
+  assert.equal(broken.ok, false)
+  assert.match(broken.error.message, /Expected a VArgus JSON options object/)
+  assert.deepEqual(poller.poll(), { changed: false })
+
+  await writeFile(file, '{"folder":false}')
+  assert.deepEqual(poller.poll(), { changed: true, ok: true, options: { folder: false } })
+
+  await rm(file)
+  assert.deepEqual(poller.poll(), { changed: true, ok: true, options: {} })
+  assert.deepEqual(poller.poll(), { changed: false })
+
+  if (process.platform !== 'win32') {
+    const target = join(dir, 'target.jsonc')
+    const link = join(dir, 'link.jsonc')
+    await writeFile(target, '{"model":false}')
+    await symlink(target, link)
+    const linkPoller = new OptionsPoller(link)
+    assert.deepEqual(linkPoller.readInitial(), { model: false })
+    await writeFile(target, '{"model":true}')
+    assert.deepEqual(linkPoller.poll(), { changed: true, ok: true, options: { model: true } })
+  }
 })

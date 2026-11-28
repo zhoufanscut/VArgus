@@ -16,10 +16,11 @@ import { OmoSubagents } from './subagents.ts'
 import { OmoVcs } from './vcs.ts'
 import { OmoKimi, type ProviderAuth } from './kimi.ts'
 import { outputTokensPerSecond } from '../../core/session.ts'
-import { readCheckoutOptions, readOptionsFile } from '../../node/options.ts'
+import { initialVcs } from '../../core/vcs.ts'
+import { OptionsPoller, readOptionsFile } from '../../node/options.ts'
 import { detectWsl } from '../../node/wsl.ts'
 import { mountOmo, type OmoUi } from '../../outputs/omo.ts'
-import { parseOptions, resolveOptions } from '../../options.ts'
+import { parseOptions, resolveOptions, sameOptions } from '../../options.ts'
 import { resolveLabels } from '../../i18n/index.ts'
 import { makeTheme } from '../../theme/index.ts'
 import { REFRESH_GRACE_MS, staleParts } from '../../render/freshness.ts'
@@ -69,8 +70,24 @@ export type OmoApi = {
   }): void
 }
 
+type OptionsSource = {
+  read(): Record<string, unknown>
+  sync(): void
+}
+
 export function configuredVargus(file: string): (pi: OmoApi) => void {
-  return pi => vargus(pi, { ...readCheckoutOptions(), ...readOptionsFile(file) })
+  return pi => {
+    const poller = new OptionsPoller()
+    let checkout = poller.readInitial()
+    const explicit = readOptionsFile(file)
+    mountExtension(pi, {
+      read: () => ({ ...checkout, ...explicit }),
+      sync: () => {
+        const result = poller.poll()
+        if (result.changed && result.ok) checkout = result.options
+      },
+    })
+  }
 }
 
 function modelKey(model: Record<string, unknown> | undefined): string | undefined {
@@ -112,10 +129,27 @@ function snapshotSpawns(spawns: OmoSpawnReceiptMap): OmoSpawnReceiptMap {
   return copy
 }
 
-export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> = readCheckoutOptions()): void {
+export default function vargus(pi: OmoApi, fileOptions?: Record<string, unknown>): void {
+  if (fileOptions !== undefined) {
+    mountExtension(pi, { read: () => fileOptions, sync: () => {} })
+    return
+  }
+  const poller = new OptionsPoller()
+  let checkout = poller.readInitial()
+  mountExtension(pi, {
+    read: () => checkout,
+    sync: () => {
+      const result = poller.poll()
+      if (result.changed && result.ok) checkout = result.options
+    },
+  })
+}
+
+function mountExtension(pi: OmoApi, source: OptionsSource): void {
   let active: {
     ctx: Context
     stop(): void
+    syncOptions(): void
     update(opts?: { forceVcs?: boolean; forceSubagents?: boolean }): void
     messageStart(event: unknown): void
     messageUpdate(event: unknown): void
@@ -135,12 +169,15 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     if (ctx.mode !== 'tui') return
     const settings = ctx.sessionManager.reduceHistory(omoSettingsReducer)
     if (!settings.enabled) return
-    const options = resolveOptions({ ...fileOptions, ...settings.options })
-    const vcs = new OmoVcs()
-    const subagents = options.includeSubagents && (options.tokens || options.callCounts)
+    source.sync()
+    const sessionOptions = settings.options
+    let options = resolveOptions({ ...source.read(), ...sessionOptions })
+    let vcs: OmoVcs | undefined = options.repo || options.branch || options.status ? new OmoVcs() : undefined
+    let subagents = options.includeSubagents && (options.tokens || options.callCounts)
       ? new OmoSubagents() : undefined
-    const kimi = new OmoKimi(() => instance.ctx.modelRegistry.getProviderAuth('kimi-coding'))
-    const theme = makeTheme(options.theme, Boolean(process.env.NO_COLOR), OMO_THEME)
+    let kimi: OmoKimi | undefined = options.rateLimits
+      ? new OmoKimi(() => instance.ctx.modelRegistry.getProviderAuth('kimi-coding')) : undefined
+    let theme = makeTheme(options.theme, Boolean(process.env.NO_COLOR), OMO_THEME)
     const labels = resolveLabels('en')
     const isWsl = detectWsl()
     let disposed = false
@@ -150,6 +187,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
     let values = collectOmo(ctx, options.rateLimits ? pi.getSubscriptionLimits() : [], homedir(), Date.now())
     let mainSpawns: OmoSpawnReceiptMap = subagents ? snapshotSpawns(collectOmoSpawns(ctx)) : new Map()
     let checkedAt = Date.now()
+    let unsubscribe: () => void = () => {}
     const instance = {
       ctx,
       messageStart(event: unknown) {
@@ -202,6 +240,43 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         stream = undefined
         tokensPerSecond = undefined
       },
+      syncOptions() {
+        if (disposed) return
+        source.sync()
+        const next = resolveOptions({ ...source.read(), ...sessionOptions })
+        if (sameOptions(options, next)) return
+        if (next.theme !== options.theme) {
+          theme = makeTheme(next.theme, Boolean(process.env.NO_COLOR), OMO_THEME)
+        }
+        const hadVcs = options.repo || options.branch || options.status
+        const hasVcs = next.repo || next.branch || next.status
+        if (hasVcs && !hadVcs) vcs = new OmoVcs()
+        else if (!hasVcs && hadVcs) {
+          vcs?.dispose()
+          vcs = undefined
+          values.vcs = initialVcs()
+        }
+        const wantSub = next.includeSubagents && (next.tokens || next.callCounts)
+        if (wantSub && !subagents) {
+          subagents = new OmoSubagents()
+          mainSpawns = snapshotSpawns(collectOmoSpawns(instance.ctx))
+        } else if (!wantSub && subagents) {
+          subagents.dispose()
+          subagents = undefined
+          mainSpawns = new Map()
+        }
+        if (next.rateLimits && !options.rateLimits) {
+          kimi = new OmoKimi(() => instance.ctx.modelRegistry.getProviderAuth('kimi-coding'))
+          unsubscribe = pi.onSubscriptionLimits(() => instance.update())
+        } else if (!next.rateLimits && options.rateLimits) {
+          unsubscribe()
+          unsubscribe = () => {}
+          kimi?.dispose()
+          kimi = undefined
+          values.limits = []
+        }
+        options = next
+      },
       update(opts?: { forceVcs?: boolean; forceSubagents?: boolean }) {
         if (disposed) return
         const current = instance.ctx
@@ -221,13 +296,13 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
           output.refresh()
           return
         }
-        if (options.rateLimits) {
+        if (options.rateLimits && kimi) {
           void kimi.refresh(current.model?.provider).then(() => {
             if (disposed || instance.ctx.model?.provider !== 'kimi-coding') return
             output.refresh()
           })
         }
-        values.vcs = vcs.values
+        values.vcs = vcs ? vcs.values : initialVcs()
         if (subagents) {
           void subagents.refresh(current.cwd, sessionId, Date.now(), forceSubagents).then(() => {
             if (disposed) return
@@ -235,7 +310,7 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
           })
         }
         output.refresh()
-        if (options.repo || options.branch || options.status) {
+        if (vcs && (options.repo || options.branch || options.status)) {
           void vcs.refresh(current.cwd, Date.now(), forceVcs).then(reading => {
             if (disposed) return
             values.vcs = reading
@@ -247,16 +322,16 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
         disposed = true
         clearInterval(timer)
         unsubscribe()
-        vcs.dispose()
+        vcs?.dispose()
         subagents?.dispose()
-        kimi.dispose()
+        kimi?.dispose()
         output.dispose()
       },
     }
     const output = mountOmo(ctx.ui, width => {
       const stale = Date.now() - checkedAt >= REFRESH_GRACE_MS
       const now = stale ? checkedAt : Date.now()
-      const limits = options.rateLimits && instance.ctx.model?.provider === 'kimi-coding'
+      const limits = options.rateLimits && kimi && instance.ctx.model?.provider === 'kimi-coding'
         ? kimi.readings(now, labels) : values.limits
       const sub = subagents?.snapshot
       let effectiveSession = values.session
@@ -283,8 +358,11 @@ export default function vargus(pi: OmoApi, fileOptions: Record<string, unknown> 
       })
       return stale ? staleParts(parts, width, { t: theme, l: labels, isWsl }) : joinParts(parts, theme)
     })
-    const unsubscribe = options.rateLimits ? pi.onSubscriptionLimits(() => instance.update()) : () => {}
-    const timer = setInterval(() => instance.update(), 1000)
+    unsubscribe = options.rateLimits ? pi.onSubscriptionLimits(() => instance.update()) : () => {}
+    const timer = setInterval(() => {
+      instance.syncOptions()
+      instance.update()
+    }, 1000)
     timer.unref()
     active = instance
     instance.update()

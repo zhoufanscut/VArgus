@@ -15,29 +15,43 @@ Removing for Claude uninstalls the user-scope plugin, removes its checkout marke
 Removing for Codex removes the VArgus startup hooks and autostart state.
 Removing for OmO removes the VArgus extension loader.`
 
-const HELP = `Usage:
+const HELP = `Usage (all hosts):
   vargus install|remove antigravity|claude|codex|omo [OPTIONS]
-  vargus statusline [--theme NAME] [--config FILE]
   vargus themes [NAME]
+
+Antigravity CLI only (configured as statusLine.command):
+  vargus statusline [--theme NAME] [--config FILE]
+
+Codex CLI only (tmux/psmux helper):
   vargus on|off|status|reload [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
   vargus hook session-start|prompt [--config FILE] [--pane %ID] [--socket PATH]
   vargus tmux-reset
 
 Run \`vargus install --help\` or \`vargus remove --help\` for host options and details.
-Antigravity CLI runs \`vargus statusline\` from PATH and pipes session JSON on stdin.
 Run \`vargus themes [NAME]\` to preview bundled colour themes in your terminal.
 
-The tmux row is opt-in for Codex. Standalone on/off hide/restore Codex's saved footer
-through tmux /statusline commands. Off removes the row; inactive views restore
-on their next empty-composer visit. The helper exits after restoration or TUI exit.
-VArgus reads vargus.jsonc from its checkout. --config FILE overlays a JSON or JSONC options object.
-The tmux controls leave saved Codex settings alone.
-Standalone drafts keep last-confirmed readings by default. Installed
-Codex startup hooks are enabled by default; neither needs an options file.
-After updating, reload replaces the helper, rereads checkout defaults, and retains
-explicit overrides and on/off mode. Supplied options override retained values. Codex keeps running.
-Exit Codex to restore the original tmux bar. After a helper crash, tmux-reset
-cleans up an abandoned row when no VArgus helper is still running.
+Shared configuration:
+  VArgus reads vargus.jsonc from its checkout. Edits to vargus.jsonc apply
+  automatically across all four hosts while running. --config FILE overlays a
+  JSON or JSONC options object.
+
+Runtime controls by host:
+  Codex CLI:       !vargus on|off|status|reload (tmux/psmux helper; reload upgrades code/explicit flags)
+  OmO Native:      /vargus on|off|status|config in OmO; /reload after code or --config updates
+  Claude Code:     /config for options, /plugin to enable/disable, /reload-plugins after code updates
+  Antigravity CLI: /statusline on|off|delete in agy (vargus statusline refreshes code and config each draw)
+
+Codex tmux details:
+  The tmux row is opt-in for Codex. Standalone on/off hide/restore Codex's saved footer
+  through tmux /statusline commands. Off removes the row; inactive views restore
+  on their next empty-composer visit. The helper exits after restoration or TUI exit.
+  The tmux controls leave saved Codex settings alone.
+  Standalone drafts keep last-confirmed readings by default. Installed
+  Codex startup hooks are enabled by default; neither needs an options file.
+  After updating code or changing explicit flags, !vargus reload replaces the helper,
+  rereads checkout defaults, and retains explicit overrides and on/off mode.
+  Exit Codex to restore the original tmux bar. After a helper crash, tmux-reset
+  cleans up an abandoned row when no VArgus helper is still running.
 `
 
 export async function main(argv: string[]): Promise<number> {

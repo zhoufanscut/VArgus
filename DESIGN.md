@@ -131,6 +131,16 @@ would select a different file when the user changes projects. Explicit option
 files use the same comment-aware parser. Flags keep their argument order, and
 OmO's saved session overrides remain the top layer for that session.
 
+All four hosts apply edits and deletions to `vargus.jsonc` automatically while
+running: Antigravity reads it on each subprocess invocation, and Codex, OmO
+Native, and Claude Code poll raw file contents on their 1-second tick without
+forcing a restart. Comparing raw file contents avoids coarse-mtime and equal-length
+overwrite misses and follows symlinks. Invalid JSONC mid-edit leaves the last
+valid options active (logging once per broken content in Claude, and silently
+retaining the row in Codex and OmO) until the next edit or deletion. Each host
+keeps its override layer (`--config`/`--theme` in Codex, `--config` and
+`/vargus config` in OmO, locked rows and picker rewrites in Claude).
+
 The Claude Code 2.1.323 `PluginOptions` declaration describes registration
 values as “defaults filled in.” Its `ConfigKind` includes `'number'` for
 settings such as the folder fold threshold. Its `config.set` declaration says
@@ -146,8 +156,10 @@ The shell writer preserves literal backslashes in POSIX paths and converts
 Windows drive separators for Git Bash. A Linux profile named `profile\west`
 kept its backup and restored the previous theme after the shared key was removed.
 Removing that key restores the fallback. A deliberate picker edit replaces
-the fallback. The renderer reads the file at startup and on the reload command,
-including when Claude keeps the loaded module. A picker edit stages a change beside
+the fallback. The renderer reads the file at startup, on the 1-second poll (guarded by
+`savingDepth` and `$.state` `saving` so it never races an in-flight `/config`
+picker edit and leaves native picker rows untouched until `/config` opens), and
+on the reload command, including when Claude keeps the loaded module. A picker edit stages a change beside
 the destination, passes the event to Claude, and publishes the accepted value
 after checking the original bytes. It changes one top-level value and preserves
 unrelated settings and comments. A file edit from another session between
@@ -373,9 +385,13 @@ bound TUI exits.
 `reload` validates and replays the root transcript before replacing the worker.
 A recovery record retains the root, options and mode. Flags override retained
 options in command order, and the original footer backups remain separate.
-Workers also record which option keys were explicit. Reload rereads the
-checkout defaults for the remaining keys. Older snapshots retain their
-effective values because they contain no record of which keys were explicit.
+Workers also record which option keys were explicit. Both live 1-second
+`vargus.jsonc` polling (via [`OptionsPoller`](src/node/options.ts)) and `reload`
+reread checkout defaults for the remaining keys without clearing explicit
+overrides. Live polling reconfigures `codexLine`, theme, VCS polling, and
+subagent folding in place without restarting the worker or discarding paused
+draft snapshots. Older snapshots retain their effective values because they
+contain no record of which keys were explicit.
 An interrupted manual `off` still suppresses reactivation. A worker without
 reload metadata needs an `off` and `on` with the original options.
 
@@ -711,10 +727,13 @@ and clears readings on provider switch or dispose. Its cache and backoff
 belong to the mounted extension instance.
 
 [The loader](src/cli/omo.ts) can store an absolute JSON options path. The
-extension resolves saved session overrides over file values and defaults.
-It persists enabled state and explicit overrides, so changes to other file
-keys still apply after reload. Legacy full snapshots retain their saved
-values.
+extension resolves saved session overrides over explicit `--config` file values,
+checkout `vargus.jsonc` defaults, and built-in defaults. On each 1-second tick it
+polls `vargus.jsonc` and reconfigures theme, VCS polling, rate limits, and
+subagent collection in place without tearing down the mounted widget or clearing
+live `t/s` state. It persists enabled state and explicit overrides, so changes
+to other file keys still apply live and after reload. Legacy full snapshots
+retain their saved values.
 
 The OmO widget compares its last successful collection time on each draw. A
 failed collection retains the readings and requests a redraw, including on the

@@ -5,6 +5,11 @@ import { DRIVE_PATH, shellPath } from './paths'
 import { pluginDataDir } from './write'
 
 const saving = { plugin: 'vargus', key: 'savingOption' } as const
+let hasObserved = false
+let observedRaw: string | undefined
+let savingDepth = 0
+let polling = false
+
 function filePath($: EngineInterface): string {
   return `${$.plugin.root}/vargus.jsonc`
 }
@@ -16,10 +21,17 @@ function optionKey($: EngineInterface, row: { key: string }): keyof Options | un
   if (Object.hasOwn(DEFAULTS, key)) return key as keyof Options
 }
 
-async function sharedValues($: EngineInterface): Promise<Record<string, PickerValue>> {
-  const path = filePath($)
-  if (!await $.fs.exists(path)) return {}
-  const file = parseOptions(await $.fs.read(path))
+async function sharedValues($: EngineInterface, preRead?: { raw: string | undefined }): Promise<Record<string, PickerValue>> {
+  let text: string
+  if (preRead) {
+    if (preRead.raw === undefined) return {}
+    text = preRead.raw
+  } else {
+    const path = filePath($)
+    if (!await $.fs.exists(path)) return {}
+    text = await $.fs.read(path)
+  }
+  const file = parseOptions(text)
   const values: Record<string, PickerValue> = {}
   for (const [key, value] of Object.entries(file)) {
     if (!Object.hasOwn(DEFAULTS, key)) continue
@@ -63,9 +75,14 @@ async function saveMirror($: EngineInterface, file: string, id: string, value?: 
 
 // The native panel displays saved picker values. Its backups belong to this
 // installation; Claude removes its data directory when the marketplace is removed.
-export async function claudeOptions($: EngineInterface, given: PluginOptions, syncPicker = false): Promise<Options> {
+export async function claudeOptions(
+  $: EngineInterface,
+  given: PluginOptions,
+  syncPicker = false,
+  preRead?: { raw: string | undefined },
+): Promise<Options> {
   const pending = (await $.state.get(saving)).value
-  const shared = await sharedValues($)
+  const shared = await sharedValues($, preRead)
   if (pending) delete shared[pending]
   const file = await mirrorFile($)
   const mirrors: Mirrors = file ? JSON.parse(await readOptional($, file) ?? '{}') : {}
@@ -150,9 +167,50 @@ async function prepareEdit($: EngineInterface, key: keyof Options, value: Picker
   return edit
 }
 
+export async function initSharedOptions($: EngineInterface, given: PluginOptions): Promise<Options> {
+  const raw = await readOptional($, filePath($))
+  hasObserved = true
+  observedRaw = raw
+  return claudeOptions($, given, false, { raw })
+}
+
+export async function pollSharedOptions($: EngineInterface, given: PluginOptions): Promise<Options | undefined> {
+  if (polling || savingDepth > 0) return undefined
+  polling = true
+  try {
+    let raw: string | undefined
+    try { raw = await readOptional($, filePath($)) }
+    catch { return undefined }
+    if (hasObserved && raw === observedRaw) return undefined
+    if ((await $.state.get(saving)).value || savingDepth > 0) return undefined
+    try {
+      const result = await claudeOptions($, given, false, { raw })
+      if (savingDepth > 0) return undefined
+      hasObserved = true
+      observedRaw = raw
+      return result
+    } catch (error) {
+      if (savingDepth === 0) {
+        hasObserved = true
+        observedRaw = raw
+        $.ui.log('Could not load vargus.jsonc. ' + String(error))
+      }
+      return undefined
+    }
+  } finally {
+    polling = false
+  }
+}
+
 async function refreshOptions($: EngineInterface, given: PluginOptions, syncPicker: boolean, apply: (changes: Partial<Options>) => void): Promise<void> {
-  try { apply(await claudeOptions($, given, syncPicker)) }
-  catch (error) { $.ui.log('Could not load vargus.jsonc. ' + String(error)) }
+  try {
+    const raw = await readOptional($, filePath($))
+    if (savingDepth === 0) {
+      hasObserved = true
+      observedRaw = raw
+    }
+    apply(await claudeOptions($, given, syncPicker, { raw }))
+  } catch (error) { $.ui.log('Could not load vargus.jsonc. ' + String(error)) }
 }
 
 export function registerConfig(on: On, given: PluginOptions, apply: (changes: Partial<Options>) => void): void {
@@ -175,43 +233,48 @@ export function registerConfig(on: On, given: PluginOptions, apply: (changes: Pa
     // A downloaded marketplace cache is private to Claude. A checkout, or an
     // existing file deliberately placed beside the plugin, has a shared config.
     if (!await $.fs.exists(path) && !await $.fs.exists(`${$.plugin.root}/.git`)) return next(e)
+    savingDepth++
     let staged: StagedEdit | undefined
-    try { staged = await prepareEdit($, key, e.value) }
-    catch (error) { return { deny: path + ': ' + String(error) } }
     // The native save can reload the mod before next() returns. The new copy
     // uses the native value for this key until the file is published.
     let savingVersion: number | undefined
     try {
-      savingVersion = (await $.state.set(saving, key)).version
-      const accepted = await next(e)
-      if ('deny' in accepted || !validOption(key, accepted.value)) return accepted
       try {
-        if (accepted.value !== e.value) {
-          if (staged) await runEdit($, staged, 'cancel')
-          staged = await prepareEdit($, key, accepted.value)
+        try { staged = await prepareEdit($, key, e.value) }
+        catch (error) { return { deny: path + ': ' + String(error) } }
+        savingVersion = (await $.state.set(saving, key)).version
+        const accepted = await next(e)
+        if ('deny' in accepted || !validOption(key, accepted.value)) return accepted
+        try {
+          if (accepted.value !== e.value) {
+            if (staged) await runEdit($, staged, 'cancel')
+            staged = await prepareEdit($, key, accepted.value)
+          }
+          for (let i = 0; staged; i++) {
+            const edit = staged
+            const committed = await runEdit($, edit, 'commit')
+            staged = undefined  // the script releases its staging directory on success or conflict
+            if (committed) break
+            if (i === 2) throw new Error('The file changed during the edit. Retry the setting.')
+            staged = await prepareEdit($, key, accepted.value)
+          }
+        } catch (error) {
+          $.ui.log('Could not save ' + path + '. ' + String(error))
+          const restored = await $.config.set({ key: e.key, value: e.previous })
+          if ('value' in restored && restored.value !== undefined) return { value: restored.value }
+          return accepted
         }
-        for (let i = 0; staged; i++) {
-          const edit = staged
-          const committed = await runEdit($, edit, 'commit')
-          staged = undefined  // the script releases its staging directory on success or conflict
-          if (committed) break
-          if (i === 2) throw new Error('The file changed during the edit. Retry the setting.')
-          staged = await prepareEdit($, key, accepted.value)
-        }
-      } catch (error) {
-        $.ui.log('Could not save ' + path + '. ' + String(error))
-        const restored = await $.config.set({ key: e.key, value: e.previous })
-        if ('value' in restored && restored.value !== undefined) return { value: restored.value }
+        // A person's saved choice is now also the native fallback for this key.
+        const file = await mirrorFile($)
+        if (file) await saveMirror($, file, $.plugin.root + ':' + key)
+        if (given[key] === accepted.value) apply({ [key]: accepted.value })
         return accepted
+      } finally {
+        if (savingVersion !== undefined) await $.state.set(saving, null, { ifVersion: savingVersion })
+        if (staged) await runEdit($, staged, 'cancel')
       }
-      // A person's saved choice is now also the native fallback for this key.
-      const file = await mirrorFile($)
-      if (file) await saveMirror($, file, $.plugin.root + ':' + key)
-      if (given[key] === accepted.value) apply({ [key]: accepted.value })
-      return accepted
     } finally {
-      if (savingVersion !== undefined) await $.state.set(saving, null, { ifVersion: savingVersion })
-      if (staged) await runEdit($, staged, 'cancel')
+      savingDepth--
     }
   })
 }

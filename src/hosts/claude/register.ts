@@ -1,4 +1,4 @@
-import type { EngineInterface, Register, SessionStartInput, Timer, TurnStepChunk, TurnStepResult } from 'claude-code'
+import type { EngineInterface, PluginOptions, Register, SessionStartInput, Timer, TurnStepChunk, TurnStepResult } from 'claude-code'
 
 import { initialClaudeLimits, claudeQuotaReadings } from './quota'
 import { measuredLimits, startLimits, stopLimits } from './collect/limits'
@@ -9,10 +9,10 @@ import {
 import { initialVcs, startVcs, stopVcs, toolCalledVcs } from './collect/vcs'
 import type { Theme, Values } from '../../core/types'
 import { resolveLabels } from '../../i18n'
-import { resolveOptions, type Options } from '../../options'
+import { resolveOptions, sameOptions, type Options } from '../../options'
 import { joinParts, renderParts } from '../../render'
 import { claudeDisplay } from './display'
-import { claudeOptions, registerConfig } from './config'
+import { initSharedOptions, pollSharedOptions, registerConfig } from './config'
 import { makeTheme } from '../../theme'
 import { DRIVE_PATH } from './paths'
 import { createWriter, endSession, homeDir, pruneOld, writeLine, type Writer } from './write'
@@ -26,6 +26,8 @@ let writer: Writer | null = null
 let tick: Timer | null = null
 let theme: Theme | null = null
 let options: Options | null = null
+let sessionStart: SessionStartInput | null = null
+let noColor = false
 const labels = resolveLabels('en')
 const quota = initialClaudeLimits()
 const values: Values = {
@@ -35,8 +37,15 @@ const values: Values = {
   vcs: initialVcs(),
 }
 
-async function refresh($: EngineInterface): Promise<void> {
+async function refresh($: EngineInterface, given: PluginOptions): Promise<void> {
   if (!writer || !theme || !options) return
+  if (sessionStart) {
+    const before = options
+    const polled = await pollSharedOptions($, given)
+    if (polled && options === before && !sameOptions(options, polled)) {
+      configure($, sessionStart, polled, noColor, options)
+    }
+  }
   values.core.cwd = await $.session.cwd()
   // re-read each tick: a /model switch raises no event but the classic
   // PostModelSwitch, which doesn't run under a managed install (a failed read
@@ -87,15 +96,17 @@ export const register: Register = (on, given) => {
     // Only an interactive session shows a status line (DESIGN, "When the line is written").
     if (e.isInteractive) {
       let initial = native
-      try { initial = await claudeOptions($, given) }
+      try { initial = await initSharedOptions($, given) }
       catch (error) { $.ui.log('Could not load vargus.jsonc. ' + String(error)) }
       writer = await createWriter($)
-      const noColor = !!(await $.env.get('NO_COLOR'))
+      sessionStart = e
+      noColor = !!(await $.env.get('NO_COLOR'))
       configure($, e, initial, noColor)
       applyOptions = changes => {
         if (!options) return
-        configure($, e, resolveOptions({ ...options, ...changes }), noColor, options)
-        refresh($).catch(() => {})
+        const resolved = resolveOptions({ ...options, ...changes })
+        if (!sameOptions(options, resolved)) configure($, e, resolved, noColor, options)
+        refresh($, given).catch(() => {})
       }
       const home = await $.env.get('HOME')
       const userProfile = await $.env.get('USERPROFILE')
@@ -103,11 +114,11 @@ export const register: Register = (on, given) => {
       values.core.isWsl = await isWsl($, home, userProfile, e.cwd)
       tick?.cancel()
       tick = $.clock.every(1000, () => {
-        refresh($).catch(() => {})
+        refresh($, given).catch(() => {})
       })
       // Not awaited: the first session.start is awaited before the first
       // prompt, and a slow or refused write must not hold it.
-      refresh($).catch(() => {})
+      refresh($, given).catch(() => {})
       // A live plugin reload can leave the old detail pane open in Claude.
       $.ui.close({ id: 'vargus' }).catch(() => {})
       const w = writer

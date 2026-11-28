@@ -559,4 +559,284 @@ describe('register: the line as the host sets it up', () => {
     await command('reload-plugins')
     expect(await line(clock, w)).toContain(tokenText('alert', '1.50M'))
   })
+
+  test('vargus.jsonc creation, equal-length edits, invalid JSONC and deletion apply on the next 1s tick without touching picker until /config', NO_VCS, async ($, on) => {
+    const { clock, w, rows, edits, state, command } = sharedPicker($, on)
+    const sep = (theme: string) => makeTheme(theme, false).paint('sep', ' | ')
+    const logs: string[] = []
+    on('ui.log', async ($, e) => {
+      logs.push(e.text)
+      return { value: undefined }
+    })
+
+    await $.session.start(start)
+    const initial = await line(clock, w)
+    expect(initial).toContain('opus')
+    expect(initial).toContain(sep('claude-terracotta'))
+
+    // Creating vargus.jsonc takes effect on the next 1s tick without /reload-plugins or /config.
+    state.file = '{"model":false,"theme":"daylight","folder":false}'
+    const created = await line(clock, w)
+    expect(created).not.toContain('opus')
+    expect(created).toContain(sep('daylight'))
+    expect(created).toContain('~/x') // vargus.folder is locked true
+    expect(edits).toEqual([])
+    expect(rows.map(r => r.value)).toEqual([true, 'auto', true])
+
+    // Equal-length edit ("daylight" -> "graphite") still applies immediately.
+    state.file = '{"model":false,"theme":"graphite","folder":false}'
+    const edited = await line(clock, w)
+    expect(edited).toContain(sep('graphite'))
+    expect(edited).not.toContain('opus')
+
+    // Invalid JSONC keeps last valid options and logs once until the content changes.
+    state.file = '{broken'
+    const duringError1 = await line(clock, w)
+    expect(duringError1).toContain(sep('graphite'))
+    expect(duringError1).not.toContain('opus')
+    const duringError2 = await line(clock, w)
+    expect(duringError2).toContain(sep('graphite'))
+    expect(logs.length).toBe(1)
+    expect(logs[0]).toContain('Could not load vargus.jsonc.')
+
+    // Deleting vargus.jsonc reverts to native choices on the next 1s tick.
+    state.file = undefined
+    const deleted = await line(clock, w)
+    expect(deleted).toContain('opus')
+    expect(deleted).toContain(sep('claude-terracotta'))
+
+    // Opening /config syncs the picker later cleanly.
+    state.file = '{"model":false}'
+    await command('config')
+    expect(rows[0]!.value).toBe(false)
+    expect(edits).toEqual(['vargus.model'])
+  })
+
+  test('live vargus.jsonc poll skips while $.config.set is in flight and converges after commit', NO_VCS, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    mock.store(on)
+    const w = world(on, clock, { HOME: '/home/u', NO_COLOR: '1' }, false)
+    const provider = { plugin: 'vargus@vargus', tier: 'user' as const }
+    const row: ConfigRow = {
+      key: 'vargus.model', label: 'Model', kind: 'boolean', value: true,
+      provider, isLocked: false,
+    }
+    let file = '{"model":true}\n'
+    let staged = ''
+    let releaseSet: (() => void) | undefined
+    const setStarted = new Promise<void>(resolve => {
+      on('config.set', async ($, e) => {
+        row.value = e.value
+        resolve()
+        await new Promise<void>(done => { releaseSet = done })
+        return { value: row.value }
+      })
+    })
+    on('fs.exists', async ($, e) => ({ value: fixtureFsPath(e.path).endsWith('/vargus.jsonc') }))
+    on('fs.read', async ($, e) => {
+      if (fixtureFsPath(e.path).endsWith('/vargus.jsonc')) return { value: file }
+      throw new Error('ENOENT')
+    })
+    on('fs.stat', async ($, e) => ({
+      value: { kind: 'file', isLink: false, realPath: e.path, size: file.length, mtimeMs: 0 },
+    }))
+    on('config.list', async () => ({ value: [row] }))
+    on('process.run', async ($, e) => {
+      const index = e.argv.findIndex(arg => arg.endsWith('/replace-config.sh'))
+      if (index >= 0) {
+        const op = e.argv[index + 1]
+        if (op === 'prepare') staged = e.init?.stdin?.slice(file.length) ?? ''
+        if (op === 'commit') file = staged
+      }
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+
+    await $.session.start(start)
+    expect(await line(clock, w)).toContain('opus')
+
+    const saving = $.config.set({
+      key: row.key, previous: true, value: false, provider, origin: { kind: 'composer' },
+    })
+    await setStarted
+    // A 1s tick while config.set is mid-flight must skip without racing.
+    expect(await line(clock, w)).toContain('opus')
+
+    releaseSet!()
+    expect(await saving).toEqual({ value: false })
+    expect(file).toBe('{"model":false}\n')
+    expect(await line(clock, w)).not.toContain('opus')
+  })
+
+  test('pollSharedOptions does not permanently skip an edit if config.set interrupts claudeOptions and denies', NO_VCS, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    mock.store(on)
+    const w = world(on, clock, { HOME: '/home/u', NO_COLOR: '1' }, false)
+    const provider = { plugin: 'vargus@vargus', tier: 'user' as const }
+    const row: ConfigRow = {
+      key: 'vargus.model', label: 'Model', kind: 'boolean', value: true,
+      provider, isLocked: false,
+    }
+    let file = '{"model":true}\n'
+    let releaseConfigList: (() => void) | undefined
+    let holdNextList = false
+    const listHeld = new Promise<void>(resolve => {
+      on('config.list', async () => {
+        if (holdNextList) {
+          holdNextList = false
+          resolve()
+          await new Promise<void>(done => { releaseConfigList = done })
+        }
+        return { value: [row] }
+      })
+    })
+    on('fs.exists', async ($, e) => ({ value: fixtureFsPath(e.path).endsWith('/vargus.jsonc') }))
+    on('fs.read', async ($, e) => {
+      if (fixtureFsPath(e.path).endsWith('/vargus.jsonc')) return { value: file }
+      throw new Error('ENOENT')
+    })
+    on('fs.stat', async ($, e) => ({
+      value: { kind: 'file', isLink: false, realPath: e.path, size: file.length, mtimeMs: 0 },
+    }))
+    let releaseSet: (() => void) | undefined
+    const setStarted = new Promise<void>(resolve => {
+      on('config.set', async () => {
+        resolve()
+        await new Promise<void>(done => { releaseSet = done })
+        return { deny: 'rejected by test' }
+      })
+    })
+    on('process.run', async () => ({
+      value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+    }))
+
+    await $.session.start(start)
+    expect(await line(clock, w)).toContain('opus')
+
+    // Start a 1s poll on a new vargus.jsonc edit while holding its config.list read.
+    file = '{"model":false}\n'
+    holdNextList = true
+    const tickRun = clock.advance(1000)
+    await listHeld
+
+    // Keep config.set in flight until after claudeOptions resolves, then deny it.
+    const denied = $.config.set({
+      key: row.key, previous: true, value: false, provider, origin: { kind: 'composer' },
+    })
+    await setStarted
+
+    releaseConfigList!()
+    await tickRun
+    expect(w.lines.at(-1)).toContain('opus')
+
+    releaseSet!()
+    expect(await denied).toEqual({ deny: 'rejected by test' })
+    // The next 1s tick must still pick up file = '{"model":false}\n'.
+    expect(await line(clock, w)).not.toContain('opus')
+  })
+
+  test('pollSharedOptions recovers if config.set cleanup throws in finally', NO_VCS, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    mock.store(on)
+    const w = world(on, clock, { HOME: '/home/u', NO_COLOR: '1' }, false)
+    const provider = { plugin: 'vargus@vargus', tier: 'user' as const }
+    const row: ConfigRow = {
+      key: 'vargus.model', label: 'Model', kind: 'boolean', value: true,
+      provider, isLocked: false,
+    }
+    let file = '{"model":true}\n'
+    let cancelCalls = 0
+    on('config.list', async () => ({ value: [row] }))
+    on('fs.exists', async ($, e) => ({ value: fixtureFsPath(e.path).endsWith('/vargus.jsonc') }))
+    on('fs.read', async ($, e) => {
+      if (fixtureFsPath(e.path).endsWith('/vargus.jsonc')) return { value: file }
+      throw new Error('ENOENT')
+    })
+    on('fs.stat', async ($, e) => ({
+      value: { kind: 'file', isLink: false, realPath: e.path, size: file.length, mtimeMs: 0 },
+    }))
+    on('config.set', async () => ({ deny: 'rejected by test' }))
+    on('process.run', async ($, e) => {
+      if (e.argv.includes('cancel')) {
+        cancelCalls++
+        return { value: { exitCode: 1, stdout: '', stderr: 'cancel failed', isStdoutTruncated: false, isStderrTruncated: false } }
+      }
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+
+    await $.session.start(start)
+    expect(await line(clock, w)).toContain('opus')
+
+    try {
+      await $.config.set({
+        key: row.key, previous: true, value: false, provider, origin: { kind: 'composer' },
+      })
+    } catch {
+      // cancel threw inside inner finally
+    }
+    expect(cancelCalls).toBe(1)
+
+    // Outer finally must still decrement savingDepth so polling resumes.
+    file = '{"model":false}\n'
+    expect(await line(clock, w)).not.toContain('opus')
+  })
+
+  test('refresh does not let a stale pollSharedOptions overwrite a concurrent /reload-plugins', NO_VCS, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    mock.store(on)
+    const w = world(on, clock, { HOME: '/home/u' }, false)
+    const provider = { plugin: 'vargus@vargus', tier: 'user' as const }
+    const row: ConfigRow = {
+      key: 'vargus.model', label: 'Model', kind: 'boolean', value: true,
+      provider, isLocked: false,
+    }
+    let file = '{"model":true}\n'
+    let releaseConfigList: (() => void) | undefined
+    let holdNextList = false
+    const listHeld = new Promise<void>(resolve => {
+      on('config.list', async () => {
+        if (holdNextList) {
+          holdNextList = false
+          resolve()
+          await new Promise<void>(done => { releaseConfigList = done })
+        }
+        return { value: [row] }
+      })
+    })
+    on('fs.exists', async ($, e) => ({ value: fixtureFsPath(e.path).endsWith('/vargus.jsonc') }))
+    on('fs.read', async ($, e) => {
+      if (fixtureFsPath(e.path).endsWith('/vargus.jsonc')) return { value: file }
+      throw new Error('ENOENT')
+    })
+    on('fs.stat', async ($, e) => ({
+      value: { kind: 'file', isLink: false, realPath: e.path, size: file.length, mtimeMs: 0 },
+    }))
+    on('command.run', async () => ({ text: 'reloaded' }))
+    on('process.run', async () => ({
+      value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+    }))
+
+    await $.session.start(start)
+    expect(await line(clock, w)).toContain('opus')
+    expect(w.lines.at(-1)).toContain(makeTheme('claude-terracotta', false).paint('sep', ' | '))
+
+    // Start a 1s poll on model:false while holding its config.list read.
+    file = '{"model":false}\n'
+    holdNextList = true
+    const tickRun = clock.advance(1000)
+    await listHeld
+
+    // Apply a newer edit via /reload-plugins before the older poll resolves.
+    file = '{"model":true,"theme":"daylight"}\n'
+    await $.command.run({
+      command: 'reload-plugins', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 },
+    })
+
+    // Releasing the stale poll must not clobber the newer /reload-plugins state.
+    releaseConfigList!()
+    await tickRun
+    expect(w.lines.at(-1)).toContain('opus')
+    expect(w.lines.at(-1)).toContain(makeTheme('daylight', false).paint('sep', ' | '))
+    expect(await line(clock, w)).toContain('opus')
+    expect(w.lines.at(-1)).toContain(makeTheme('daylight', false).paint('sep', ' | '))
+  })
 })
