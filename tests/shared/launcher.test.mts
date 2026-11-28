@@ -40,19 +40,29 @@ test('antigravity and omo verbs direct users to install and remove commands', as
 test('top-level help merges install and remove while subcommand help lists per-host options', async () => {
   for (const args of [[], ['--help']]) {
     const { stdout } = await runCli(args)
-    assert.match(stdout, /^Usage \(all hosts\):$/m)
+    assert.match(stdout, /^Usage:$/m)
     assert.match(stdout, /^  vargus install\|remove antigravity\|claude\|codex\|omo \[OPTIONS\]$/m)
-    assert.match(stdout, /^Antigravity CLI only \(configured as statusLine\.command\):$/m)
-    assert.match(stdout, /^Codex CLI only \(tmux\/psmux helper\):$/m)
-    assert.match(stdout, /^Shared configuration:$/m)
+    assert.match(stdout, /^  vargus themes \[NAME\]$/m)
+    assert.match(stdout, /^Configuration:$/m)
+    assert.match(stdout, /vargus\.sample\.jsonc/)
     assert.match(stdout, /^Runtime controls by host:$/m)
-    assert.match(stdout, /Run `vargus install --help` or `vargus remove --help` for host options and details\./)
+    assert.match(stdout, /!vargus on\|off\|status\|reload/)
+    assert.match(stdout, /docs\/setup-<host>\.md/)
+    assert.match(stdout, /Run `vargus install --help`, `vargus remove --help`, or `vargus themes --help` for options\./)
+    assert.doesNotMatch(stdout, /vargus statusline/)
+    assert.doesNotMatch(stdout, /vargus hook/)
+    assert.doesNotMatch(stdout, /vargus tmux-reset/)
+    assert.doesNotMatch(stdout, /Antigravity CLI only/)
+    assert.doesNotMatch(stdout, /Codex CLI only/)
+    assert.doesNotMatch(stdout, /Codex tmux details/)
+    assert.doesNotMatch(stdout, /--config FILE/)
     assert.doesNotMatch(stdout, /^  vargus (?:install|remove) antigravity$/m)
   }
 
   for (const action of ['on', 'reload']) {
     const { stdout } = await runCli([action, '--help'])
     assert.match(stdout, /^Usage \(Codex CLI only\):$/m)
+    assert.match(stdout, /--theme and\n--config FILE \(JSON or JSONC\) override vargus\.jsonc for this helper\./)
     assert.match(stdout, /OmO Native:.*\/vargus/)
     assert.match(stdout, /Claude Code:.*\/reload-plugins/)
     assert.match(stdout, /Antigravity CLI:.*\/statusline/)
@@ -63,18 +73,38 @@ test('top-level help merges install and remove while subcommand help lists per-h
   assert.match(installHelp, /^  vargus install claude$/m)
   assert.match(installHelp, /^  vargus install codex \[--home CODEX_HOME\]$/m)
   assert.match(installHelp, /^  vargus install omo \[--dir EXTENSIONS_DIRECTORY\] \[--config FILE\]$/m)
-  assert.match(installHelp, /Installing for Antigravity/)
+  assert.match(installHelp, /Run `vargus install <host> --help` for host-specific details and options\./)
+  assert.doesNotMatch(installHelp, /Sets `statusLine\.command`/)
 
   const removeHelp = (await runCli(['remove', '--help'])).stdout
   assert.match(removeHelp, /^  vargus remove antigravity$/m)
   assert.match(removeHelp, /^  vargus remove claude$/m)
   assert.match(removeHelp, /^  vargus remove codex \[--home CODEX_HOME\]$/m)
   assert.match(removeHelp, /^  vargus remove omo \[--dir EXTENSIONS_DIRECTORY\]$/m)
+  assert.match(removeHelp, /Run `vargus remove <host> --help` for host-specific details and options\./)
   assert.doesNotMatch(removeHelp, /vargus remove omo.*--config/)
-  assert.match(removeHelp, /Removing for Antigravity/)
-  assert.match(removeHelp, /Removing for Claude/)
-  assert.match(removeHelp, /Removing for Codex/)
-  assert.match(removeHelp, /Removing for OmO/)
+  assert.doesNotMatch(removeHelp, /Clears the VArgus/)
+
+  const perHostExpectations: Array<[string, string, RegExp]> = [
+    ['install', 'antigravity', /Sets `statusLine\.command` in ~\/\.gemini\/antigravity-cli\/settings\.json\./],
+    ['install', 'claude', /Sets up the VArgus plugin and inline status line at user scope\./],
+    ['install', 'codex', /--home CODEX_HOME[\s\S]*Adds the VArgus startup hooks to hooks\.json in CODEX_HOME/],
+    ['install', 'omo', /--dir EXTENSIONS_DIRECTORY[\s\S]*--config FILE[\s\S]*Adds the VArgus extension loader/],
+    ['remove', 'antigravity', /Clears the VArgus `statusLine` from ~\/\.gemini\/antigravity-cli\/settings\.json\./],
+    ['remove', 'claude', /Uninstalls the user-scope plugin/],
+    ['remove', 'codex', /--home CODEX_HOME[\s\S]*Removes the VArgus startup hooks and autostart state from CODEX_HOME/],
+    ['remove', 'omo', /--dir EXTENSIONS_DIRECTORY[\s\S]*Removes the VArgus extension loader/],
+  ]
+  for (const [action, host, pattern] of perHostExpectations) {
+    const { stdout } = await runCli([action, host, '--help'])
+    assert.match(stdout, new RegExp(`^  vargus ${action} ${host}`, 'm'))
+    assert.match(stdout, pattern)
+  }
+  const removeOmoHelp = (await runCli(['remove', 'omo', '--help'])).stdout
+  assert.doesNotMatch(removeOmoHelp, /--config/)
+
+  await assert.rejects(runCli(['install', 'unknown', '--help']))
+  await assert.rejects(runCli(['remove', 'toString', '--help']))
 })
 
 test('CLI dispatches install and remove for antigravity against the default home settings path', async () => {

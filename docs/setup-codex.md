@@ -54,9 +54,10 @@ With the [PATH launcher](../README.md#put-vargus-on-path) in place, run the inst
 vargus install codex
 ```
 
-The command prepares `vargus/autostart` and adds the VArgus **SessionStart** and
-**UserPromptSubmit** callbacks to `hooks.json`, preserving existing callbacks,
-including direct VArgus callbacks and their options. It uses `CODEX_HOME` or `~/.codex`
+The command prepares `vargus/autostart` and adds the VArgus **SessionStart**
+(`vargus hook session-start`) and **UserPromptSubmit** (`vargus hook prompt`)
+callbacks to `hooks.json`, preserving existing callbacks, including direct
+VArgus callbacks and their options. It uses `CODEX_HOME` or `~/.codex`
 (`%USERPROFILE%\.codex` on Windows). Pass `--home /absolute/path` to prepare
 another home, then launch Codex with that home. Record the checkout, launcher,
 and the `hooks.json` path printed by the installer.
@@ -71,8 +72,9 @@ In the intended TUI, the user completes these steps.
 3. Send a normal prompt to start the row, then [verify activation](#verify).
 
 `codexAutoStart` defaults to true. To use a custom tmux socket, restrict activation
-to a pane, or supply a VArgus options file, add `--socket PATH`, `--pane %ID`
-or `--config FILE` to both VArgus commands in `hooks.json`. After moving the checkout, repoint the
+to a pane, pick a theme, or supply a VArgus options file, add `--socket PATH`,
+`--pane %ID`, `--theme NAME`, or `--config FILE` to both VArgus commands in
+`hooks.json`. After moving the checkout, repoint the
 [PATH launcher](../README.md#put-vargus-on-path). If a callback names the old checkout
 directly, update its executable path in `hooks.json` and keep its arguments.
 Reopen Codex and review any changed callbacks.

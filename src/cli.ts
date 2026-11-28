@@ -6,53 +6,74 @@ const REMOVE_COMMANDS = `  vargus remove antigravity
   vargus remove claude
   vargus remove codex [--home CODEX_HOME]
   vargus remove omo [--dir EXTENSIONS_DIRECTORY]`
-const INSTALL_DETAILS = `Installing for Antigravity sets \`statusLine.command\` in ~/.gemini/antigravity-cli/settings.json.
-Installing for Claude sets up the VArgus plugin and inline status line at user scope.
-Installing for Codex adds the VArgus startup hooks.
-Installing for OmO adds the VArgus extension loader.`
-const REMOVE_DETAILS = `Removing for Antigravity clears the VArgus \`statusLine\` from ~/.gemini/antigravity-cli/settings.json.
-Removing for Claude uninstalls the user-scope plugin, removes its checkout marketplace when unused, and clears the VArgus \`statusLine\`.
-Removing for Codex removes the VArgus startup hooks and autostart state.
-Removing for OmO removes the VArgus extension loader.`
+const HOST_HELP = {
+  install: {
+    antigravity: `Usage:
+  vargus install antigravity
 
-const HELP = `Usage (all hosts):
+Sets \`statusLine.command\` in ~/.gemini/antigravity-cli/settings.json.
+See docs/setup-antigravity.md for manual setup and override flags.`,
+    claude: `Usage:
+  vargus install claude
+
+Sets up the VArgus plugin and inline status line at user scope.
+See docs/setup-claude.md for manual or project-scoped setup.`,
+    codex: `Usage:
+  vargus install codex [--home CODEX_HOME]
+
+Adds the VArgus startup hooks to hooks.json in CODEX_HOME (default: $CODEX_HOME or ~/.codex).
+See docs/setup-codex.md for hook trust, Thread ID setup, and manual activation.`,
+    omo: `Usage:
+  vargus install omo [--dir EXTENSIONS_DIRECTORY] [--config FILE]
+
+Adds the VArgus extension loader to OmO's extensions directory.
+--dir EXTENSIONS_DIRECTORY  Install into an explicit extensions directory.
+--config FILE               Overlay a JSON or JSONC options file on top of vargus.jsonc.
+See docs/setup-omo.md for details.`,
+  },
+  remove: {
+    antigravity: `Usage:
+  vargus remove antigravity
+
+Clears the VArgus \`statusLine\` from ~/.gemini/antigravity-cli/settings.json.
+See docs/setup-antigravity.md for details.`,
+    claude: `Usage:
+  vargus remove claude
+
+Uninstalls the user-scope plugin, removes its checkout marketplace when unused,
+and clears the VArgus \`statusLine\`.
+See docs/setup-claude.md for details.`,
+    codex: `Usage:
+  vargus remove codex [--home CODEX_HOME]
+
+Removes the VArgus startup hooks and autostart state from CODEX_HOME (default: $CODEX_HOME or ~/.codex).
+See docs/setup-codex.md for details.`,
+    omo: `Usage:
+  vargus remove omo [--dir EXTENSIONS_DIRECTORY]
+
+Removes the VArgus extension loader from OmO's extensions directory.
+--dir EXTENSIONS_DIRECTORY  Remove from an explicit extensions directory.
+See docs/setup-omo.md for details.`,
+  },
+} as const
+
+const HELP = `Usage:
   vargus install|remove antigravity|claude|codex|omo [OPTIONS]
   vargus themes [NAME]
 
-Antigravity CLI only (configured as statusLine.command):
-  vargus statusline [--theme NAME] [--config FILE]
+Run \`vargus install --help\`, \`vargus remove --help\`, or \`vargus themes --help\` for options.
 
-Codex CLI only (tmux/psmux helper):
-  vargus on|off|status|reload [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
-  vargus hook session-start|prompt [--config FILE] [--pane %ID] [--socket PATH]
-  vargus tmux-reset
-
-Run \`vargus install --help\` or \`vargus remove --help\` for host options and details.
-Run \`vargus themes [NAME]\` to preview bundled colour themes in your terminal.
-
-Shared configuration:
-  VArgus reads vargus.jsonc from its checkout. Edits to vargus.jsonc apply
-  automatically across all four hosts while running. --config FILE overlays a
-  JSON or JSONC options object.
+Configuration:
+  Copy vargus.sample.jsonc to vargus.jsonc in the VArgus checkout to customize
+  settings across all four hosts. Edits apply automatically while running.
 
 Runtime controls by host:
-  Codex CLI:       !vargus on|off|status|reload (tmux/psmux helper; reload upgrades code/explicit flags)
-  OmO Native:      /vargus on|off|status|config in OmO; /reload after code or --config updates
+  Codex CLI:       !vargus on|off|status|reload inside Codex (\`vargus on --help\` for options)
+  OmO Native:      /vargus on|off|status|config; /reload after code updates
   Claude Code:     /config for options, /plugin to enable/disable, /reload-plugins after code updates
-  Antigravity CLI: /statusline on|off|delete in agy (vargus statusline refreshes code and config each draw)
+  Antigravity CLI: /statusline on|off|delete (picks up code and config updates automatically)
 
-Codex tmux details:
-  The tmux row is opt-in for Codex. Standalone on/off hide/restore Codex's saved footer
-  through tmux /statusline commands. Off removes the row; inactive views restore
-  on their next empty-composer visit. The helper exits after restoration or TUI exit.
-  The tmux controls leave saved Codex settings alone.
-  Standalone drafts keep last-confirmed readings by default. Installed
-  Codex startup hooks are enabled by default; neither needs an options file.
-  After updating code or changing explicit flags, !vargus reload replaces the helper,
-  rereads checkout defaults, and retains explicit overrides and on/off mode.
-  Exit Codex to restore the original tmux bar. After a helper crash, tmux-reset
-  cleans up an abandoned row when no VArgus helper is still running.
-`
+See docs/setup-<host>.md for host setup, override files, and troubleshooting.`
 
 export async function main(argv: string[]): Promise<number> {
   const [command, host] = argv
@@ -62,7 +83,11 @@ export async function main(argv: string[]): Promise<number> {
   if (command === 'install' || command === 'remove') {
     const usage = `Usage:\n${command === 'install' ? INSTALL_COMMANDS : REMOVE_COMMANDS}`
     if (host === '--help' && argv.length === 2) {
-      console.log(`${usage}\n\n${command === 'install' ? INSTALL_DETAILS : REMOVE_DETAILS}`)
+      console.log(`${usage}\n\nRun \`vargus ${command} <host> --help\` for host-specific details and options.`)
+      return 0
+    }
+    if (argv.length === 3 && argv[2] === '--help' && host !== undefined && Object.hasOwn(HOST_HELP[command], host)) {
+      console.log(HOST_HELP[command][host as keyof typeof HOST_HELP[typeof command]])
       return 0
     }
     if (host === 'codex') return (await import('./cli/codex/setup.ts')).codexSetup([command, ...argv.slice(2)])

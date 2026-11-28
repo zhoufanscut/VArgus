@@ -99,12 +99,13 @@ const CODEX_CONTROL_HELP = `Usage (Codex CLI only):
   vargus on|off|status|reload [--pane %ID] [--socket PATH] [--theme NAME] [--config FILE]
 
 Controls VArgus's tmux/psmux helper for Codex CLI (run as !vargus ... inside Codex).
-Edits to vargus.jsonc apply automatically across all four hosts.
+Edits to vargus.jsonc apply automatically across all four hosts; --theme and
+--config FILE (JSON or JSONC) override vargus.jsonc for this helper.
 
 Other hosts use their native controls:
   OmO Native:      /vargus on|off|status|config, /reload after code updates
   Claude Code:     /config for options, /plugin to toggle, /reload-plugins after code updates
-  Antigravity CLI: /statusline on|off|delete (refreshes code and config automatically)`
+  Antigravity CLI: /statusline on|off|delete (picks up code and config updates automatically)`
 
 export async function standalone(args: string[], automatic = false): Promise<number> {
   const [action, ...flags] = args
