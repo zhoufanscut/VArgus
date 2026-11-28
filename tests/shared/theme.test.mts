@@ -2,8 +2,11 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import type { Rgb, TokenName } from '../../src/core/types.ts'
-import { AUTO_THEME, FALLBACK_THEME, lookupPaletteName, makeTheme, resolvePalette, resolveThemeOption } from '../../src/theme/index.ts'
-import { PALETTES, PALETTE_POLARITY } from '../../src/theme/palettes.ts'
+import {
+  AUTO_THEME, CUSTOM_THEME, FALLBACK_THEME, lookupPaletteName, makeTheme,
+  parseCustomTheme, resolvePalette, resolveThemeOption, sameCustomTheme,
+} from '../../src/theme/index.ts'
+import { PALETTES, PALETTE_POLARITY, TOKEN_NAMES } from '../../src/theme/palettes.ts'
 
 // Themes (DESIGN, "Colours", "Rules carried over from VantageHUD", Themes).
 
@@ -281,5 +284,61 @@ describe('theme', () => {
     assert.equal(t.paint('label', 'ctx:'), 'ctx:')
     assert.equal(t.paint([1, 2, 3], 'x'), 'x')
     assert.equal(t.bold('x'), 'x')
+  })
+
+  test('parseCustomTheme validates tokens and polarity, ignores bad entries, and guards against prototype keys', () => {
+    assert.equal(parseCustomTheme(undefined), undefined)
+    assert.equal(parseCustomTheme(null), undefined)
+    assert.equal(parseCustomTheme([]), undefined)
+    assert.equal(parseCustomTheme('red'), undefined)
+    assert.equal(parseCustomTheme({}), undefined)
+    assert.equal(parseCustomTheme({ polarity: 'dark' }), undefined)
+    assert.equal(parseCustomTheme({ text: '#123', label: 'blue', sep: '#GGGGGG' }), undefined)
+
+    const proto = Object.create({ text: '#112233', polarity: 'light' })
+    assert.equal(parseCustomTheme(proto), undefined)
+
+    const parsed = parseCustomTheme({
+      polarity: ' LIGHT ',
+      text: ' #AABBCC ',
+      sep: '#12345',
+      alert: 42,
+      unknown: '#ffffff',
+    })
+    assert.deepEqual(parsed, { polarity: 'light', text: '#aabbcc' })
+    assert.equal(parseCustomTheme({ polarity: 'neon', label: '#112233' })?.polarity, undefined)
+    assert.equal(parseCustomTheme({ polarity: 'neon', label: '#112233' })?.label, '#112233')
+
+    assert.equal(sameCustomTheme(undefined, undefined), true)
+    assert.equal(sameCustomTheme({ text: '#112233' }, undefined), false)
+    assert.equal(sameCustomTheme({ text: '#112233' }, { text: '#112233' }), true)
+    assert.equal(sameCustomTheme({ polarity: 'dark', text: '#112233' }, { text: '#112233' }), false)
+  })
+
+  test('customTheme supports partial and full overlays, polarity inheritance/override, and NO_COLOR', () => {
+    const partial = resolvePalette('auto', 'agy-tokyonight', { sep: '#123456' })
+    assert.equal(partial.name, CUSTOM_THEME)
+    assert.equal(partial.polarity, 'dark')
+    assert.deepEqual(partial.rgb.sep, [0x12, 0x34, 0x56])
+    assert.deepEqual(partial.rgb.text, resolvePalette('agy-tokyonight').rgb.text)
+
+    const lightBase = resolvePalette('daylight', undefined, { label: '#112233' })
+    assert.equal(lightBase.name, CUSTOM_THEME)
+    assert.equal(lightBase.polarity, 'light')
+    assert.deepEqual(lightBase.rgb.label, [0x11, 0x22, 0x33])
+    assert.deepEqual(lightBase.rgb.text, resolvePalette('daylight').rgb.text)
+
+    const polarityOverride = resolvePalette('daylight', undefined, { polarity: 'dark', text: '#ffffff' })
+    assert.equal(polarityOverride.polarity, 'dark')
+
+    const fullInput = Object.fromEntries(TOKEN_NAMES.map((tok, i) => [tok, `#10203${i}`])) as Record<TokenName, string>
+    const full = makeTheme('graphite', false, undefined, { polarity: 'light', ...fullInput })
+    assert.equal(full.name, CUSTOM_THEME)
+    assert.equal(full.paint('text', 'a'), '\x1b[38;2;16;32;48ma\x1b[0m')
+    assert.equal(full.paint('track', 'b'), '\x1b[38;2;16;32;56mb\x1b[0m')
+
+    const plain = makeTheme('graphite', true, undefined, { text: '#112233' })
+    assert.equal(plain.name, CUSTOM_THEME)
+    assert.equal(plain.paint('text', 'a'), 'a')
   })
 })

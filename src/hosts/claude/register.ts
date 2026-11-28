@@ -10,9 +10,9 @@ import { initialVcs, startVcs, stopVcs, toolCalledVcs } from './collect/vcs'
 import type { Theme, Values } from '../../core/types'
 import { resolveLabels } from '../../i18n'
 import { resolveOptions, sameOptions, type Options } from '../../options'
-import { joinParts, renderParts } from '../../render'
+import { configErrorLine, joinParts, renderParts } from '../../render'
 import { claudeDisplay } from './display'
-import { initSharedOptions, pollSharedOptions, registerConfig } from './config'
+import { initSharedOptions, pollSharedOptions, registerConfig, sharedConfigError } from './config'
 import { makeTheme } from '../../theme'
 import { DRIVE_PATH } from './paths'
 import { createWriter, endSession, homeDir, pruneOld, writeLine, type Writer } from './write'
@@ -46,6 +46,12 @@ async function refresh($: EngineInterface, given: PluginOptions): Promise<void> 
       configure($, sessionStart, polled, noColor, options)
     }
   }
+  const err = sharedConfigError()
+  if (err) {
+    const errLine = configErrorLine(err, { t: theme, l: labels, columns: values.core.columns })
+    await writeLine($, writer, errLine, values.core.columns, { t: theme, l: labels, isWsl: values.core.isWsl }, errLine ? [errLine] : [])
+    return
+  }
   values.core.cwd = await $.session.cwd()
   // re-read each tick: a /model switch raises no event but the classic
   // PostModelSwitch, which doesn't run under a managed install (a failed read
@@ -76,7 +82,7 @@ async function isWsl(
 
 function configure($: EngineInterface, e: SessionStartInput, next: Options, noColor: boolean, previous?: Options): void {
   options = next
-  theme = makeTheme(next.theme, noColor, CLAUDE_THEME)
+  theme = makeTheme(next.theme, noColor, CLAUDE_THEME, next.customTheme)
   const hasVcs = next.repo || next.branch || next.status
   const hadVcs = previous?.repo || previous?.branch || previous?.status
   if (hasVcs && !hadVcs) startVcs($, values.vcs, e)

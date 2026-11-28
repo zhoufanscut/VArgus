@@ -6,7 +6,7 @@ import type { Fragment, FragmentInput, Values } from '../../src/core/types.ts'
 import { resolveLabels } from '../../src/i18n/index.ts'
 import { en } from '../../src/i18n/en.ts'
 import { DEFAULTS, resolveOptions, type Options } from '../../src/options.ts'
-import { joinParts, ORDER, render, renderParts } from '../../src/render/index.ts'
+import { configErrorLine, joinParts, ORDER, render, renderParts } from '../../src/render/index.ts'
 import { limits } from '../../src/render/fragments/limits.ts'
 import { initialSession } from '../../src/core/session.ts'
 import { displaySession, shortModelName } from '../../src/render/session.ts'
@@ -244,4 +244,22 @@ test('staleParts fits whole fragments under both coloured and NO_COLOR themes wi
     assert.equal(plainWsl, expectedPlain.replace('⌛stale', '!:stale'), `${name} NO_COLOR WSL stale`)
     assert.equal(stripAnsi(styledWsl), plainWsl, `${name} styled/NO_COLOR WSL stale parity`)
   }
+})
+
+test('configErrorLine unwraps cause, cleans control characters, styles in alert, respects NO_COLOR, and fits columns', () => {
+  const styled = makeTheme('graphite', false)
+  const plain = makeTheme('graphite', true)
+  const cause = new SyntaxError('Expected\nproperty\x1b[31m\tname')
+  const wrapped = new Error('Expected a VArgus JSON options object in /abs/path/vargus.jsonc. ' + cause.message, { cause })
+
+  const fullPlain = configErrorLine(wrapped, { t: plain })
+  assert.equal(fullPlain, '[CONFIG ERR] vargus.jsonc: Expected property?[31m name')
+  assert.equal(configErrorLine(wrapped, { t: styled }), styled.paint('alert', fullPlain))
+
+  assert.equal(configErrorLine(wrapped, { t: plain, columns: 0 }), '')
+  assert.equal(configErrorLine(wrapped, { t: plain, columns: 8 }), '[CONF...')
+  assert.equal(configErrorLine(wrapped, { t: plain, columns: 12 }), '[CONFIG ERR]')
+  assert.equal(configErrorLine(wrapped, { t: plain, columns: 15 }), '[CONFIG ERR]')
+  assert.equal(configErrorLine(wrapped, { t: plain, columns: 25 }), '[CONFIG ERR] vargus.js...')
+  assert.equal(configErrorLine(wrapped, { t: plain, columns: 3 }), '[CO')
 })

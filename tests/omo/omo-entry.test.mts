@@ -1650,12 +1650,11 @@ test('OmO live-reloads checkout vargus.jsonc edits and deletions in place, prese
     assert.equal(live.listeners, 0)
     assert.match(row(), /150t\/s/)
 
-    // Broken JSONC mid-edit retains the last valid options.
+    // Broken JSONC mid-edit replaces the row with an alert-styled error tip until fixed or deleted.
     await writeFile(sharedConfig, '{broken')
     t.mock.timers.tick(1000)
-    assert.ok(row().includes(graphite.paint('sep', ' | ')))
-    assert.doesNotMatch(row(), /sol/)
-    assert.match(row(), /150t\/s/)
+    assert.ok(row().includes(graphite.paint('alert', '[CONFIG ERR] vargus.jsonc:').replace(/\x1b\[0m$/, '')))
+    assert.doesNotMatch(row(), /sol|150t\/s/)
 
     // Deleting vargus.jsonc reverts to defaults on next 1s tick and preserves 150t/s.
     await rm(sharedConfig)
@@ -1686,6 +1685,94 @@ test('OmO live-reloads checkout vargus.jsonc edits and deletions in place, prese
     explicitOnly.event('session_start')
     t.mock.timers.tick(1000)
     assert.match(explicitOnly.row?.render(200).join('') ?? '', /sol/)
+  } finally {
+    for (const s of sessions) s.event('session_shutdown')
+    if (savedNoColor === undefined) delete process.env.NO_COLOR
+    else process.env.NO_COLOR = savedNoColor
+    if (savedAgentDir === undefined) delete process.env.OMO_CODING_AGENT_DIR
+    else process.env.OMO_CODING_AGENT_DIR = savedAgentDir
+    if (savedHome === undefined) delete process.env.HOME
+    else process.env.HOME = savedHome
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('OmO live-reloads customTheme and lets --config and /vargus config theme overrides win or clear it', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-omo-custom-theme-'))
+  const savedNoColor = process.env.NO_COLOR
+  const savedAgentDir = process.env.OMO_CODING_AGENT_DIR
+  const savedHome = process.env.HOME
+  const sessions: Array<ReturnType<typeof host>> = []
+  try {
+    delete process.env.NO_COLOR
+    process.env.HOME = dir
+    process.env.OMO_CODING_AGENT_DIR = join(dir, 'agent')
+    const checkout = await fixtureCheckout(dir)
+    const sharedConfig = join(checkout, 'vargus.jsonc')
+    const explicitConfig = join(dir, 'explicit.jsonc')
+    await writeFile(sharedConfig, JSON.stringify({ customTheme: { sep: '#112233' } }))
+    await writeFile(explicitConfig, JSON.stringify({ theme: 'daylight' }))
+
+    t.mock.timers.enable({ apis: ['setInterval'] })
+    const mod = await import(pathToFileURL(join(checkout, 'src/hosts/omo/register.ts')).href + '?custom')
+    const omo = makeTheme('omo-violet', false)
+    const daylight = makeTheme('daylight', false)
+    const custom1 = makeTheme('omo-violet', false, undefined, { sep: '#112233' })
+    const custom2 = makeTheme('omo-violet', false, undefined, { sep: '#445566' })
+
+    const live = host('tui', dir)
+    sessions.push(live)
+    live.load(mod.default)
+    live.event('session_start')
+    const row = () => live.row?.render(200).join('') ?? ''
+    assert.ok(row().includes(custom1.paint('sep', ' | ')))
+
+    await writeFile(sharedConfig, JSON.stringify({ customTheme: { sep: '#445566' } }))
+    t.mock.timers.tick(1000)
+    assert.ok(row().includes(custom2.paint('sep', ' | ')))
+
+    // Session `/vargus config {"theme": ...}` overrides checkout customTheme.
+    await live.command('config {"theme":"daylight"}')
+    assert.ok(row().includes(daylight.paint('sep', ' | ')))
+    assert.equal(row().includes(custom2.paint('sep', ' | ')), false)
+
+    // Session `/vargus config {"customTheme": ...}` overlays and `null` clears back to default.
+    await live.command('config {"customTheme":{"sep":"#778899"}}')
+    assert.ok(row().includes(makeTheme('daylight', false, undefined, { sep: '#778899' }).paint('sep', ' | ')))
+    await live.command('config {"customTheme":null}')
+    assert.ok(row().includes(daylight.paint('sep', ' | ')))
+
+    // Removing customTheme from checkout reverts when no session override is set.
+    const clean = host('tui', dir)
+    sessions.push(clean)
+    clean.load(mod.default)
+    clean.event('session_start')
+    assert.ok((clean.row?.render(200).join('') ?? '').includes(custom2.paint('sep', ' | ')))
+    await rm(sharedConfig)
+    t.mock.timers.tick(1000)
+    assert.ok((clean.row?.render(200).join('') ?? '').includes(omo.paint('sep', ' | ')))
+
+    // Explicit `--config` setting `"theme"` overrides checkout `customTheme`.
+    await writeFile(sharedConfig, JSON.stringify({ customTheme: { sep: '#112233' } }))
+    const layered = host('tui', dir)
+    sessions.push(layered)
+    layered.load(mod.configuredVargus(explicitConfig))
+    layered.event('session_start')
+    const layeredRow = layered.row?.render(200).join('') ?? ''
+    assert.ok(layeredRow.includes(daylight.paint('sep', ' | ')))
+    assert.equal(layeredRow.includes(custom1.paint('sep', ' | ')), false)
+
+    // Cold-start broken vargus.jsonc mounts with [CONFIG ERR] and recovers when fixed.
+    await writeFile(sharedConfig, '{broken')
+    const brokenStart = host('tui', dir)
+    sessions.push(brokenStart)
+    brokenStart.load(mod.default)
+    brokenStart.event('session_start')
+    const brokenRow = () => brokenStart.row?.render(200).join('') ?? ''
+    assert.ok(brokenRow().includes(omo.paint('alert', '[CONFIG ERR] vargus.jsonc:').replace(/\x1b\[0m$/, '')))
+    await writeFile(sharedConfig, JSON.stringify({ theme: 'daylight' }))
+    t.mock.timers.tick(1000)
+    assert.ok(brokenRow().includes(daylight.paint('sep', ' | ')))
   } finally {
     for (const s of sessions) s.event('session_shutdown')
     if (savedNoColor === undefined) delete process.env.NO_COLOR

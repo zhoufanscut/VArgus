@@ -8,10 +8,10 @@ import { collectAntigravitySubagentCounts } from '../hosts/antigravity/subagents
 import { collectDeclaredSkillRoots, readTranscriptState, resolveConversationId, resolveTranscriptPath } from '../hosts/antigravity/transcript.ts'
 import { readCachedVcs } from '../hosts/antigravity/vcs.ts'
 import { resolveLabels } from '../i18n/index.ts'
-import { readCheckoutOptions, readOptionsFile } from '../node/options.ts'
+import { readCheckoutOptionsSafe, readOptionsFile } from '../node/options.ts'
 import { detectWsl } from '../node/wsl.ts'
-import { resolveOptions } from '../options.ts'
-import { joinParts, renderParts } from '../render/index.ts'
+import { mergeOptionLayers, resolveOptions } from '../options.ts'
+import { configErrorLine, joinParts, renderParts } from '../render/index.ts'
 import { makeTheme } from '../theme/index.ts'
 
 export const ANTIGRAVITY_THEME = 'agy-tokyonight'
@@ -32,6 +32,7 @@ function sameParts(a: readonly string[], b: readonly string[]): boolean {
 
 export type StatuslineRuntime = {
   givenOptions?: Record<string, unknown>
+  configError?: unknown
   home?: string
   appDataDir?: string
   isWsl?: boolean
@@ -46,6 +47,15 @@ export async function renderAntigravityStatusLine(
   payload: AntigravityPayload,
   runtime: StatuslineRuntime = {},
 ): Promise<string> {
+  if (runtime.configError !== undefined) {
+    const noColor = runtime.noColor ?? Boolean(process.env.NO_COLOR)
+    const options = resolveOptions(runtime.givenOptions ?? {})
+    const theme = makeTheme(options.theme, noColor, ANTIGRAVITY_THEME, options.customTheme)
+    const width = payload.terminal_width
+    const columns = width && width > 0 ? Math.max(0, width - STATUSLINE_PADDING.length) : undefined
+    const errLine = configErrorLine(runtime.configError, { t: theme, l: resolveLabels('en'), columns })
+    return errLine ? `${STATUSLINE_PADDING}${errLine}` : ''
+  }
   const id = resolveConversationId(payload)
   if (!id) return (await collectLine(payload, runtime)).line
   const dir = runtime.cacheDir ?? defaultCacheDir()
@@ -63,7 +73,7 @@ export async function renderAntigravityStatusLine(
   } catch (error) {
     const width = payload.terminal_width
     const columns = width && width > 0 ? Math.max(0, width - STATUSLINE_PADDING.length) : undefined
-    const style = { t: makeTheme(options.theme, noColor, ANTIGRAVITY_THEME), l: resolveLabels('en'), isWsl }
+    const style = { t: makeTheme(options.theme, noColor, ANTIGRAVITY_THEME, options.customTheme), l: resolveLabels('en'), isWsl }
     if (isCachedRow(previous)) {
       const stale = staleParts(previous.parts, columns, style)
       if (stale) return STATUSLINE_PADDING + stale
@@ -88,7 +98,7 @@ async function collectLine(payload: AntigravityPayload, runtime: StatuslineRunti
   const noColor = runtime.noColor ?? Boolean(process.env.NO_COLOR)
   const cacheDir = runtime.cacheDir ?? defaultCacheDir()
   const options = resolveOptions(runtime.givenOptions ?? {})
-  const theme = makeTheme(options.theme, noColor, ANTIGRAVITY_THEME)
+  const theme = makeTheme(options.theme, noColor, ANTIGRAVITY_THEME, options.customTheme)
   const labels = resolveLabels('en')
   const values = collectAntigravityPayload(payload, {
     labels,
@@ -171,13 +181,14 @@ async function collectLine(payload: AntigravityPayload, runtime: StatuslineRunti
 }
 
 export async function statusline(args: string[]): Promise<number> {
-  let given = readCheckoutOptions()
+  const checkout = readCheckoutOptionsSafe()
+  let given = checkout.ok ? checkout.options : {}
   for (let i = 0; i < args.length; i++) {
     const flag = args[i]!
     const value = args[++i]
     if (value === undefined) throw new Error(`Missing value for ${flag}.`)
-    if (flag === '--theme') given.theme = value
-    else if (flag === '--config') given = { ...given, ...readOptionsFile(value) }
+    if (flag === '--theme') given = mergeOptionLayers(given, { theme: value })
+    else if (flag === '--config') given = mergeOptionLayers(given, readOptionsFile(value))
     else throw new Error(`Unknown VArgus option: ${flag}.`)
   }
 
@@ -202,7 +213,12 @@ export async function statusline(args: string[]): Promise<number> {
 
   const now = Date.now()
   const observedAt = now - Math.round(process.uptime() * 1000)
-  const line = await renderAntigravityStatusLine(payload, { givenOptions: given, now, observedAt })
+  const line = await renderAntigravityStatusLine(payload, {
+    givenOptions: given,
+    configError: checkout.ok ? undefined : checkout.error,
+    now,
+    observedAt,
+  })
   if (line) process.stdout.write(`${line}\n`)
   return 0
 }

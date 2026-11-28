@@ -2,6 +2,10 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { parseOptions } from '../options.ts'
 
+export type ReadOptionsResult =
+  | { ok: true; options: Record<string, unknown> }
+  | { ok: false; error: Error }
+
 export type PollOptionsResult =
   | { changed: false }
   | { changed: true; ok: true; options: Record<string, unknown> }
@@ -31,6 +35,11 @@ export function readCheckoutOptions(): Record<string, unknown> {
   return raw === undefined ? {} : parseRawOptions(raw, checkoutFile)
 }
 
+export function readCheckoutOptionsSafe(): ReadOptionsResult {
+  try { return { ok: true, options: readCheckoutOptions() } }
+  catch (error) { return { ok: false, error: error instanceof Error ? error : new Error(String(error)) } }
+}
+
 /** Poll a JSON/JSONC options file by raw content so edits, deletions and symlinks take effect immediately. */
 export class OptionsPoller {
   private readonly path: string
@@ -46,6 +55,17 @@ export class OptionsPoller {
     this.initialized = true
     this.lastRaw = raw
     return raw === undefined ? {} : parseRawOptions(raw, this.path)
+  }
+
+  readInitialSafe(): ReadOptionsResult {
+    let raw: string | undefined
+    try { raw = readRawOptional(this.path) }
+    catch (error) { return { ok: false, error: error instanceof Error ? error : new Error(String(error)) } }
+    this.initialized = true
+    this.lastRaw = raw
+    if (raw === undefined) return { ok: true, options: {} }
+    try { return { ok: true, options: parseRawOptions(raw, this.path) } }
+    catch (error) { return { ok: false, error: error instanceof Error ? error : new Error(String(error)) } }
   }
 
   poll(): PollOptionsResult {

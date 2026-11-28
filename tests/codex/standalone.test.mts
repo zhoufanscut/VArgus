@@ -199,10 +199,11 @@ trust_level = "trusted"
       await wait(async () => String(await callCounts()), /^false$/)
       assert.equal((await runtimeRecord()).pid, beforeLivePid)
       await writeFile(sharedFile, '{broken')
-      await delay(1200)
+      await wait(row, /\[CONFIG ERR\] vargus\.jsonc:/)
       assert.equal(await callCounts(), false)
       assert.equal((await runtimeRecord()).pid, beforeLivePid)
       await rm(sharedFile)
+      await wait(row, /session:/)
       await wait(async () => String(await callCounts()), /^true$/)
       assert.equal((await runtimeRecord()).pid, beforeLivePid)
     }

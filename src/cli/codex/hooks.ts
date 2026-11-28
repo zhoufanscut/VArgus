@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findRollout } from '../../hosts/codex/rollout.ts'
 import { resolveCodexOptions } from '../../hosts/codex/options.ts'
-import { readCheckoutOptions, readOptionsFile } from '../../node/options.ts'
+import { readCheckoutOptionsSafe, readOptionsFile } from '../../node/options.ts'
 import { hookSession } from '../../hosts/codex/hooks.ts'
 import { setTimeout as delay } from 'node:timers/promises'
 import { savedFooter, footerIdentity } from '../../hosts/codex/footer.ts'
@@ -18,7 +18,8 @@ export async function hook(args: string[]): Promise<number> {
   const event = args[0] === 'session-start' ? 'SessionStart' : args[0] === 'prompt' ? 'UserPromptSubmit' : undefined
   if (!event) throw new Error('Use vargus hook session-start|prompt [--config FILE].')
   const flags = args.slice(1)
-  let given = readCheckoutOptions(), socket: string | undefined, pane: string | undefined
+  const checkout = readCheckoutOptionsSafe()
+  let given = checkout.ok ? checkout.options : {}, socket: string | undefined, pane: string | undefined
   for (let i = 0; i < flags.length; i += 2) {
     const flag = flags[i], value = flags[i + 1]
     if (value === undefined) throw new Error(`Missing value for ${flag}.`)

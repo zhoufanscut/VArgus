@@ -20,11 +20,11 @@ import { initialVcs } from '../../core/vcs.ts'
 import { OptionsPoller, readOptionsFile } from '../../node/options.ts'
 import { detectWsl } from '../../node/wsl.ts'
 import { mountOmo, type OmoUi } from '../../outputs/omo.ts'
-import { parseOptions, resolveOptions, sameOptions } from '../../options.ts'
+import { mergeOptionLayers, parseOptions, resolveOptions, sameOptions } from '../../options.ts'
 import { resolveLabels } from '../../i18n/index.ts'
-import { makeTheme } from '../../theme/index.ts'
+import { makeTheme, sameCustomTheme } from '../../theme/index.ts'
 import { REFRESH_GRACE_MS, staleParts } from '../../render/freshness.ts'
-import { joinParts, renderParts } from '../../render/index.ts'
+import { configErrorLine, joinParts, renderParts } from '../../render/index.ts'
 
 export const OMO_THEME = 'omo-violet'
 
@@ -73,19 +73,29 @@ export type OmoApi = {
 type OptionsSource = {
   read(): Record<string, unknown>
   sync(): void
+  error(): Error | undefined
 }
 
 export function configuredVargus(file: string): (pi: OmoApi) => void {
   return pi => {
     const poller = new OptionsPoller()
-    let checkout = poller.readInitial()
+    const initial = poller.readInitialSafe()
+    let checkout = initial.ok ? initial.options : {}
+    let configError = initial.ok ? undefined : initial.error
     const explicit = readOptionsFile(file)
     mountExtension(pi, {
-      read: () => ({ ...checkout, ...explicit }),
+      read: () => mergeOptionLayers(checkout, explicit),
       sync: () => {
         const result = poller.poll()
-        if (result.changed && result.ok) checkout = result.options
+        if (!result.changed) return
+        if (result.ok) {
+          checkout = result.options
+          configError = undefined
+        } else {
+          configError = result.error
+        }
       },
+      error: () => configError,
     })
   }
 }
@@ -131,17 +141,26 @@ function snapshotSpawns(spawns: OmoSpawnReceiptMap): OmoSpawnReceiptMap {
 
 export default function vargus(pi: OmoApi, fileOptions?: Record<string, unknown>): void {
   if (fileOptions !== undefined) {
-    mountExtension(pi, { read: () => fileOptions, sync: () => {} })
+    mountExtension(pi, { read: () => fileOptions, sync: () => {}, error: () => undefined })
     return
   }
   const poller = new OptionsPoller()
-  let checkout = poller.readInitial()
+  const initial = poller.readInitialSafe()
+  let checkout = initial.ok ? initial.options : {}
+  let configError = initial.ok ? undefined : initial.error
   mountExtension(pi, {
     read: () => checkout,
     sync: () => {
       const result = poller.poll()
-      if (result.changed && result.ok) checkout = result.options
+      if (!result.changed) return
+      if (result.ok) {
+        checkout = result.options
+        configError = undefined
+      } else {
+        configError = result.error
+      }
     },
+    error: () => configError,
   })
 }
 
@@ -171,13 +190,13 @@ function mountExtension(pi: OmoApi, source: OptionsSource): void {
     if (!settings.enabled) return
     source.sync()
     const sessionOptions = settings.options
-    let options = resolveOptions({ ...source.read(), ...sessionOptions })
+    let options = resolveOptions(mergeOptionLayers(source.read(), sessionOptions))
     let vcs: OmoVcs | undefined = options.repo || options.branch || options.status ? new OmoVcs() : undefined
     let subagents = options.includeSubagents && (options.tokens || options.callCounts)
       ? new OmoSubagents() : undefined
     let kimi: OmoKimi | undefined = options.rateLimits
       ? new OmoKimi(() => instance.ctx.modelRegistry.getProviderAuth('kimi-coding')) : undefined
-    let theme = makeTheme(options.theme, Boolean(process.env.NO_COLOR), OMO_THEME)
+    let theme = makeTheme(options.theme, Boolean(process.env.NO_COLOR), OMO_THEME, options.customTheme)
     const labels = resolveLabels('en')
     const isWsl = detectWsl()
     let disposed = false
@@ -243,10 +262,10 @@ function mountExtension(pi: OmoApi, source: OptionsSource): void {
       syncOptions() {
         if (disposed) return
         source.sync()
-        const next = resolveOptions({ ...source.read(), ...sessionOptions })
+        const next = resolveOptions(mergeOptionLayers(source.read(), sessionOptions))
         if (sameOptions(options, next)) return
-        if (next.theme !== options.theme) {
-          theme = makeTheme(next.theme, Boolean(process.env.NO_COLOR), OMO_THEME)
+        if (next.theme !== options.theme || !sameCustomTheme(next.customTheme, options.customTheme)) {
+          theme = makeTheme(next.theme, Boolean(process.env.NO_COLOR), OMO_THEME, next.customTheme)
         }
         const hadVcs = options.repo || options.branch || options.status
         const hasVcs = next.repo || next.branch || next.status
@@ -329,6 +348,8 @@ function mountExtension(pi: OmoApi, source: OptionsSource): void {
       },
     }
     const output = mountOmo(ctx.ui, width => {
+      const err = source.error()
+      if (err) return configErrorLine(err, { t: theme, l: labels, columns: width })
       const stale = Date.now() - checkedAt >= REFRESH_GRACE_MS
       const now = stale ? checkedAt : Date.now()
       const limits = options.rateLimits && kimi && instance.ctx.model?.provider === 'kimi-coding'
@@ -459,11 +480,14 @@ function mountExtension(pi: OmoApi, source: OptionsSource): void {
           ctx.ui.notify('VArgus config must be a JSON object.', 'error')
           return
         }
-        const overrides = { ...previous.options, ...given }
+        const overrides = mergeOptionLayers(previous.options, given)
         // Persist the session's keys so other options still follow the file on reload.
-        const options = Object.fromEntries(
+        const options: Record<string, unknown> = Object.fromEntries(
           Object.entries(resolveOptions(overrides)).filter(([key]) => Object.hasOwn(overrides, key)),
         )
+        if (Object.hasOwn(overrides, 'customTheme') && !Object.hasOwn(options, 'customTheme')) {
+          options.customTheme = null
+        }
         pi.appendEntry(OMO_CONFIG_ENTRY, { enabled: previous.enabled, options })
         start(ctx)
         return

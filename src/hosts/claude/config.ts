@@ -1,6 +1,6 @@
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
-import { resolveThemeOption } from '../../theme'
-import { DEFAULTS, editOption, parseOptions, resolveOptions, validOption, type Options } from '../../options'
+import { parseCustomTheme, resolveThemeOption, type CustomTheme } from '../../theme'
+import { DEFAULTS, editOption, parseOptions, resolveOptions, validOption, type Options, type PickerOptionKey } from '../../options'
 import { DRIVE_PATH, shellPath } from './paths'
 import { pluginDataDir } from './write'
 
@@ -9,39 +9,47 @@ let hasObserved = false
 let observedRaw: string | undefined
 let savingDepth = 0
 let polling = false
+let configError: Error | undefined
+
+export function sharedConfigError(): Error | undefined {
+  return configError
+}
 
 function filePath($: EngineInterface): string {
   return `${$.plugin.root}/vargus.jsonc`
 }
 
-function optionKey($: EngineInterface, row: { key: string }): keyof Options | undefined {
+function optionKey($: EngineInterface, row: { key: string }): PickerOptionKey | undefined {
   const prefix = $.plugin.name + '.'
   if (!row.key.startsWith(prefix)) return
   const key = row.key.slice(prefix.length)
-  if (Object.hasOwn(DEFAULTS, key)) return key as keyof Options
+  if (Object.hasOwn(DEFAULTS, key)) return key as PickerOptionKey
 }
 
-async function sharedValues($: EngineInterface, preRead?: { raw: string | undefined }): Promise<Record<string, PickerValue>> {
+type SharedValues = { picker: Record<string, PickerValue>; customTheme?: CustomTheme }
+
+async function sharedValues($: EngineInterface, preRead?: { raw: string | undefined }): Promise<SharedValues> {
   let text: string
   if (preRead) {
-    if (preRead.raw === undefined) return {}
+    if (preRead.raw === undefined) return { picker: {} }
     text = preRead.raw
   } else {
     const path = filePath($)
-    if (!await $.fs.exists(path)) return {}
+    if (!await $.fs.exists(path)) return { picker: {} }
     text = await $.fs.read(path)
   }
   const file = parseOptions(text)
-  const values: Record<string, PickerValue> = {}
+  const picker: Record<string, PickerValue> = {}
   for (const [key, value] of Object.entries(file)) {
     if (!Object.hasOwn(DEFAULTS, key)) continue
-    if (!validOption(key as keyof Options, value)) continue
-    values[key] = key === 'theme' ? resolveThemeOption(String(value)) : value
+    if (!validOption(key as PickerOptionKey, value)) continue
+    picker[key] = key === 'theme' ? resolveThemeOption(String(value)) : value
   }
-  return values
+  const customTheme = parseCustomTheme(file.customTheme)
+  return customTheme ? { picker, customTheme } : { picker }
 }
 
-type PickerValue = Options[keyof Options]
+type PickerValue = (typeof DEFAULTS)[PickerOptionKey]
 type MirroredChoice = { original: PickerValue; applied: PickerValue; rewrittenFrom?: PickerValue }
 type Mirrors = Record<string, MirroredChoice>
 
@@ -82,18 +90,23 @@ export async function claudeOptions(
   preRead?: { raw: string | undefined },
 ): Promise<Options> {
   const pending = (await $.state.get(saving)).value
-  const shared = await sharedValues($, preRead)
+  const { picker: shared, customTheme } = await sharedValues($, preRead)
   if (pending) delete shared[pending]
   const file = await mirrorFile($)
   const mirrors: Mirrors = file ? JSON.parse(await readOptional($, file) ?? '{}') : {}
   const prefix = $.plugin.root + ':'
-  const effective = { ...given, ...shared }
-  if (!Object.keys(shared).length && !Object.keys(mirrors).some(id => id.startsWith(prefix))) return resolveOptions(effective)
+  const effective: Record<string, unknown> = { ...given, ...shared }
+  if (customTheme) effective.customTheme = customTheme
+  if (!Object.keys(shared).length && !customTheme && !Object.keys(mirrors).some(id => id.startsWith(prefix))) return resolveOptions(effective)
 
   for (const row of await $.config.list()) {
     const key = optionKey($, row)
     if (!key || key === pending || !validOption(key, row.value)) continue
-    if (row.isLocked) { effective[key] = row.value; continue }
+    if (row.isLocked) {
+      effective[key] = row.value
+      if (key === 'theme') delete effective.customTheme
+      continue
+    }
     const id = prefix + key
     const mirror = mirrors[id]
     const requested = shared[key]
@@ -154,7 +167,7 @@ async function runEdit($: EngineInterface, edit: StagedEdit, operation: 'prepare
   return true
 }
 
-async function prepareEdit($: EngineInterface, key: keyof Options, value: PickerValue): Promise<StagedEdit | undefined> {
+async function prepareEdit($: EngineInterface, key: PickerOptionKey, value: PickerValue): Promise<StagedEdit | undefined> {
   const file = filePath($)
   const exists = await $.fs.exists(file)
   const path = exists ? (await $.fs.stat(file, { resolve: true })).realPath : file
@@ -168,10 +181,16 @@ async function prepareEdit($: EngineInterface, key: keyof Options, value: Picker
 }
 
 export async function initSharedOptions($: EngineInterface, given: PluginOptions): Promise<Options> {
+  configError = undefined
   const raw = await readOptional($, filePath($))
   hasObserved = true
   observedRaw = raw
-  return claudeOptions($, given, false, { raw })
+  try {
+    return await claudeOptions($, given, false, { raw })
+  } catch (error) {
+    configError = error instanceof Error ? error : new Error(String(error))
+    throw error
+  }
 }
 
 export async function pollSharedOptions($: EngineInterface, given: PluginOptions): Promise<Options | undefined> {
@@ -188,11 +207,13 @@ export async function pollSharedOptions($: EngineInterface, given: PluginOptions
       if (savingDepth > 0) return undefined
       hasObserved = true
       observedRaw = raw
+      configError = undefined
       return result
     } catch (error) {
       if (savingDepth === 0) {
         hasObserved = true
         observedRaw = raw
+        configError = error instanceof Error ? error : new Error(String(error))
         $.ui.log('Could not load vargus.jsonc. ' + String(error))
       }
       return undefined
@@ -209,8 +230,14 @@ async function refreshOptions($: EngineInterface, given: PluginOptions, syncPick
       hasObserved = true
       observedRaw = raw
     }
-    apply(await claudeOptions($, given, syncPicker, { raw }))
-  } catch (error) { $.ui.log('Could not load vargus.jsonc. ' + String(error)) }
+    const next = await claudeOptions($, given, syncPicker, { raw })
+    if (savingDepth === 0) configError = undefined
+    apply({ ...next, customTheme: next.customTheme })
+  } catch (error) {
+    if (savingDepth === 0) configError = error instanceof Error ? error : new Error(String(error))
+    $.ui.log('Could not load vargus.jsonc. ' + String(error))
+    apply({})
+  }
 }
 
 export function registerConfig(on: On, given: PluginOptions, apply: (changes: Partial<Options>) => void): void {

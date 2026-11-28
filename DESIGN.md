@@ -129,15 +129,21 @@ only the keys present overriding built-in defaults. The Node reader resolves
 the path from its own module. Looking in the session's working directory
 would select a different file when the user changes projects. Explicit option
 files use the same comment-aware parser. Flags keep their argument order, and
-OmO's saved session overrides remain the top layer for that session.
+OmO's saved session overrides remain the top layer for that session. Layer
+merging ([`mergeOptionLayers`](src/options.ts)) lets an explicit higher-layer
+`theme` override any lower-layer `customTheme` unless that layer also specifies
+`customTheme`.
 
 All four hosts apply edits and deletions to `vargus.jsonc` automatically while
 running: Antigravity reads it on each subprocess invocation, and Codex, OmO
 Native, and Claude Code poll raw file contents on their 1-second tick without
 forcing a restart. Comparing raw file contents avoids coarse-mtime and equal-length
-overwrite misses and follows symlinks. Invalid JSONC mid-edit leaves the last
-valid options active (logging once per broken content in Claude, and silently
-retaining the row in Codex and OmO) until the next edit or deletion. Each host
+overwrite misses and follows symlinks. Invalid JSONC syntax in `vargus.jsonc`
+(at startup or mid-edit) replaces the status line across all four hosts with a
+width-fitted `[CONFIG ERR] vargus.jsonc: <reason>` tip in `alert` while
+retaining the last valid options in memory (or defaults on cold load), logging
+once per broken content in Claude, and automatically restoring the normal row
+once fixed or deleted; explicit `--config FILE` CLI flags still fail fast. Each host
 keeps its override layer (`--config`/`--theme` in Codex, `--config` and
 `/vargus config` in OmO, locked rows and picker rewrites in Claude).
 
@@ -209,6 +215,7 @@ The row uses one compact layout across all four hosts:
 | Git operation parenthetical | `(op)` attached | `alert` | `(rebase 2/3)`, `(merge)`, `(bisect)` |
 | Icon prefix | `<icon><text>` (WSL `<char>:<text>`, see below) | `label` | `🔧73 🤖2 ⚡1` / `T:73 A:2 S:1`, `⌛stale` / `!:stale` |
 | API error badge | `[API CODE]` | `alert` (in the rate-limit slot) | `[API 429]`, `[API AUTH]`, `[API ERR]` |
+| Config syntax error | `[CONFIG ERR] file: reason` | `alert` (replaces row) | `[CONFIG ERR] vargus.jsonc: Expected ',' or '}'` |
 | VCS status | `<mark><count>` | `add` (`+`, `⇡`), `del` (`✗`, `!`, `⇣`), `track` (`?`) | `✗1 +2 !3 ?4 ⇡1 ⇣2` |
 
 All hosts select the WSL text fallback (`T:`, `A:`, `S:`, `!:stale`) only on WSL and ignore `WSLENV`: native Windows processes launched from Windows Terminal inherit `WSLENV` (such as `WT_SESSION:WT_PROFILE_ID:`) to forward variables into `wsl.exe`, which previously forced false text fallback on native Windows (`win32`) with PowerShell and `psmux` (clearing only `WSLENV` in the same native Windows process switched the preview from `T:73` to `🔧73`). The Node hosts ([`detectWsl`](src/node/wsl.ts), shared by Codex, OmO, Antigravity and `vargus themes`) require Linux (`process.platform === 'linux'`) plus `WSL_DISTRO_NAME`, `WSL_INTEROP`, or a `/microsoft/i` `os.release()` kernel string. The Claude mod ([`isWsl`](src/hosts/claude/register.ts)), which has no `process.platform` API, returns `false` on drive-path Windows environments (`USERPROFILE` a drive path without a `/` `HOME`, or a drive-path working directory) and otherwise checks `WSL_DISTRO_NAME`, `WSL_INTEROP`, or `/proc/version` matching `/microsoft/i`.
@@ -286,10 +293,23 @@ The palette registry uses own-property lookup (case-insensitive, collapsing
 internal whitespace to hyphens so `agy tokyonight` resolves to `agy-tokyonight`).
 `auto` resolves to the running host's palette (`graphite` when no host palette
 is given), `resolveThemeOption` keeps `"auto"` canonical in Claude's `/config`
-picker, and unknown names fall back to `graphite`. When a host sees a non-empty
-`NO_COLOR`, the theme returns plain text. Run
+picker, and unknown names fall back to `graphite`.
+
+An optional `customTheme` object in `vargus.jsonc` (parsed by
+[`parseCustomTheme`](src/theme/index.ts)) overlays any subset of the 9 hex
+tokens (`#rrggbb`, validated per token with malformed or missing entries falling
+back to the resolved `theme`) and an optional `polarity` (`"dark"` or `"light"`,
+defaulting to the base theme's polarity). Setting at least one valid hex token
+resolves `resolvePalette` / `makeTheme` to `"custom"`, and `customTheme` is kept
+outside `DEFAULTS` and `.claude-plugin/plugin.json` so Claude's `/config` picker
+stays static while locked managed `theme` settings override checkout
+`customTheme` and picker edits preserve it.
+
+When a host sees a non-empty `NO_COLOR`, the theme returns plain text. Run
 `vargus themes [NAME]` ([themes.ts](src/cli/themes.ts)) to preview bundled palettes
-(`vargus themes auto` previews the four host palettes, tagged `(auto: <Host>)`)
+(`vargus themes auto` previews the four host palettes, tagged `(auto: <Host>)`;
+when `customTheme` is configured in `vargus.jsonc`, `vargus themes` includes it
+and `vargus themes custom` previews it alone)
 in the terminal through the shared renderer; it separates palettes into dark and
 light sections, forces each polarity's typical reference background (`#181818` for
 dark, `#ffffff` for light) on swatch and sample rows with per-line SGR resets

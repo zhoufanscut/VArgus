@@ -2,6 +2,10 @@ import type { TokenName } from '../core/types.ts'
 
 export type PalettePolarity = 'dark' | 'light'
 
+export const TOKEN_NAMES: readonly TokenName[] = [
+  'text', 'calm', 'label', 'detail', 'sep', 'alert', 'add', 'del', 'track',
+]
+
 // Bundled palettes use one 3-group data-first OKLCH structure, 9 hex tokens each:
 //   - 5-step data-first tonal ramp (`text > calm > label > detail > sep`) in one theme hue family:
 //       text    location anchors (bold folder; plain repo and branch/ref names)

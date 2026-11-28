@@ -7,7 +7,8 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { savedFooter, restoreFooter, footerIdentity } from '../../hosts/codex/footer.ts'
 import { resolveCodexOptions, workerOptions } from '../../hosts/codex/options.ts'
-import { readCheckoutOptions, readOptionsFile } from '../../node/options.ts'
+import { mergeOptionLayers } from '../../options.ts'
+import { readCheckoutOptionsSafe, readOptionsFile } from '../../node/options.ts'
 import { findRollout, RolloutReader } from '../../hosts/codex/rollout.ts'
 import { TmuxOutput } from '../../outputs/tmux/client.ts'
 import { applicationArguments } from '../../outputs/tmux/process.ts'
@@ -120,11 +121,12 @@ export async function standalone(args: string[], automatic = false): Promise<num
     if (value === undefined) throw new Error(`Missing value for ${flag}.`)
     if (flag === '--pane') pane = value
     else if (flag === '--socket') socket = value
-    else if (flag === '--theme') options.theme = value
-    else if (flag === '--config') options = { ...options, ...readOptionsFile(value) }
+    else if (flag === '--theme') options = mergeOptionLayers(options, { theme: value })
+    else if (flag === '--config') options = mergeOptionLayers(options, readOptionsFile(value))
     else throw new Error(`Unknown VArgus option: ${flag}.`)
   }
-  const checkout = action === 'on' || action === 'reload' ? readCheckoutOptions() : {}
+  const checkoutResult = action === 'on' || action === 'reload' ? readCheckoutOptionsSafe() : undefined
+  const checkout = checkoutResult?.ok ? checkoutResult.options : {}
   if (automatic && !resolveCodexOptions({ ...checkout, ...options }).codexAutoStart) return 0
   const thread = process.env.CODEX_THREAD_ID
   const home = process.env.CODEX_HOME ?? join(homedir(), '.codex')

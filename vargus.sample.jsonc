@@ -32,5 +32,18 @@
   //   omo-violet         OmO Native dark theme
   //   graphite           Neutral-gray dark theme
   //   daylight           Light-background theme
+  // Custom theme (override any token on top of "theme", or set all 9)
+  // "customTheme": {
+  //   "polarity": "dark",    // Preview: "dark" or "light"
+  //   "text":     "#e2e8f6", // Folder, repo, branch
+  //   "calm":     "#c2cbf3", // Normal readings
+  //   "label":    "#8babee", // Prefixes, model, call counts
+  //   "detail":   "#8890b3", // Parentheticals (reset, cache, speed)
+  //   "sep":      "#474b5b", // " | " divider
+  //   "alert":    "#f7768e", // High usage, low effort, API/git alerts
+  //   "add":      "#94af7b", // Staged / added, ahead
+  //   "del":      "#c78c94", // Conflicts, modified, behind
+  //   "track":    "#67aebd"  // Untracked files
+  // },
   "theme": "auto"
 }

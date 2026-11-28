@@ -33,6 +33,7 @@ export const en = {
   apiRateLimited: '[API 429]',
   apiAuth: '[API AUTH]',
   apiError: '[API ERR]',
+  configError: '[CONFIG ERR]',
 }
 
 export type Labels = Record<keyof typeof en, string>

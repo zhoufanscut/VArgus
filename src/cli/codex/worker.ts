@@ -14,9 +14,9 @@ import { TmuxOutput } from '../../outputs/tmux/client.ts'
 import { PaneInput } from '../../outputs/tmux/input.ts'
 import { applicationTarget } from '../../outputs/tmux/target.ts'
 import { staleParts } from '../../render/freshness.ts'
-import { joinParts } from '../../render/index.ts'
+import { configErrorLine, joinParts } from '../../render/index.ts'
 import { cleanText } from '../../render/text.ts'
-import { makeTheme } from '../../theme/index.ts'
+import { makeTheme, type CustomTheme } from '../../theme/index.ts'
 import { detectWsl } from '../../node/wsl.ts'
 import { codexLine } from './line.ts'
 import {
@@ -65,15 +65,15 @@ export async function foldDescendantCounts(
   return extraCounts
 }
 
-export function codexTheme(theme: string, noColor: boolean) {
-  return makeTheme(theme, noColor, CODEX_THEME)
+export function codexTheme(theme: string, noColor: boolean, custom?: CustomTheme) {
+  return makeTheme(theme, noColor, CODEX_THEME, custom)
 }
 
 export async function rowWorker(spec: Spec): Promise<number> {
   const { target, thread } = spec
   const file = recordPath(target), views = new Views(spec.home, thread, spec.transcript), input = new PaneInput(target)
   const output = new TmuxOutput(target.socket, target.pane)
-  let options = resolveCodexOptions(spec.options), theme = codexTheme(options.theme, !!process.env.NO_COLOR)
+  let options = resolveCodexOptions(spec.options), theme = codexTheme(options.theme, !!process.env.NO_COLOR, options.customTheme)
   const isWsl = detectWsl()
   let staleStyle = { t: theme, l: en, isWsl }
   const footerSettings = new FooterSettings(cwd => savedFooterSettings(cwd, spec.home))
@@ -92,7 +92,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
   const suppressed = new Set<string>()
   let mode = spec.mode, selected: string | undefined, error: string | undefined
   let stopping = false, attached = false, optionsAt = 0, refreshAt = 0, renderAt = 0
-  let lastConfirmed: string | undefined, readingError: string | undefined, published = ''
+  let lastConfirmed: string | undefined, readingError: string | undefined, configError: Error | undefined, published = ''
   let lastReadings: { thread: string; label: string; readFailed: boolean; line: ReturnType<typeof codexLine> } | undefined
   let paused: Running['paused']
   let identity: 'first' | 'whole' | 'none' = 'none'
@@ -102,11 +102,21 @@ export async function rowWorker(spec: Spec): Promise<number> {
   process.on('SIGTERM', stop); process.on('SIGHUP', stop)
   const syncCheckoutOptions = () => {
     const polled = checkoutPoller.poll()
-    if (!polled.changed || !polled.ok) return
+    if (!polled.changed) return
+    if (!polled.ok) {
+      configError = polled.error
+      renderAt = 0
+      return
+    }
+    const hadError = configError !== undefined
+    configError = undefined
     const next = resolveCodexOptions(workerOptions(polled.options, {}, savedOverrides).options)
-    if (sameOptions(options, next)) return
+    if (sameOptions(options, next)) {
+      if (hadError) renderAt = 0
+      return
+    }
     options = next
-    theme = codexTheme(options.theme, !!process.env.NO_COLOR)
+    theme = codexTheme(options.theme, !!process.env.NO_COLOR, options.customTheme)
     staleStyle = { t: theme, l: en, isWsl }
     const nextFold = options.includeSubagents && (options.tokens || options.callCounts)
     if (nextFold && !foldSubagents) refreshAt = 0
@@ -181,7 +191,12 @@ export async function rowWorker(spec: Spec): Promise<number> {
       let parts: string[] | undefined
       let width: number | undefined
       paused = undefined
-      if (view) {
+      if (configError && (view || (hold && lastReadings))) {
+        width = await output.width()
+        line = configErrorLine(configError, { t: theme, l: en, columns: width })
+        parts = line ? [line] : []
+        if (!view && lastReadings) paused = { thread: lastReadings.thread, label: lastReadings.label }
+      } else if (view) {
         readingError = undefined
         try {
           const reader = getReader(view)
@@ -230,7 +245,7 @@ export async function rowWorker(spec: Spec): Promise<number> {
       }
     }
     if (paused) error = `Readings paused from ${paused.label} (${paused.thread}); the current view is unknown.`
-    error ??= readingError
+    error ??= configError?.message ?? readingError
     const value = await state(), serialized = JSON.stringify(value)
     if (serialized !== published) { await save(file, value); published = serialized }
   }

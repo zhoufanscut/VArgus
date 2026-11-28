@@ -1,19 +1,23 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 
 import { formatThemesPreview, themes } from '../../src/cli/themes.ts'
 import { detectWsl } from '../../src/node/wsl.ts'
 import { stringWidth } from '../../src/render/width.ts'
 import { makeTheme } from '../../src/theme/index.ts'
-import { PALETTES, PALETTE_POLARITY } from '../../src/theme/palettes.ts'
+import { PALETTES, PALETTE_POLARITY, TOKEN_NAMES } from '../../src/theme/palettes.ts'
+import { fixtureCheckout } from '../checkout.mts'
 
 const execFileAsync = promisify(execFile)
 
 function runThemes(
   args: string[],
-  opts: { noColor?: boolean; isWsl?: boolean; columns?: number } = {},
+  opts: { noColor?: boolean; isWsl?: boolean; columns?: number; checkoutOptions?: Record<string, unknown> } = {},
 ) {
   let out = ''
   const code = themes(args, {
@@ -21,6 +25,7 @@ function runThemes(
     noColor: opts.noColor ?? false,
     isWsl: opts.isWsl ?? false,
     columns: opts.columns,
+    checkoutOptions: opts.checkoutOptions ?? {},
   })
   return { code, out }
 }
@@ -238,7 +243,52 @@ describe('vargus themes', () => {
 
   test('rejects unknown names including Object prototype properties', () => {
     for (const bad of ['nope', 'constructor', 'toString', '__proto__', '', 'day light', 'aurora', 'ember', 'nebula', 'tokyo-night', 'agy--tokyonight']) {
-      assert.throws(() => runThemes([bad]), /Unknown theme.*auto, agy-tokyonight, codex-ink, claude-terracotta, omo-violet, graphite, daylight/)
+      assert.throws(() => runThemes([bad]), /Unknown theme.*auto, agy-tokyonight, codex-ink, claude-terracotta, omo-violet, graphite, daylight, custom/)
+    }
+  })
+
+  test('previews partial and full customTheme in its resolved polarity section and errors cleanly when absent', async () => {
+    assert.throws(
+      () => runThemes(['custom']),
+      /No valid customTheme configured in vargus\.jsonc/,
+    )
+
+    const partial = runThemes([' Custom '], {
+      checkoutOptions: { theme: 'daylight', customTheme: { label: '#112233' } },
+    })
+    assert.equal(partial.code, 0)
+    assert.ok(partial.out.startsWith('\x1b[1mLight themes (#ffffff)\x1b[22m\n\ncustom (vargus.jsonc, base: daylight)\n'))
+    assert.ok(partial.out.includes('\x1b[48;2;255;255;255m'))
+    assert.ok(partial.out.includes(makeTheme('daylight', false, undefined, { label: '#112233' }).paint('label', 'label').replace(/\x1b\[0m$/, '')))
+
+    const allNine = Object.fromEntries(TOKEN_NAMES.map((tok, i) => [tok, `#20304${i}`]))
+    const full = runThemes([], {
+      noColor: true,
+      checkoutOptions: { theme: 'daylight', customTheme: { polarity: 'dark', ...allNine } },
+    })
+    assert.equal(full.code, 0)
+    const sections = full.out.trimEnd().split('\n\n\n')
+    assert.match(sections[0]!, /custom \(vargus\.jsonc\)/)
+    assert.doesNotMatch(sections[1]!, /custom \(vargus\.jsonc\)/)
+
+    const dir = await mkdtemp(join(tmpdir(), 'vargus-themes-custom-'))
+    try {
+      const checkout = await fixtureCheckout(dir)
+      const env = { ...process.env, VARGUS_CLI_MAIN: '1', NO_COLOR: '', WSL_DISTRO_NAME: '', WSL_INTEROP: '', WSLENV: '' }
+      await writeFile(join(checkout, 'vargus.jsonc'), '// custom\n{"theme":"auto","customTheme":{"polarity":"light","text":"#123456"}}')
+      const customCli = await execFileAsync(process.execPath, [join(checkout, 'src/cli.ts'), 'themes', 'custom'], { env })
+      assert.ok(customCli.stdout.startsWith('\x1b[1mLight themes (#ffffff)\x1b[22m\n\ncustom (vargus.jsonc, base: graphite)\n'))
+
+      // Broken vargus.jsonc must not block bundled themes, while `themes custom` reports the parse error.
+      await writeFile(join(checkout, 'vargus.jsonc'), '{broken')
+      const bundledCli = await execFileAsync(process.execPath, [join(checkout, 'src/cli.ts'), 'themes', 'graphite'], { env })
+      assert.ok(bundledCli.stdout.startsWith('\x1b[1mDark themes (#181818)\x1b[22m\n\ngraphite\n'))
+      await assert.rejects(
+        execFileAsync(process.execPath, [join(checkout, 'src/cli.ts'), 'themes', 'custom'], { env }),
+        (err: Error & { code?: number; stderr?: string }) => err.code === 1 && /Expected a VArgus JSON options object/.test(err.stderr ?? ''),
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
     }
   })
 

@@ -823,6 +823,47 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
     assert.equal(fromCheckout.code, 0, fromCheckout.stderr)
     assert.match(fromCheckout.stdout, /ctx:20%/)
     assert.doesNotMatch(fromCheckout.stdout, /carbon/)
+
+    // Checkout customTheme applies by default; --theme overrides it; --config can supply customTheme and obeys flag order.
+    await writeFile(join(install, 'vargus.jsonc'), JSON.stringify({ ...givenOptions, customTheme: { label: '#112233' } }))
+    const customCheckout = await runStatusline([], JSON.stringify(payload), { NO_COLOR: '' })
+    assert.equal(customCheckout.code, 0, customCheckout.stderr)
+    assert.ok(customCheckout.stdout.includes('\x1b[38;2;17;34;51m'))
+
+    const themeOverridesCustom = await runStatusline(['--theme', 'daylight'], JSON.stringify(payload), { NO_COLOR: '' })
+    assert.equal(themeOverridesCustom.code, 0, themeOverridesCustom.stderr)
+    assert.ok(!themeOverridesCustom.stdout.includes('\x1b[38;2;17;34;51m'))
+    assert.ok(themeOverridesCustom.stdout.includes(makeTheme('daylight', false).paint('label', 'ctx:')))
+
+    const customConfigPath = join(root, 'custom-theme.jsonc')
+    await writeFile(customConfigPath, JSON.stringify({ ...givenOptions, theme: 'graphite', customTheme: { label: '#445566' } }))
+    const configWithCustom = await runStatusline(['--config', customConfigPath], JSON.stringify(payload), { NO_COLOR: '' })
+    assert.equal(configWithCustom.code, 0, configWithCustom.stderr)
+    assert.ok(configWithCustom.stdout.includes('\x1b[38;2;68;85;102m'))
+
+    const themeAfterConfig = await runStatusline(['--config', customConfigPath, '--theme', 'daylight'], JSON.stringify(payload), { NO_COLOR: '' })
+    assert.equal(themeAfterConfig.code, 0, themeAfterConfig.stderr)
+    assert.ok(!themeAfterConfig.stdout.includes('\x1b[38;2;68;85;102m'))
+    assert.ok(themeAfterConfig.stdout.includes(makeTheme('daylight', false).paint('label', 'ctx:')))
+
+    const configAfterTheme = await runStatusline(['--theme', 'daylight', '--config', customConfigPath], JSON.stringify(payload), { NO_COLOR: '' })
+    assert.equal(configAfterTheme.code, 0, configAfterTheme.stderr)
+    assert.ok(configAfterTheme.stdout.includes('\x1b[38;2;68;85;102m'))
+
+    // Broken checkout vargus.jsonc renders [CONFIG ERR] in alert on stdout (exit 0), fits terminal_width, and recovers when fixed.
+    await writeFile(join(install, 'vargus.jsonc'), '{broken')
+    const brokenColored = await runStatusline([], JSON.stringify(payload), { NO_COLOR: '' })
+    assert.equal(brokenColored.code, 0, brokenColored.stderr)
+    assert.ok(brokenColored.stdout.includes('\x1b[38;2;247;118;142m[CONFIG ERR] vargus.jsonc:'))
+    const brokenPlain = await runStatusline([], JSON.stringify(payload), { NO_COLOR: '1' })
+    assert.equal(brokenPlain.code, 0, brokenPlain.stderr)
+    assert.ok(!brokenPlain.stdout.includes('\x1b['))
+    assert.match(brokenPlain.stdout, /^  \[CONFIG ERR\] vargus\.jsonc: /)
+    const brokenNarrow = await runStatusline([], JSON.stringify({ ...payload, terminal_width: 24 }), { NO_COLOR: '1' })
+    assert.equal(brokenNarrow.code, 0, brokenNarrow.stderr)
+    assert.equal(brokenNarrow.stdout.replace(/\r?\n$/, ''), '  [CONFIG ERR] vargus...')
+
+    await writeFile(join(install, 'vargus.jsonc'), '// checkout default\n' + JSON.stringify({ ...givenOptions, model: false }))
     const colored = await runStatusline(['--theme', 'agy-tokyonight', '--config', configPath], JSON.stringify(payload), { NO_COLOR: '' })
     assert.equal(colored.code, 0, colored.stderr)
     assert.match(colored.stdout, /carbon/)
@@ -2568,6 +2609,61 @@ test('Antigravity auto theme resolves to agy-tokyonight on healthy and stale row
 
     const unknownRow = await renderAntigravityStatusLine(payload, { cacheDir, home: dir, noColor: false, isWsl: false, givenOptions: { ...baseOpts, theme: 'nope' } })
     assert.equal(unknownRow, explicitRow)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('Antigravity renders customTheme overlays, keeps stale fallback styled, and isolates row caches', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vargus-agy-custom-theme-'))
+  const cacheDir = join(dir, 'cache'), brain = join(dir, 'brain', 'alpha')
+  const transcript = join(brain, 'transcript.jsonl')
+  const baseOpts = { model: true, folder: false, rateLimits: false, context: false, tokens: false, session: true, callCounts: false, repo: false, branch: false, status: false }
+  const payload = { conversation_id: 'alpha', model: 'gemini-4-carbon', cwd: dir, transcript_path: transcript }
+  try {
+    await mkdir(brain, { recursive: true })
+    await writeFile(transcript, '{}\n')
+
+    const agy = makeTheme('agy-tokyonight', false)
+    const custom = makeTheme('auto', false, 'agy-tokyonight', { label: '#112233', sep: '#445566' })
+
+    const baseRow = await renderAntigravityStatusLine(payload, { cacheDir, home: dir, noColor: false, isWsl: false, givenOptions: baseOpts })
+    assert.equal(baseRow, '  ' + agy.paint('label', 'carbon'))
+
+    const customRow = await renderAntigravityStatusLine(payload, {
+      cacheDir,
+      home: dir,
+      noColor: false,
+      isWsl: false,
+      givenOptions: { ...baseOpts, customTheme: { label: '#112233', sep: '#445566' } },
+    })
+    assert.equal(customRow, '  ' + custom.paint('label', 'carbon'))
+    assert.notEqual(customRow, baseRow)
+
+    const transcriptCache = cachePath(cacheDir, 'transcript', transcript)
+    const saved = await readFile(transcriptCache, 'utf8')
+    await writeFile(transcriptCache, JSON.stringify({ ...JSON.parse(saved), seenSkillsInTurn: 42 }))
+    await appendFile(transcript, '{}\n')
+
+    const staleCustom = await renderAntigravityStatusLine(payload, {
+      cacheDir,
+      home: dir,
+      noColor: false,
+      isWsl: false,
+      givenOptions: { ...baseOpts, customTheme: { label: '#112233', sep: '#445566' } },
+    })
+    assert.equal(staleCustom, customRow + custom.paint('sep', ' | ') + custom.paint('label', '⌛stale'))
+    const staleBase = await renderAntigravityStatusLine(payload, { cacheDir, home: dir, noColor: false, isWsl: false, givenOptions: baseOpts })
+    assert.equal(staleBase, baseRow + agy.paint('sep', ' | ') + agy.paint('label', '⌛stale'))
+
+    const errRow = await renderAntigravityStatusLine(payload, {
+      cacheDir,
+      home: dir,
+      noColor: false,
+      isWsl: false,
+      configError: new SyntaxError('bad json'),
+    })
+    assert.equal(errRow, '  ' + agy.paint('alert', '[CONFIG ERR] vargus.jsonc: bad json'))
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

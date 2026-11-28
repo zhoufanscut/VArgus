@@ -589,17 +589,26 @@ describe('register: the line as the host sets it up', () => {
     expect(edited).toContain(sep('graphite'))
     expect(edited).not.toContain('opus')
 
-    // Invalid JSONC keeps last valid options and logs once until the content changes.
+    // Invalid JSONC shows [CONFIG ERR] in alert, keeps last valid options in memory, and logs once until changed.
     state.file = '{broken'
     const duringError1 = await line(clock, w)
-    expect(duringError1).toContain(sep('graphite'))
+    const alertPrefix = makeTheme('graphite', false).paint('alert', '[CONFIG ERR] vargus.jsonc:').replace(/\x1b\[0m$/, '')
+    expect(duringError1).toContain(alertPrefix)
     expect(duringError1).not.toContain('opus')
     const duringError2 = await line(clock, w)
-    expect(duringError2).toContain(sep('graphite'))
+    expect(duringError2).toContain(alertPrefix)
     expect(logs.length).toBe(1)
     expect(logs[0]).toContain('Could not load vargus.jsonc.')
 
-    // Deleting vargus.jsonc reverts to native choices on the next 1s tick.
+    // Fixing back to the exact prior valid content clears the error tip immediately.
+    state.file = '{"model":false,"theme":"graphite","folder":false}'
+    const recoveredSame = await line(clock, w)
+    expect(recoveredSame).toContain(sep('graphite'))
+    expect(recoveredSame).not.toContain('opus')
+
+    // Deleting vargus.jsonc after broken JSONC reverts to native choices on the next 1s tick.
+    state.file = '{broken'
+    expect(await line(clock, w)).toContain(alertPrefix)
     state.file = undefined
     const deleted = await line(clock, w)
     expect(deleted).toContain('opus')
@@ -838,5 +847,101 @@ describe('register: the line as the host sets it up', () => {
     expect(w.lines.at(-1)).toContain(makeTheme('daylight', false).paint('sep', ' | '))
     expect(await line(clock, w)).toContain('opus')
     expect(w.lines.at(-1)).toContain(makeTheme('daylight', false).paint('sep', ' | '))
+  })
+
+  test('customTheme applies at startup, live-reloads on 1s ticks, clears on /reload-plugins, yields to locked theme, and survives /config picker edits', NO_VCS, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, clock, { HOME: '/home/u', CLAUDE_CONFIG_DIR: '/home/u/.claude', NO_COLOR: '' }, false)
+    mock.store(on)
+    const provider = { plugin: 'vargus@vargus', tier: 'user' as const }
+    const themeRow: ConfigRow = { key: 'vargus.theme', label: 'Theme', kind: 'choice', value: 'auto', provider, isLocked: false }
+    let file: string | undefined = JSON.stringify({ customTheme: { sep: '#112233' } })
+    let staged = ''
+    on('fs.exists', async ($, e) => ({ value: fixtureFsPath(e.path).endsWith('/vargus.jsonc') && file !== undefined }))
+    on('fs.read', async ($, e) => {
+      if (fixtureFsPath(e.path).endsWith('/vargus.jsonc') && file !== undefined) return { value: file }
+      throw new Error('ENOENT')
+    })
+    on('fs.stat', async ($, e) => ({
+      value: { kind: 'file', isLink: false, realPath: e.path, size: (file ?? '').length, mtimeMs: 0 },
+    }))
+    on('config.list', async () => ({ value: [themeRow] }))
+    on('config.set', async ($, e) => {
+      if (e.key === themeRow.key) themeRow.value = e.value
+      return { value: themeRow.value }
+    })
+    on('command.run', async () => ({ text: 'ok' }))
+    on('process.run', async ($, e) => {
+      const index = e.argv.findIndex(arg => arg.endsWith('/replace-config.sh'))
+      if (index >= 0) {
+        const op = e.argv[index + 1]
+        if (op === 'prepare') staged = e.init?.stdin?.slice((file ?? '').length) ?? ''
+        if (op === 'commit') file = staged
+      }
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+
+    const sep = (rgb: string, base = 'claude-terracotta') =>
+      makeTheme(base, false, undefined, { sep: rgb }).paint('sep', ' | ')
+    const baseSep = (name: string) => makeTheme(name, false).paint('sep', ' | ')
+
+    await $.session.start(start)
+    expect(await line(clock, w)).toContain(sep('#112233'))
+
+    // Live 1s poll picks up customTheme edits and preserves customTheme during /config picker edits.
+    file = JSON.stringify({ customTheme: { sep: '#445566' }, theme: 'auto' })
+    expect(await line(clock, w)).toContain(sep('#445566'))
+
+    await $.config.set({
+      key: themeRow.key, previous: 'auto', value: 'daylight', provider, origin: { kind: 'composer' },
+    })
+    expect(JSON.parse(file)).toEqual({ customTheme: { sep: '#445566' }, theme: 'daylight' })
+    expect(await line(clock, w)).toContain(sep('#445566', 'daylight'))
+
+    // /reload-plugins clears a removed customTheme cleanly.
+    file = JSON.stringify({ theme: 'daylight' })
+    await $.command.run({
+      command: 'reload-plugins', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 },
+    })
+    expect(await line(clock, w)).toContain(baseSep('daylight'))
+
+    // Deleting vargus.jsonc vs locked theme overriding customTheme (even when only customTheme is in the file).
+    file = JSON.stringify({ customTheme: { sep: '#778899' } })
+    expect(await line(clock, w)).toContain(sep('#778899'))
+
+    themeRow.isLocked = true
+    themeRow.value = 'graphite'
+    await $.command.run({
+      command: 'reload-plugins', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 },
+    })
+    expect(await line(clock, w)).toContain(baseSep('graphite'))
+    expect(w.lines.at(-1)).not.toContain(sep('#778899'))
+
+    // Live 1s tick removal of customTheme when unlocked reverts to native choice.
+    themeRow.isLocked = false
+    themeRow.value = 'auto'
+    await $.command.run({
+      command: 'reload-plugins', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 },
+    })
+    expect(await line(clock, w)).toContain(sep('#778899'))
+    file = undefined
+    expect(await line(clock, w)).toContain(baseSep('claude-terracotta'))
+  })
+
+  test('broken vargus.jsonc at startup renders [CONFIG ERR] in alert and recovers on fix', NO_VCS, async ($, on) => {
+    const { clock, w, state } = sharedPicker($, on)
+    const logs: string[] = []
+    on('ui.log', async ($, e) => {
+      logs.push(e.text)
+      return { value: undefined }
+    })
+    state.file = '{broken'
+    await $.session.start(start)
+    const alertPrefix = makeTheme('claude-terracotta', false).paint('alert', '[CONFIG ERR] vargus.jsonc:').replace(/\x1b\[0m$/, '')
+    expect(await line(clock, w)).toContain(alertPrefix)
+    expect(logs.length).toBe(1)
+
+    state.file = '{"theme":"daylight"}'
+    expect(await line(clock, w)).toContain(makeTheme('daylight', false).paint('sep', ' | '))
   })
 })

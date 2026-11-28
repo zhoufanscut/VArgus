@@ -160,7 +160,11 @@ Claude shows the account-wide five-hour and seven-day limits when available.
 - **Theme** defaults to `auto` (`claude-terracotta` in Claude Code; each host
   picks its own matching palette). With the shared launcher installed, run
   `vargus themes` to preview the palettes. Choose `graphite` for neutral gray or
-  `daylight` for a light background.
+  `daylight` for a light background. To customize individual tokens or define a
+  full 9-token palette, add `"customTheme"` to `vargus.jsonc` (see
+  [`vargus.sample.jsonc`](../vargus.sample.jsonc)). Changing **Theme** in `/config`
+  writes `"theme"` while keeping `"customTheme"` intact in `vargus.jsonc`, whereas
+  a locked managed `theme` setting overrides a checkout `"customTheme"`.
 - **Colours off**: set `NO_COLOR` (to any non-empty value) in the environment you start Claude Code from.
   Other programs Claude Code starts see it too.
 

@@ -1,18 +1,17 @@
-import type { Rgb, TokenName, Values } from '../core/types.ts'
+import type { Rgb, Values } from '../core/types.ts'
 import { initialSession } from '../core/session.ts'
 import { resolveLabels } from '../i18n/index.ts'
+import { readCheckoutOptions } from '../node/options.ts'
 import { detectWsl } from '../node/wsl.ts'
-import { DEFAULTS } from '../options.ts'
+import { DEFAULTS, resolveOptions } from '../options.ts'
 import { staleParts } from '../render/freshness.ts'
 import { render, renderParts } from '../render/index.ts'
 import { displaySession, shortModelName } from '../render/session.ts'
 import { stringWidth } from '../render/width.ts'
-import { AUTO_THEME, lookupPaletteName, makeTheme, resolvePalette } from '../theme/index.ts'
-import { PALETTES, PALETTE_POLARITY, type PalettePolarity } from '../theme/palettes.ts'
+import { AUTO_THEME, CUSTOM_THEME, lookupPaletteName, makeTheme, resolvePalette, type CustomTheme } from '../theme/index.ts'
+import { PALETTES, PALETTE_POLARITY, TOKEN_NAMES, type PalettePolarity } from '../theme/palettes.ts'
 
-const TOKEN_ORDER: readonly TokenName[] = [
-  'text', 'calm', 'label', 'detail', 'sep', 'alert', 'add', 'del', 'track',
-]
+const TOKEN_ORDER = TOKEN_NAMES
 const THEME_NAMES = Object.keys(PALETTES)
 const AUTO_HOST_LABELS: Record<string, string> = {
   'agy-tokyonight': 'Antigravity',
@@ -21,7 +20,7 @@ const AUTO_HOST_LABELS: Record<string, string> = {
   'omo-violet': 'OmO',
 }
 const AUTO_THEMES = Object.keys(AUTO_HOST_LABELS)
-const AVAILABLE_THEMES = [AUTO_THEME, ...THEME_NAMES]
+const AVAILABLE_THEMES = [AUTO_THEME, ...THEME_NAMES, CUSTOM_THEME]
 const POLARITY_ORDER: readonly PalettePolarity[] = ['dark', 'light']
 const SECTION_TITLE: Record<PalettePolarity, string> = {
   dark: 'Dark themes',
@@ -42,7 +41,10 @@ Preview all bundled themes (or one named theme) on a dark (#181818) or light (#f
 Default: ${AUTO_THEME} (uses ${AUTO_THEMES.join(', ')} by host).
 Dark themes: ${DARK_THEMES.join(', ')}.
 Light themes: ${LIGHT_THEMES.join(', ')}.
+Custom theme: pass \`custom\` (or omit NAME) to preview \`customTheme\` from vargus.jsonc.
 Respects NO_COLOR.`
+
+export type CustomThemePreview = { baseTheme: string; custom: CustomTheme }
 
 function sampleValues(isWsl: boolean): { calm: Values; alert: Values } {
   const core = { cwd: '/home/u/proj/VArgus', home: '/home/u', columns: undefined, isWsl }
@@ -111,9 +113,11 @@ function applyBackground(line: string, bg: Rgb, padWidth: number): string {
   return `${bgSgr}${line.replaceAll(RESET, `${RESET}${bgSgr}`)}${pad}${RESET}`
 }
 
+type PreviewEntry = { header: string; theme: ReturnType<typeof makeTheme> }
+
 export function formatThemesPreview(
   names: readonly string[],
-  opts: { noColor?: boolean; isWsl?: boolean; columns?: number } = {},
+  opts: { noColor?: boolean; isWsl?: boolean; columns?: number; custom?: CustomThemePreview } = {},
 ): string {
   if (names.length === 0) return ''
   const l = resolveLabels('en')
@@ -127,10 +131,26 @@ export function formatThemesPreview(
       : undefined
 
   const expandedNames = names.flatMap(name => (name.trim().toLowerCase() === AUTO_THEME ? AUTO_THEMES : [name]))
-  const byPolarity = new Map<PalettePolarity, string[]>(POLARITY_ORDER.map(p => [p, []]))
+  const byPolarity = new Map<PalettePolarity, PreviewEntry[]>(POLARITY_ORDER.map(p => [p, []]))
   for (const name of expandedNames) {
+    if (name.trim().toLowerCase() === CUSTOM_THEME && opts.custom) {
+      const palette = resolvePalette(opts.custom.baseTheme, undefined, opts.custom.custom)
+      const base = resolvePalette(opts.custom.baseTheme)
+      const isFull = TOKEN_ORDER.every(token => opts.custom!.custom[token] !== undefined)
+      const header = isFull ? 'custom (vargus.jsonc)' : `custom (vargus.jsonc, base: ${base.name})`
+      byPolarity.get(palette.polarity)!.push({
+        header,
+        theme: makeTheme(opts.custom.baseTheme, noColor, undefined, opts.custom.custom),
+      })
+      continue
+    }
     const palette = resolvePalette(name)
-    byPolarity.get(palette.polarity)!.push(palette.name)
+    const hostLabel = AUTO_HOST_LABELS[palette.name]
+    const header = hostLabel ? `${palette.name} (auto: ${hostLabel})` : palette.name
+    byPolarity.get(palette.polarity)!.push({
+      header,
+      theme: makeTheme(palette.name, noColor),
+    })
   }
 
   const sections: string[] = []
@@ -143,10 +163,7 @@ export function formatThemesPreview(
       : `\x1b[1m${SECTION_TITLE[polarity]} (${PREVIEW_BG[polarity].hex})\x1b[22m`
     const bg = PREVIEW_BG[polarity].rgb
 
-    const blocks = group.map(name => {
-      const t = makeTheme(name, noColor)
-      const hostLabel = AUTO_HOST_LABELS[name]
-      const header = hostLabel ? `${name} (auto: ${hostLabel})` : name
+    const blocks = group.map(({ header, theme: t }) => {
       const swatches = TOKEN_ORDER.map(token => t.paint(token, token)).join('  ')
       const calmRow = render({
         v: samples.calm,
@@ -192,7 +209,13 @@ export function formatThemesPreview(
 
 export function themes(
   args: string[],
-  io?: { write?: (chunk: string) => void; noColor?: boolean; isWsl?: boolean; columns?: number },
+  io?: {
+    write?: (chunk: string) => void
+    noColor?: boolean
+    isWsl?: boolean
+    columns?: number
+    checkoutOptions?: Record<string, unknown>
+  },
 ): number {
   const write = io?.write ?? (chunk => { process.stdout.write(chunk) })
   if (args.length === 1 && args[0] === '--help') {
@@ -202,13 +225,28 @@ export function themes(
   if (args.some(arg => arg.startsWith('-'))) {
     throw new Error(USAGE)
   }
+  const readCustom = (): CustomThemePreview | undefined => {
+    const resolved = resolveOptions(io?.checkoutOptions ?? readCheckoutOptions())
+    return resolved.customTheme ? { baseTheme: resolved.theme, custom: resolved.customTheme } : undefined
+  }
   let selected: readonly string[]
+  let custom: CustomThemePreview | undefined
   if (args.length === 0) {
-    selected = THEME_NAMES
+    custom = readCustom()
+    selected = custom ? [...THEME_NAMES, CUSTOM_THEME] : THEME_NAMES
   } else if (args.length === 1) {
     const raw = args[0]!
-    if (raw.trim().toLowerCase() === AUTO_THEME) {
+    const normalized = raw.trim().toLowerCase()
+    if (normalized === AUTO_THEME) {
       selected = AUTO_THEMES
+    } else if (normalized === CUSTOM_THEME) {
+      custom = readCustom()
+      if (!custom) {
+        throw new Error(
+          'No valid customTheme configured in vargus.jsonc. Copy vargus.sample.jsonc to vargus.jsonc and uncomment "customTheme" to define one.',
+        )
+      }
+      selected = [CUSTOM_THEME]
     } else {
       const key = lookupPaletteName(raw)
       if (!key) {
@@ -226,6 +264,6 @@ export function themes(
   const noColor = io?.noColor ?? Boolean(process.env.NO_COLOR)
   const isWsl = io?.isWsl ?? detectWsl()
   const columns = io?.columns ?? (process.stdout.isTTY ? process.stdout.columns : undefined)
-  write(formatThemesPreview(selected, { noColor, isWsl, columns }))
+  write(formatThemesPreview(selected, { noColor, isWsl, columns, custom }))
   return 0
 }
