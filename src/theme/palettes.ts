@@ -52,6 +52,12 @@ export const PALETTES: Record<string, Record<TokenName, string>> = {
     calm: '#e6c8b9', alert: '#ff6b80',
     add: '#85ac89', del: '#c08b8c', track: '#81a4c7',
   },
+  // soft violet dark (OmO / Senpi dark theme family)
+  'omo-violet': {
+    text: '#ebeaf3', label: '#ac9be0', detail: '#908c9d', sep: '#48464e',
+    calm: '#cfcae3', alert: '#ff7d80',
+    add: '#79a88d', del: '#c18c8b', track: '#78a1c1',
+  },
   // pure neutral-gray dark, lowest VCS chroma. VArgus's default.
   graphite: {
     text: '#ededed', label: '#aeaeae', detail: '#929292', sep: '#4a4a4a',
@@ -73,6 +79,7 @@ export const PALETTE_POLARITY: Record<string, PalettePolarity> = {
   'tokyo-night': 'dark',
   'codex-ink': 'dark',
   'claude-terracotta': 'dark',
+  'omo-violet': 'dark',
   graphite: 'dark',
   daylight: 'light',
 }

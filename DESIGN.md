@@ -250,6 +250,21 @@ with terracotta rather than using Anthropic's Light and Mid Gray unchanged: thei
 measured hues are about 56–58° from the orange, beyond the 35° ramp limit.
 [Claude Code colour tokens](https://code.claude.com/docs/en/terminal-config#create-a-custom-theme) · [Anthropic brand colours](https://github.com/anthropics/skills/blob/e4bb5d960d87126ff3b3a8af1a104b7db67560ba/skills/brand-guidelines/SKILL.md) · [Claude Code theme measurements (third party)](https://blog.vincentqiao.com/en/posts/claude-code-theme/)
 
+The dark `omo-violet` palette follows the OmO / Senpi `dark` theme inspected in
+the local source on 2026-11-28. In Senpi's
+`packages/coding-agent/src/modes/interactive/theme/dark.json`, `"accent": "violet"`
+resolves to `okhsl(295 50% 67%)` (`#a798d7`); success and error use
+`okhsl(159 59% 67%)` and `okhsl(20 72% 67%)`. OmO's
+`packages/omo-senpi/src/components/lsp/adapter/renderers-diagnostics.ts` combines
+bold `toolTitle`, `accent` filenames and `muted` details. This supports a violet
+signature rather than the blue accent of Senpi's separate `grok-night` theme.
+The VArgus label is adjusted to `#ac9be0` (OKLCH 0.730/0.100/295°), with a
+violet-tinted neutral ramp and a brighter coral alarm. The faintest readable
+ramp token (`detail`) has 4.51:1 contrast against `#282828`. VCS colors keep
+the source's green/red roles with balanced muted chroma; the blue `track` hue
+is shifted from 232° to about 242° so its OKLab distance from `add` is 0.086,
+above the 0.08 floor (the 232° candidate measured 0.077).
+
 The palette registry uses own-property lookup (case-insensitive, collapsing
 internal whitespace to hyphens so `tokyo night` resolves to `tokyo-night`) and
 falls back to `graphite` for unknown names. When a host sees a non-empty
