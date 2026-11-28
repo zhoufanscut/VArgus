@@ -176,6 +176,23 @@ install or replace the command in the original scope using the manual setup abov
 
 ## Remove
 
+### User-scope removal
+
+If you installed VArgus at user scope with `vargus install claude`, run its
+counterpart from a terminal:
+
+```sh
+vargus remove claude
+```
+
+This uninstalls `vargus@vargus` at user scope, removes the `vargus` directory
+marketplace when it points to this checkout and no project or local installation
+still uses it, and deletes VArgus's user `statusLine` entry while leaving any
+non-VArgus `statusLine` untouched. Run `/reload-plugins` or start a new Claude
+Code session, then follow [Remove shared files](../README.md#remove-shared-files).
+
+### Manual or multi-scope removal
+
 1. Run `claude plugin list --json` from the project to check the installed scopes. Before
    uninstalling, check `settings.json` in your Claude config directory and the affected project's
    `.claude/settings.local.json` and `.claude/settings.json`. Remove the VArgus `statusLine` entry

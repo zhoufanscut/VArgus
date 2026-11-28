@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -95,6 +95,24 @@ async function changeHooks(file: string, install: boolean): Promise<void> {
   }
 }
 
+async function removeStartupDirectory(home: string): Promise<void> {
+  const vargusDir = join(home, 'vargus')
+  const autostartDir = startupDirectory(home)
+  const vargusInfo = await lstat(vargusDir).catch(error => {
+    if (!isMissing(error)) throw error
+  })
+  if (!vargusInfo || vargusInfo.isSymbolicLink() || !vargusInfo.isDirectory()) return
+  const autostartInfo = await lstat(autostartDir).catch(error => {
+    if (!isMissing(error)) throw error
+  })
+  if (autostartInfo && !autostartInfo.isSymbolicLink() && autostartInfo.isDirectory()) {
+    await rm(autostartDir, { recursive: true, force: true })
+  }
+  try { await rmdir(vargusDir) } catch (error) {
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
+  }
+}
+
 export async function codexSetup(argv: string[]): Promise<number> {
   const [action, flag, directory] = argv
   if ((action !== 'install' && action !== 'remove')
@@ -111,9 +129,16 @@ export async function codexSetup(argv: string[]): Promise<number> {
   if (install || info) {
     const file = info?.isSymbolicLink() ? await realpath(path) : path
     await withControlLock(file + '.vargus.lock', async () => {
-      if (install) await mkdir(startupDirectory(home), { recursive: true, mode: 0o700 })
-      await changeHooks(file, install)
+      if (install) {
+        await mkdir(startupDirectory(home), { recursive: true, mode: 0o700 })
+        await changeHooks(file, true)
+      } else {
+        await changeHooks(file, false)
+        await removeStartupDirectory(home)
+      }
     }, 'Another VArgus setup is editing these Codex hooks. Run the command again.')
+  } else {
+    await removeStartupDirectory(home)
   }
   console.log(install
     ? `VArgus startup hooks are set up in ${path}. Select Thread ID in Codex and review the callbacks in /hooks.`

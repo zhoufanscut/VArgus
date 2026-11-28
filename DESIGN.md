@@ -48,16 +48,19 @@ before checking ownership, including the reachable Claude mod graph.
 ### User-facing setup paths
 
 The [shared checkout and launcher](README.md#shared-checkout-and-launcher)
-can serve several hosts. Setup ownership follows the artifact it writes.
+can serve several hosts. Setup ownership follows the artifact it writes, and
+`vargus install|remove <host>` is symmetric across all four hosts.
 
 - [Claude](docs/setup-claude.md) and [Antigravity](docs/setup-antigravity.md)
   manage their own `statusLine` entries. Both installers refuse a different custom
-  configured reader. [Settings I/O](src/cli/settings.ts) follows symlinks,
-  locks the target, checks for intervening edits and replaces it atomically.
-- [Codex](docs/setup-codex.md) installs callbacks in the selected Codex home.
-  Hook review and the saved Thread ID selection happen in Codex.
+  configured reader, and both removers clear only VArgus's `statusLine` entry.
+  [Settings I/O](src/cli/settings.ts) follows symlinks, locks the target, checks
+  for intervening edits and replaces it atomically.
+- [Codex](docs/setup-codex.md) installs and removes callbacks and its
+  `vargus/autostart` state in the selected Codex home. Hook review and the
+  saved Thread ID selection happen in Codex.
 - The [OmO loader](docs/setup-omo.md) imports its checkout by file URL. Loader
-  changes require a match to VArgus's generated format.
+  updates and removal require a match to VArgus's generated format.
 
 Finish host-specific removal and restoration before removing a launcher or
 checkout that those integrations still use.
@@ -480,9 +483,20 @@ to `1st`/`2nd` when missing or non-positive.
 
 [Setup](src/cli/codex/setup.ts) adds `SessionStart` and `UserPromptSubmit`
 callbacks in `hooks.json`. It retains existing callbacks and their arguments.
-Removal preserves retained callbacks' positions and refuses a mixed group
-when removal would shift one. Codex 0.169.1 marked an unchanged command as
-modified after such a shift. Trust belongs to Codex's review UI.
+Removal preserves retained callbacks' positions, refuses a mixed group when
+removal would shift one, and removes `<CODEX_HOME>/vargus/autostart` (plus empty
+`<CODEX_HOME>/vargus`) once hook removal succeeds. Codex 0.169.1 marked an
+unchanged command as modified after a position shift. Trust belongs to Codex's
+review UI.
+
+In a live Linux probe on Codex 0.172.0 with tmux 3.5a (shared-daemon and
+`--no-daemon` modes, 2026-11-28), removing `hooks.json` entries and
+`vargus/autostart` while a TUI stayed open kept no permanent error or lost
+history: if another prompt was sent before exit, the open TUI's cached
+`UserPromptSubmit` hook reactivated VArgus once and recreated empty
+`vargus/autostart`, whereas `/exit` (even without `!vargus off`) restored the
+tmux bar and `codex resume` restored the conversation history and native footer
+with VArgus off.
 
 The [hook](src/cli/codex/hooks.ts) requires an event transcript that matches
 the engine's current path and one matching footer below an empty composer.
@@ -825,7 +839,10 @@ status command budget.
 
 Setup in the agent sandbox hands the final change to the user. The Linux
 `agy` 1.5.8 probe was denied a read of the protected settings file. The host's
-own `/statusline` command applied the row in the running TUI. See
+own `/statusline` command applied the row in the running TUI. Outside `agy`,
+`vargus remove antigravity` checks `statusLine.command` and removes only
+VArgus's `statusLine` entry atomically without creating missing directories,
+refusing unrelated commands. See
 [live evidence](#live-evidence-and-limits) for platform coverage.
 
 ## Claude Code
@@ -971,8 +988,20 @@ registration to Claude Code, reads the settings back, and configures the
 matching reader. It reuses the registered VArgus marketplace. In the
 2.1.323 installer probe, setting `NPM_CONFIG_OMIT=dev` for the Claude
 subprocess let the plugin cache from a checkout with its development-only
-lockfile and an empty npm cache. The [Claude guide](docs/setup-claude.md)
-covers manual scopes and preserving the reader that preceded VArgus.
+lockfile and an empty npm cache.
+
+Its counterpart `vargus remove claude` reverses those user-scope steps under the
+same `settings.json` lock: it checks `claude plugin list --json` (verified on
+Linux Claude Code 2.1.332 on 2026-11-28 to return `project`- and `local`-scope
+installs across all projects globally, independent of `cwd`), uninstalls
+`vargus@vargus` at user scope if present, removes the `vargus` directory
+marketplace with `cwd` set to `CLAUDE_CONFIG_DIR` only when it points to this
+checkout and no other scope or plugin under `@vargus` remains installed (omitting
+`--scope` so Claude clears both `known_marketplaces.json` and user
+`settings.json` without touching project settings), and removes VArgus's own
+`statusLine` entry while leaving any non-VArgus `statusLine` untouched. The
+[Claude guide](docs/setup-claude.md) covers manual scopes and preserving the
+reader that preceded VArgus.
 
 ## Rules carried over from VantageHUD
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { main } from '../../src/cli.ts'
@@ -43,6 +43,8 @@ test('Codex setup installs and removes only its own callbacks in the selected ho
     assert.equal(await run('remove'), 0)
     const removed = await readFile(path, 'utf8')
     assert.deepEqual(JSON.parse(removed), existing)
+    await assert.rejects(lstat(join(home, 'vargus', 'autostart')), { code: 'ENOENT' })
+    await assert.rejects(lstat(join(home, 'vargus')), { code: 'ENOENT' })
     assert.equal(await run('remove'), 0)
     assert.equal(await readFile(path, 'utf8'), removed)
     assert.equal(await readFile(join(home, 'config.toml'), 'utf8'), config)
@@ -85,6 +87,7 @@ test('Codex setup reuses legacy callbacks and leaves other handlers in their gro
 test('Codex removal leaves both events intact when it would move a retained callback', async () => {
   const home = await mkdtemp(join(tmpdir(), 'vargus-setup-mixed-'))
   const path = join(home, 'hooks.json')
+  const autostart = join(home, 'vargus', 'autostart')
   const raw = JSON.stringify({ hooks: {
     SessionStart: [{ hooks: [{ type: 'command', command: 'vargus hook session-start' }] }],
     UserPromptSubmit: [{ hooks: [
@@ -93,9 +96,51 @@ test('Codex removal leaves both events intact when it would move a retained call
     ] }],
   } })
   try {
+    await mkdir(autostart, { recursive: true })
     await writeFile(path, raw)
     await assert.rejects(main(['remove', 'codex', '--home', home]), /UserPromptSubmit .* would move other callbacks/)
     assert.equal(await readFile(path, 'utf8'), raw)
+    assert.ok((await stat(autostart)).isDirectory())
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('Codex removal preserves sibling files in vargus/ and cleans up autostart even without hooks.json', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'vargus-setup-autostart-'))
+  const autostart = join(home, 'vargus', 'autostart')
+  const sibling = join(home, 'vargus', 'keep.txt')
+  try {
+    await mkdir(autostart, { recursive: true })
+    await writeFile(join(autostart, 'marker.off'), '')
+    await writeFile(sibling, 'keep')
+    assert.equal(await main(['remove', 'codex', '--home', home]), 0)
+    await assert.rejects(lstat(autostart), { code: 'ENOENT' })
+    assert.equal(await readFile(sibling, 'utf8'), 'keep')
+    assert.deepEqual(await readdir(home), ['vargus'])
+
+    await rm(sibling)
+    await mkdir(autostart, { recursive: true })
+    assert.equal(await main(['remove', 'codex', '--home', home]), 0)
+    assert.deepEqual(await readdir(home), [])
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('Codex removal leaves symlinked vargus/autostart targets intact', { skip: process.platform === 'win32' }, async () => {
+  const home = await mkdtemp(join(tmpdir(), 'vargus-setup-symlink-'))
+  const target = join(home, 'external-autostart')
+  const vargusDir = join(home, 'vargus')
+  const autostart = join(vargusDir, 'autostart')
+  try {
+    await mkdir(target)
+    await writeFile(join(target, 'keep.off'), '')
+    await mkdir(vargusDir)
+    await symlink(target, autostart)
+    assert.equal(await main(['remove', 'codex', '--home', home]), 0)
+    assert.ok((await lstat(autostart)).isSymbolicLink())
+    assert.deepEqual(await readdir(target), ['keep.off'])
   } finally {
     await rm(home, { recursive: true, force: true })
   }

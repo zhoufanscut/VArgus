@@ -166,13 +166,14 @@ takes effect immediately on the next status-line update with no restart.
 
 ## Remove
 
-1. Check the current `statusLine.command` in the settings file for the `agy`
-   profile. Proceed if it invokes VArgus `statusline`. Preserve a command that
-   belongs to another integration. Inside the `agy` agent sandbox, have the user
-   check the active command before removing it.
-2. Run `/statusline delete` in `agy` to restore the built-in row, or remove
-   the VArgus `statusLine` object in the settings file and reopen `agy`. Restore
-   any previous status-line entry you saved before installing VArgus.
+1. Outside `agy` (with `vargus` on PATH, or `./bin/vargus` from the checkout),
+   run `vargus remove antigravity` to remove the VArgus `statusLine` entry from
+   `~/.gemini/antigravity-cli/settings.json` while preserving your other settings
+   (it stops if a different status line command is configured), then reopen `agy`.
+2. Inside an open `agy` session (where the agent sandbox protects `settings.json`),
+   check the current `statusLine.command` first to preserve any unrelated
+   integration, then run `/statusline delete` in `agy` to restore the built-in row.
+   Restore any previous status-line entry you saved before installing VArgus.
 3. Follow [Remove shared files](../README.md#remove-shared-files).
 
 ## Readings

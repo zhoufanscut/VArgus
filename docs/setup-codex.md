@@ -195,10 +195,11 @@ does not build or install anything.
 ## Remove
 
 1. If you installed automatic startup, run `vargus remove codex` with the
-   same Codex home. If VArgus uses a custom shell wrapper or appears before
-   another callback in its group, remove the VArgus callbacks from `hooks.json`
-   by hand. Keep the other callbacks and review the affected groups in
-   `/hooks` after reopening Codex.
+   same Codex home. It removes the VArgus callbacks from `hooks.json` and clears
+   `vargus/autostart` (and empty `vargus/`). If VArgus uses a custom shell
+   wrapper or appears before another callback in its group, remove the VArgus
+   callbacks from `hooks.json` by hand. Keep the other callbacks and review the
+   affected groups in `/hooks` after reopening Codex.
 2. In each Codex TUI using VArgus, run `!vargus off`, then `!vargus status` while
    the clone and PATH entry still exist. If restoration is pending, visit the
    affected conversations with an empty composer and follow the

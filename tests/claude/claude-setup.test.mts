@@ -1,7 +1,7 @@
 import { test, type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -17,10 +17,31 @@ const fs = require('node:fs')
 const path = require('node:path')
 const args = process.argv.slice(2)
 fs.appendFileSync(process.env.CLAUDE_CALLS, JSON.stringify(args) + '\\n')
+if (process.env.CLAUDE_CALL_DETAILS) {
+  fs.appendFileSync(process.env.CLAUDE_CALL_DETAILS, JSON.stringify({ args, cwd: process.cwd() }) + '\\n')
+}
 const file = path.join(process.env.CLAUDE_CONFIG_DIR, 'settings.json')
-const settings = JSON.parse(fs.readFileSync(file))
-if (args[1] === 'marketplace') {
-  console.log(JSON.stringify(Object.entries(settings.extraKnownMarketplaces ?? {}).map(([name, market]) => ({ name, ...market.source }))))
+const settings = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {}
+const state = process.env.CLAUDE_STATE && fs.existsSync(process.env.CLAUDE_STATE)
+  ? JSON.parse(fs.readFileSync(process.env.CLAUDE_STATE, 'utf8'))
+  : {}
+if (args[1] === 'marketplace' && args[2] === 'list') {
+  const markets = state.marketplaces ?? Object.entries(settings.extraKnownMarketplaces ?? {}).map(([name, market]) => ({ name, ...market.source }))
+  console.log(JSON.stringify(markets))
+} else if (args[1] === 'marketplace' && args[2] === 'remove') {
+  if (settings.extraKnownMarketplaces) delete settings.extraKnownMarketplaces[args[3]]
+  fs.writeFileSync(file, JSON.stringify(settings) + '\\n')
+  console.log(JSON.stringify({ command: 'marketplace-remove', outcome: 'ok', marketplace: args[3] }))
+} else if (args[1] === 'list') {
+  const plugins = [...(state.extraPlugins ?? [])]
+  if (settings.enabledPlugins?.['vargus@vargus'] !== undefined) {
+    plugins.unshift({ id: 'vargus@vargus', version: '0.9.0', scope: 'user', enabled: settings.enabledPlugins['vargus@vargus'] })
+  }
+  console.log(JSON.stringify(plugins))
+} else if (args[1] === 'uninstall') {
+  if (settings.enabledPlugins) delete settings.enabledPlugins[args[2]]
+  fs.writeFileSync(file, JSON.stringify(settings) + '\\n')
+  console.log(JSON.stringify({ command: 'uninstall', outcome: 'ok', pluginId: args[2], scope: 'user' }))
 } else {
   require('node:assert/strict').equal(process.env.NPM_CONFIG_OMIT, 'dev')
   if (settings.model === 'fail-install') {
@@ -40,18 +61,23 @@ async function fixture(t: TestContext) {
   const config = join(home, 'profile $with "spaces"')
   const settings = join(config, 'settings.json')
   const calls = join(home, 'calls.jsonl')
+  const details = join(home, 'call-details.jsonl')
+  const state = join(home, 'state.json')
   const bin = join(home, 'bin')
   await mkdir(bin)
   await mkdir(config)
   await writeFile(join(bin, 'claude'), claude, { mode: 0o700 })
   await writeFile(calls, '')
+  await writeFile(details, '')
   const env = {
     PATH: [bin, dirname(process.execPath)].join(delimiter),
-    HOME: home, CLAUDE_CONFIG_DIR: config, CLAUDE_CALLS: calls, VARGUS_CLI_MAIN: '1',
+    HOME: home, CLAUDE_CONFIG_DIR: config, CLAUDE_CALLS: calls, CLAUDE_CALL_DETAILS: details, CLAUDE_STATE: state, VARGUS_CLI_MAIN: '1',
   }
-  return { config, settings, calls,
+  return { home, config, settings, calls, details, state,
     install: () => exec(process.execPath, [entry, 'install', 'claude'], { cwd: home, env, timeout: 10000, killSignal: 'SIGKILL' }),
+    remove: (cwd = home) => exec(process.execPath, [entry, 'remove', 'claude'], { cwd, env, timeout: 10000, killSignal: 'SIGKILL' }),
     load: async () => JSON.parse(await readFile(settings, 'utf8')),
+    readDetails: async () => (await readFile(details, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as { args: string[]; cwd: string }),
   }
 }
 
@@ -151,4 +177,128 @@ test('reinstall upgrades the old VArgus age-check readers in place', { skip: pro
     assert.equal(expired.stdout, 'idle row | ⌛stale')
     await rm(line + '.live')
   }
+})
+
+test('Claude removal undoes user install cleanly and is idempotent', { skip: process.platform === 'win32' }, async t => {
+  const f = await fixture(t)
+  await writeFile(f.settings, JSON.stringify({ model: 'fixture-model', enabledPlugins: { 'other@market': true } }))
+  await f.install()
+  await writeFile(f.calls, '')
+  await writeFile(f.details, '')
+
+  const result = await f.remove()
+  assert.match(result.stdout, /VArgus removed from user scope/)
+  const after = await f.load()
+  assert.deepEqual(after, {
+    model: 'fixture-model',
+    enabledPlugins: { 'other@market': true },
+    extraKnownMarketplaces: {},
+  })
+  assert.deepEqual(await f.readDetails(), [
+    { args: ['plugin', 'list', '--json'], cwd: f.home },
+    { args: ['plugin', 'uninstall', id, '--scope', 'user', '--json'], cwd: f.home },
+    { args: ['plugin', 'marketplace', 'list', '--json'], cwd: f.home },
+    { args: ['plugin', 'marketplace', 'remove', 'vargus', '--json'], cwd: f.config },
+  ])
+
+  const saved = await readFile(f.settings, 'utf8')
+  await writeFile(f.calls, '')
+  const repeat = await f.remove()
+  assert.match(repeat.stdout, /VArgus is not configured at user scope/)
+  assert.equal(await readFile(f.settings, 'utf8'), saved)
+  assert.deepEqual((await readFile(f.calls, 'utf8')).trim().split('\n').map(line => JSON.parse(line)), [
+    ['plugin', 'list', '--json'],
+    ['plugin', 'marketplace', 'list', '--json'],
+  ])
+})
+
+test('Claude removal preserves marketplace used by another scope or a different source', { skip: process.platform === 'win32' }, async t => {
+  const f = await fixture(t)
+  await writeFile(f.settings, JSON.stringify({ model: 'fixture-model' }))
+  await f.install()
+  await writeFile(f.state, JSON.stringify({
+    extraPlugins: [{ id, scope: 'project', projectPath: '/other/repo', enabled: true }],
+  }))
+  const projectKept = await f.remove()
+  assert.match(projectKept.stdout, /another scope still uses it/)
+  assert.equal((await f.load()).statusLine, undefined)
+  assert.deepEqual((await f.load()).extraKnownMarketplaces.vargus.source, { source: 'directory', path: checkout })
+
+  await rm(f.state)
+  await writeFile(f.settings, JSON.stringify({
+    enabledPlugins: { [id]: true },
+    extraKnownMarketplaces: { vargus: { source: { source: 'github', repo: 'zhoufanscut/VArgus' } } },
+  }))
+  await f.install()
+  const githubKept = await f.remove()
+  assert.match(githubKept.stdout, /not registered from this checkout/)
+  assert.equal((await f.load()).statusLine, undefined)
+  assert.deepEqual((await f.load()).extraKnownMarketplaces.vargus.source, { source: 'github', repo: 'zhoufanscut/VArgus' })
+
+  await writeFile(f.settings, JSON.stringify({
+    enabledPlugins: { [id]: true },
+    extraKnownMarketplaces: { vargus: { source: { source: 'directory', path: '/other/VArgus-clone' } } },
+  }))
+  await f.install()
+  const otherDirKept = await f.remove()
+  assert.match(otherDirKept.stdout, /not registered from this checkout/)
+  assert.deepEqual((await f.load()).extraKnownMarketplaces.vargus.source, { source: 'directory', path: '/other/VArgus-clone' })
+
+  // A malformed empty path must not resolve to process.cwd() and match checkout.
+  await writeFile(f.state, JSON.stringify({
+    marketplaces: [{ name: 'vargus', source: 'directory', path: '' }],
+  }))
+  await writeFile(f.settings, JSON.stringify({
+    enabledPlugins: { [id]: true },
+    extraKnownMarketplaces: { vargus: { source: { source: 'directory', path: '' } } },
+  }))
+  const emptyPath = await f.remove(checkout)
+  assert.match(emptyPath.stdout, /not registered from this checkout/)
+  assert.deepEqual((await f.load()).extraKnownMarketplaces.vargus.source, { source: 'directory', path: '' })
+
+  // A marketplace entry identified via installLocation is matched and removed when unused.
+  await writeFile(f.state, JSON.stringify({
+    marketplaces: [{ name: 'vargus', source: 'directory', installLocation: checkout }],
+  }))
+  await writeFile(f.settings, JSON.stringify({
+    enabledPlugins: { [id]: true },
+    extraKnownMarketplaces: { vargus: { source: { source: 'directory', path: checkout } } },
+  }))
+  const viaInstallLocation = await f.remove()
+  assert.match(viaInstallLocation.stdout, /VArgus removed from user scope/)
+  assert.deepEqual((await f.load()).extraKnownMarketplaces, {})
+})
+
+test('Claude removal clears legacy VArgus readers, protects custom statusLine, and handles missing or invalid config', { skip: process.platform === 'win32' }, async t => {
+  const f = await fixture(t)
+  await writeFile(f.settings, JSON.stringify({
+    enabledPlugins: { [id]: true },
+    extraKnownMarketplaces: { vargus: { source: { source: 'directory', path: checkout } } },
+    statusLine: { type: 'command', command: 'cat "$HOME/.claude/plugins/data/vargus-vargus/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null' },
+  }))
+  await f.remove()
+  assert.equal((await f.load()).statusLine, undefined)
+  assert.deepEqual((await f.load()).extraKnownMarketplaces, {})
+
+  const customReader = 'cat "$HOME/.claude/plugins/data/other-plugin/$CLAUDE_CODE_SESSION_ID/line" 2>/dev/null'
+  await writeFile(f.settings, JSON.stringify({
+    enabledPlugins: { [id]: true },
+    extraKnownMarketplaces: { vargus: { source: { source: 'directory', path: checkout } } },
+    statusLine: { type: 'command', command: customReader },
+  }))
+  const customResult = await f.remove()
+  assert.match(customResult.stdout, /Left the existing non-VArgus statusLine/)
+  assert.deepEqual((await f.load()).statusLine, { type: 'command', command: customReader })
+  assert.deepEqual((await f.load()).extraKnownMarketplaces, {})
+
+  await writeFile(f.calls, '')
+  await writeFile(f.settings, '{\n')
+  await assert.rejects(f.remove(), /Could not parse JSON/)
+  assert.equal(await readFile(f.calls, 'utf8'), '')
+
+  await rm(f.config, { recursive: true, force: true })
+  const missingResult = await f.remove()
+  assert.match(missingResult.stdout, /VArgus is not configured/)
+  assert.equal((await readdir(f.home)).includes('profile $with "spaces"'), false)
+  assert.equal(await readFile(f.calls, 'utf8'), '')
 })
