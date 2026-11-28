@@ -20,7 +20,7 @@ function hexToRgb(hex: string): Rgb {
 }
 
 // Names match case- and whitespace-insensitively (internal whitespace maps to
-// hyphens, so "tokyo night" resolves to "tokyo-night").
+// hyphens, so "agy tokyonight" resolves to "agy-tokyonight").
 export function lookupPaletteName(name: string): string | undefined {
   const key = name.trim().toLowerCase().replace(/\s+/g, '-')
   return Object.prototype.hasOwnProperty.call(registry, key) ? key : undefined

@@ -34,7 +34,7 @@ pane. With several matching panes, select the intended one explicitly:
 A custom tmux socket also needs `--socket /path/to/socket`. Codex's shared daemon
 can inherit another terminal's environment, so pane selection does not trust
 `TMUX_PANE`. Once attached, `off`, `status` and `reload` use the saved thread binding.
-`--theme ember` and `--config /path/to/options.json` apply on activation.
+`--theme codex-ink` and `--config /path/to/options.json` apply on activation.
 
 ### Native Windows setup
 
@@ -123,7 +123,7 @@ To override individual shared settings, pass `--theme NAME` or
 To change a running helper's options, use `reload` with those flags:
 
 ```text
-!vargus on --theme ember
+!vargus on --theme codex-ink
 !vargus reload --theme graphite
 ```
 
@@ -132,7 +132,7 @@ An explicit JSON or JSONC file uses the [shared defaults](../src/options.ts) and
 
 ```json
 {
-  "theme": "ember",
+  "theme": "codex-ink",
   "folderFoldThreshold": 16,
   "session": false
 }

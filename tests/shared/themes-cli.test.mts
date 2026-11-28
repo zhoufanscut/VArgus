@@ -81,7 +81,7 @@ describe('vargus themes', () => {
     assert.equal(sections.length, 2)
 
     const expectedSections = [
-      { title: 'Dark themes', hex: '#181818', bgSgr: '24;24;24', names: ['aurora', 'ember', 'nebula', 'tokyo-night', 'codex-ink', 'claude-terracotta', 'omo-violet', 'graphite'] },
+      { title: 'Dark themes', hex: '#181818', bgSgr: '24;24;24', names: ['agy-tokyonight', 'codex-ink', 'claude-terracotta', 'omo-violet', 'graphite'] },
       { title: 'Light themes', hex: '#ffffff', bgSgr: '255;255;255', names: ['daylight'] },
     ] as const
 
@@ -149,27 +149,27 @@ describe('vargus themes', () => {
   })
 
   test('groups mixed-polarity lists into Dark then Light sections while preserving relative order', () => {
-    const out = formatThemesPreview(['daylight', 'ember', 'aurora'], { noColor: false })
+    const out = formatThemesPreview(['daylight', 'omo-violet', 'agy-tokyonight'], { noColor: false })
     const sections = out.trimEnd().split('\n\n\n')
     assert.equal(sections.length, 2)
     const darkBlocks = sections[0]!.split('\n\n')
     const lightBlocks = sections[1]!.split('\n\n')
     assert.equal(darkBlocks[0], '\x1b[1mDark themes (#181818)\x1b[22m')
-    assert.equal(darkBlocks[1]!.split('\n')[0], 'ember')
-    assert.equal(darkBlocks[2]!.split('\n')[0], 'aurora')
+    assert.equal(darkBlocks[1]!.split('\n')[0], 'omo-violet')
+    assert.equal(darkBlocks[2]!.split('\n')[0], 'agy-tokyonight')
     assert.equal(lightBlocks[0], '\x1b[1mLight themes (#ffffff)\x1b[22m')
     assert.equal(lightBlocks[1]!.split('\n')[0], 'daylight')
   })
 
   test('selects a single theme into its matching polarity section case- and whitespace-insensitively', () => {
-    const dark = runThemes([' Ember '])
+    const dark = runThemes([' Codex-Ink '])
     assert.equal(dark.code, 0)
     const darkSections = dark.out.trimEnd().split('\n\n\n')
     assert.equal(darkSections.length, 1)
     const darkBlocks = darkSections[0]!.split('\n\n')
     assert.equal(darkBlocks.length, 2)
     assert.equal(darkBlocks[0], '\x1b[1mDark themes (#181818)\x1b[22m')
-    assert.equal(darkBlocks[1]!.split('\n')[0], 'ember')
+    assert.equal(darkBlocks[1]!.split('\n')[0], 'codex-ink')
     assertRowBackgroundAndForeground(darkBlocks[1]!.split('\n')[1]!, '24;24;24')
 
     const light = runThemes(['daylight'])
@@ -182,16 +182,16 @@ describe('vargus themes', () => {
     assert.equal(lightBlocks[1]!.split('\n')[0], 'daylight')
     assertRowBackgroundAndForeground(lightBlocks[1]!.split('\n')[1]!, '255;255;255')
 
-    for (const args of [['tokyo-night'], ['tokyo night'], [' Tokyo  Night '], ['tokyo', 'night']]) {
+    for (const args of [['agy-tokyonight'], ['agy tokyonight'], [' Agy  TokyoNight '], ['agy', 'tokyonight']]) {
       const tokyo = runThemes(args)
       assert.equal(tokyo.code, 0)
       const tokyoBlocks = tokyo.out.trimEnd().split('\n\n')
       assert.equal(tokyoBlocks[0], '\x1b[1mDark themes (#181818)\x1b[22m')
-      assert.equal(tokyoBlocks[1]!.split('\n')[0], 'tokyo-night')
+      assert.equal(tokyoBlocks[1]!.split('\n')[0], 'agy-tokyonight')
       assertRowBackgroundAndForeground(tokyoBlocks[1]!.split('\n')[1]!, '24;24;24')
     }
-    const directAlias = formatThemesPreview(['tokyo night'], { noColor: true })
-    assert.equal(directAlias.split('\n')[2], 'tokyo-night')
+    const directAlias = formatThemesPreview(['agy tokyonight'], { noColor: true })
+    assert.equal(directAlias.split('\n')[2], 'agy-tokyonight')
   })
 
   test('aligns rows to maxWidth + 2 on wide/piped output and avoids wrap padding on narrower terminals', () => {
@@ -212,8 +212,8 @@ describe('vargus themes', () => {
   })
 
   test('rejects unknown names including Object prototype properties', () => {
-    for (const bad of ['nope', 'constructor', 'toString', '__proto__', '', 'day light', 'tokyo--night']) {
-      assert.throws(() => runThemes([bad]), /Unknown theme.*aurora, ember, nebula, tokyo-night, codex-ink, claude-terracotta, omo-violet, graphite, daylight/)
+    for (const bad of ['nope', 'constructor', 'toString', '__proto__', '', 'day light', 'aurora', 'ember', 'nebula', 'tokyo-night', 'agy--tokyonight']) {
+      assert.throws(() => runThemes([bad]), /Unknown theme.*agy-tokyonight, codex-ink, claude-terracotta, omo-violet, graphite, daylight/)
     }
   })
 
@@ -222,11 +222,11 @@ describe('vargus themes', () => {
     assert.equal(code, 0)
     assert.match(out, /vargus themes \[NAME\]/)
     assert.match(out, /#181818.*#ffffff/)
-    assert.match(out, /Dark themes: aurora, ember, nebula, tokyo-night, codex-ink, claude-terracotta, omo-violet, graphite\./)
+    assert.match(out, /Dark themes: agy-tokyonight, codex-ink, claude-terracotta, omo-violet, graphite\./)
     assert.match(out, /Light themes: daylight\./)
     assert.throws(() => runThemes(['--unknown']), /Usage:/)
-    assert.throws(() => runThemes(['graphite', 'ember']), /Usage:/)
-    assert.throws(() => runThemes(['tokyo-night', '']), /Usage:/)
+    assert.throws(() => runThemes(['graphite', 'codex-ink']), /Usage:/)
+    assert.throws(() => runThemes(['agy-tokyonight', '']), /Usage:/)
   })
 
   test('respects noColor and isWsl flags without leaking escapes or trailing spaces', () => {
@@ -262,10 +262,10 @@ describe('vargus themes', () => {
     assert.ok(dark.stdout.includes('\x1b[48;2;24;24;24m'))
     assert.ok(dark.stdout.includes(makeTheme('graphite', false).paint('text', 'text').replace(/\x1b\[0m$/, '')))
 
-    const tokyo = await execFileAsync(process.execPath, ['src/cli.ts', 'themes', 'tokyo night'], {
+    const tokyo = await execFileAsync(process.execPath, ['src/cli.ts', 'themes', 'agy tokyonight'], {
       env: { ...envBase, NO_COLOR: '' },
     })
-    assert.ok(tokyo.stdout.startsWith('\x1b[1mDark themes (#181818)\x1b[22m\n\ntokyo-night\n'))
+    assert.ok(tokyo.stdout.startsWith('\x1b[1mDark themes (#181818)\x1b[22m\n\nagy-tokyonight\n'))
     assert.ok(tokyo.stdout.includes('\x1b[48;2;24;24;24m'))
 
     const light = await execFileAsync(process.execPath, ['src/cli.ts', 'themes', 'daylight'], {

@@ -16,26 +16,8 @@ export type PalettePolarity = 'dark' | 'light'
 //   - 3 balanced muted VCS tokens (between `label` and `detail`):
 //       add / del / track   git/svn: staged (svn: added) and ahead / conflicts, modified and behind / untracked
 export const PALETTES: Record<string, Record<TokenName, string>> = {
-  // cool Arctic cyan dark (Nord family)
-  aurora: {
-    text: '#dfeaef', label: '#69b8d0', detail: '#7898a7', sep: '#434f57',
-    calm: '#add6e0', alert: '#f6808d',
-    add: '#82b291', del: '#c59094', track: '#78aac9',
-  },
-  // warm amber/parchment dark (Gruvbox family)
-  ember: {
-    text: '#eee7db', label: '#d3a067', detail: '#a58d78', sep: '#544b44',
-    calm: '#e1caa6', alert: '#fe7768',
-    add: '#93ad78', del: '#c78c83', track: '#72a9c2',
-  },
-  // soft lavender-mauve dark (Catppuccin Mocha family)
-  nebula: {
-    text: '#e6e7f2', label: '#b2a2e4', detail: '#8c90ae', sep: '#4a4c59',
-    calm: '#cacaeb', alert: '#f87f99',
-    add: '#86b689', del: '#c99099', track: '#85a6d7',
-  },
-  // cobalt-indigo dark (Tokyo Night family)
-  'tokyo-night': {
+  // cobalt-indigo dark (Antigravity / Tokyo Night family)
+  'agy-tokyonight': {
     text: '#e2e8f6', label: '#8babee', detail: '#8890b3', sep: '#474b5b',
     calm: '#c2cbf3', alert: '#f7768e',
     add: '#94af7b', del: '#c78c94', track: '#67aebd',
@@ -73,10 +55,7 @@ export const PALETTES: Record<string, Record<TokenName, string>> = {
 }
 
 export const PALETTE_POLARITY: Record<string, PalettePolarity> = {
-  aurora: 'dark',
-  ember: 'dark',
-  nebula: 'dark',
-  'tokyo-night': 'dark',
+  'agy-tokyonight': 'dark',
   'codex-ink': 'dark',
   'claude-terracotta': 'dark',
   'omo-violet': 'dark',

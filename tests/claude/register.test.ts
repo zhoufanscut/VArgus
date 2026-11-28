@@ -99,7 +99,7 @@ function sharedPicker($: Engine, on: On, profile = '/home/u/.claude') {
   on('config.list', async () => ({ value: rows }))
   on('config.set', async ($, e) => {
     const row = rows.find(item => item.key === e.key)!
-    row.value = state.rewrite && e.key === 'vargus.theme' && e.value === 'ember' ? 'daylight' : e.value
+    row.value = state.rewrite && e.key === 'vargus.theme' && e.value === 'claude-terracotta' ? 'daylight' : e.value
     edits.push(row.key)
     return { value: row.value }
   })
@@ -180,7 +180,7 @@ describe('register: the line as the host sets it up', () => {
   })
 
   test('startup requests closure of the old detail pane and applies the saved theme',
-    { options: { ...NO_VCS.options, theme: 'ember', detailView: true } }, async ($, on) => {
+    { options: { ...NO_VCS.options, theme: 'claude-terracotta', detailView: true } }, async ($, on) => {
       const clock = mock.clock(on, { now: 0 })
       const w = world(on, clock, { HOME: '/home/u' })
       const commands: string[] = []
@@ -194,8 +194,8 @@ describe('register: the line as the host sets it up', () => {
         return { value: undefined }
       })
       await $.session.start(start)
-      // ember's sep #544b44
-      expect(await line(clock, w)).toContain('\x1b[38;2;84;75;68m | \x1b[0m')
+      // claude-terracotta's sep #4c3f3a
+      expect(await line(clock, w)).toContain('\x1b[38;2;76;63;58m | \x1b[0m')
       expect(closedPanes).toEqual(['vargus'])
       expect(commands).not.toContain('vargus')
     })
@@ -350,12 +350,12 @@ describe('register: the line as the host sets it up', () => {
 
   test('opening the picker imports canonical values and restores omitted native choices', NO_VCS, async ($, on) => {
     const { clock, w, rows, edits, state, command } = sharedPicker($, on)
-    state.file = '{"model":false,"theme":" EmBeR ","folder":false}'
+    state.file = '{"model":false,"theme":" ClAuDe-TeRrAcOtTa ","folder":false}'
     await $.session.start(start)
     expect(await line(clock, w)).not.toContain('opus')
     expect(w.lines.at(-1)).toContain('~/x')
     await command('config')
-    expect(rows.map(row => row.value)).toEqual([false, 'ember', true])
+    expect(rows.map(row => row.value)).toEqual([false, 'claude-terracotta', true])
     expect(edits).toEqual(['vargus.model', 'vargus.theme'])
     state.file = '{}'
     await command('reload-plugins')
@@ -366,17 +366,17 @@ describe('register: the line as the host sets it up', () => {
 
   test('opening the picker imports whitespace-separated theme aliases canonically', NO_VCS, async ($, on) => {
     const { clock, w, rows, edits, state, command } = sharedPicker($, on)
-    state.file = '{"theme":" Tokyo Night "}'
+    state.file = '{"theme":" Agy TokyoNight "}'
     await $.session.start(start)
-    expect(await line(clock, w)).toContain(makeTheme('tokyo-night', false).paint('sep', ' | '))
+    expect(await line(clock, w)).toContain(makeTheme('agy-tokyonight', false).paint('sep', ' | '))
     await command('config')
-    expect(rows[1]!.value).toBe('tokyo-night')
+    expect(rows[1]!.value).toBe('agy-tokyonight')
     expect(edits).toEqual(['vargus.theme'])
   })
 
   test('a clean install cannot restore a choice remembered by the previous installation', NO_VCS, async ($, on) => {
     const { rows, edits, state, command } = sharedPicker($, on, '/home/u/profile\\west')
-    rows[1]!.value = 'ember'
+    rows[1]!.value = 'claude-terracotta'
     state.file = '{"theme":"graphite"}'
     await $.session.start(start)
     await command('config')
@@ -396,10 +396,10 @@ describe('register: the line as the host sets it up', () => {
   test('the renderer follows an accepted picker rewrite until the shared request changes', NO_VCS, async ($, on) => {
     const { clock, w, rows, edits, state, command } = sharedPicker($, on)
     const sep = (theme: string) => makeTheme(theme, false).paint('sep', ' | ')
-    state.file = '{"theme":"ember"}'
+    state.file = '{"theme":"claude-terracotta"}'
     state.rewrite = true
     await $.session.start(start)
-    expect(await line(clock, w)).toContain(sep('ember'))
+    expect(await line(clock, w)).toContain(sep('claude-terracotta'))
     await command('config')
     expect(rows[1]!.value).toBe('daylight')
     expect(await line(clock, w)).toContain(sep('daylight'))
@@ -407,16 +407,16 @@ describe('register: the line as the host sets it up', () => {
     await command('config')
     expect(await line(clock, w)).toContain(sep('daylight'))
     expect(edits).toEqual(['vargus.theme'])
-    expect(state.file).toBe('{"theme":"ember"}')
+    expect(state.file).toBe('{"theme":"claude-terracotta"}')
 
-    state.file = '{"theme":"nebula"}'
+    state.file = '{"theme":"omo-violet"}'
     await command('reload-plugins')
-    expect(await line(clock, w)).toContain(sep('nebula'))
+    expect(await line(clock, w)).toContain(sep('omo-violet'))
     state.rewrite = false
-    state.file = '{"theme":"ember"}'
+    state.file = '{"theme":"claude-terracotta"}'
     await command('config')
-    expect(rows[1]!.value).toBe('ember')
-    expect(await line(clock, w)).toContain(sep('ember'))
+    expect(rows[1]!.value).toBe('claude-terracotta')
+    expect(await line(clock, w)).toContain(sep('claude-terracotta'))
   })
 
   test('includeSubagents syncs between vargus.jsonc and the picker and toggles the running row', NO_VCS, async ($, on) => {

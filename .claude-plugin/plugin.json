@@ -95,10 +95,7 @@
       "description": "Colour theme",
       "default": "graphite",
       "options": [
-        "aurora",
-        "ember",
-        "nebula",
-        "tokyo-night",
+        "agy-tokyonight",
         "codex-ink",
         "claude-terracotta",
         "omo-violet",

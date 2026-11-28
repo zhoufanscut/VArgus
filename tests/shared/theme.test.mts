@@ -71,12 +71,9 @@ function oklabDist(x: Rgb, y: Rgb): number {
 
 describe('theme', () => {
   test('bundled palettes share 9 tokens with explicit polarity; graphite is the default', () => {
-    assert.deepEqual(Object.keys(PALETTES), ['aurora', 'ember', 'nebula', 'tokyo-night', 'codex-ink', 'claude-terracotta', 'omo-violet', 'graphite', 'daylight'])
+    assert.deepEqual(Object.keys(PALETTES), ['agy-tokyonight', 'codex-ink', 'claude-terracotta', 'omo-violet', 'graphite', 'daylight'])
     assert.deepEqual(PALETTE_POLARITY, {
-      aurora: 'dark',
-      ember: 'dark',
-      nebula: 'dark',
-      'tokyo-night': 'dark',
+      'agy-tokyonight': 'dark',
       'codex-ink': 'dark',
       'claude-terracotta': 'dark',
       'omo-violet': 'dark',
@@ -89,19 +86,16 @@ describe('theme', () => {
       for (const hex of Object.values(p)) assert.match(hex, /^#[0-9a-f]{6}$/)
     }
     assert.equal(DEFAULT_THEME, 'graphite')
-    assert.equal(resolvePalette('ember').polarity, 'dark')
-    assert.equal(resolvePalette('tokyo-night').polarity, 'dark')
+    assert.equal(resolvePalette('codex-ink').polarity, 'dark')
+    assert.equal(resolvePalette('agy-tokyonight').polarity, 'dark')
     assert.equal(resolvePalette('daylight').polarity, 'light')
-    assert.deepEqual(resolvePalette('ember').rgb.alert, [0xfe, 0x77, 0x68])
+    assert.deepEqual(resolvePalette('claude-terracotta').rgb.alert, [0xff, 0x6b, 0x80])
   })
 
   test('every palette\'s 9 tokens match the unified OKLCH palette definitions', () => {
     // token order: text label detail sep calm alert add del track
     const expected: Record<string, string> = {
-      aurora: '#dfeaef #69b8d0 #7898a7 #434f57 #add6e0 #f6808d #82b291 #c59094 #78aac9',
-      ember: '#eee7db #d3a067 #a58d78 #544b44 #e1caa6 #fe7768 #93ad78 #c78c83 #72a9c2',
-      nebula: '#e6e7f2 #b2a2e4 #8c90ae #4a4c59 #cacaeb #f87f99 #86b689 #c99099 #85a6d7',
-      'tokyo-night': '#e2e8f6 #8babee #8890b3 #474b5b #c2cbf3 #f7768e #94af7b #c78c94 #67aebd',
+      'agy-tokyonight': '#e2e8f6 #8babee #8890b3 #474b5b #c2cbf3 #f7768e #94af7b #c78c94 #67aebd',
       'codex-ink': '#eceff2 #74a8e6 #8e949c #45484b #c9d0d9 #ff7976 #7ea989 #c38d8a #a294c1',
       'claude-terracotta': '#fcf1ea #dd947d #a38b7e #4c3f3a #e6c8b9 #ff6b80 #85ac89 #c08b8c #81a4c7',
       'omo-violet': '#ebeaf3 #ac9be0 #908c9d #48464e #cfcae3 #ff7d80 #79a88d #c18c8b #78a1c1',
@@ -233,33 +227,33 @@ describe('theme', () => {
   })
 
   test('an unknown name, constructor and toString included, falls back to graphite; names ignore case and whitespace', () => {
-    for (const name of ['nope', 'constructor', 'toString', '__proto__', '', 'day light', 'tokyo--night']) {
+    for (const name of ['nope', 'constructor', 'toString', '__proto__', '', 'day light', 'aurora', 'ember', 'nebula', 'tokyo-night', 'agy--tokyonight']) {
       assert.equal(lookupPaletteName(name), undefined)
       const resolved = resolvePalette(name)
       assert.equal(resolved.name, 'graphite')
       assert.equal(resolved.polarity, 'dark')
     }
-    assert.equal(resolvePalette(' Ember ').name, 'ember')
-    for (const alias of ['tokyo-night', 'tokyo night', ' Tokyo  Night ', 'TOKYO\tNIGHT']) {
-      assert.equal(lookupPaletteName(alias), 'tokyo-night')
+    assert.equal(resolvePalette(' Daylight ').name, 'daylight')
+    for (const alias of ['agy-tokyonight', 'agy tokyonight', ' Agy  TokyoNight ', 'AGY\tTOKYONIGHT']) {
+      assert.equal(lookupPaletteName(alias), 'agy-tokyonight')
       const resolved = resolvePalette(alias)
-      assert.equal(resolved.name, 'tokyo-night')
+      assert.equal(resolved.name, 'agy-tokyonight')
       assert.equal(resolved.polarity, 'dark')
       assert.deepEqual(resolved.rgb.alert, [0xf7, 0x76, 0x8e])
-      assert.equal(makeTheme(alias, false).name, 'tokyo-night')
+      assert.equal(makeTheme(alias, false).name, 'agy-tokyonight')
     }
     assert.deepEqual(makeTheme('constructor', false).rgb.text, [0xed, 0xed, 0xed])
   })
 
   test('paint is a 24-bit SGR code and a reset; bold ends bold alone', () => {
-    const t = makeTheme('aurora', false)
-    assert.equal(t.paint('label', 'ctx:'), '\x1b[38;2;105;184;208mctx:\x1b[0m')
+    const t = makeTheme('agy-tokyonight', false)
+    assert.equal(t.paint('label', 'ctx:'), '\x1b[38;2;139;171;238mctx:\x1b[0m')
     assert.equal(t.paint([1, 2, 3], 'x'), '\x1b[38;2;1;2;3mx\x1b[0m')
     assert.equal(t.bold('x'), '\x1b[1mx\x1b[22m')
   })
 
   test('NO_COLOR: every call returns its text with no escape at all', () => {
-    const t = makeTheme('aurora', true)
+    const t = makeTheme('agy-tokyonight', true)
     assert.equal(t.paint('label', 'ctx:'), 'ctx:')
     assert.equal(t.paint([1, 2, 3], 'x'), 'x')
     assert.equal(t.bold('x'), 'x')

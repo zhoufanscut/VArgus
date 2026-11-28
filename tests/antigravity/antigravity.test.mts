@@ -823,7 +823,7 @@ test('vargus statusline CLI renders end-to-end with themes, config, NO_COLOR, WS
     assert.equal(fromCheckout.code, 0, fromCheckout.stderr)
     assert.match(fromCheckout.stdout, /ctx:20%/)
     assert.doesNotMatch(fromCheckout.stdout, /carbon/)
-    const colored = await runStatusline(['--theme', 'aurora', '--config', configPath], JSON.stringify(payload), { NO_COLOR: '' })
+    const colored = await runStatusline(['--theme', 'agy-tokyonight', '--config', configPath], JSON.stringify(payload), { NO_COLOR: '' })
     assert.equal(colored.code, 0, colored.stderr)
     assert.match(colored.stdout, /carbon/)
     assert.ok(colored.stdout.includes('\x1b[38;2;'), 'expected 24-bit ANSI SGR output')

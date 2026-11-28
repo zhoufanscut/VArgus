@@ -19,8 +19,8 @@ import { makeTheme } from '../../src/theme/index.ts'
 // The session area's fragments (DESIGN, "Fragments"), each rule as VantageHUD
 // 0.6.0 had it (src/hud/elements/*.js, src/lib/formatting.js).
 
-const t = makeTheme('aurora', false)
-const plain = makeTheme('aurora', true)
+const t = makeTheme('agy-tokyonight', false)
+const plain = makeTheme('agy-tokyonight', true)
 const { calm, alert } = t.rgb
 
 function input(

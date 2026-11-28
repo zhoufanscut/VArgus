@@ -50,7 +50,7 @@ to Codex or Antigravity CLI. For example, save this JSON as `~/.config/vargus.js
 See the [shared option keys](../src/options.ts).
 
 ```json
-{"theme":"ember","session":false}
+{"theme":"omo-violet","session":false}
 ```
 
 For a loader in the active agent directory, run the following command from the

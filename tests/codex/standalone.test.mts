@@ -265,7 +265,7 @@ trust_level = "trusted"
         assert.equal(old.split(from).length, 2, from)
         await writeFile(path, old.replace(from, to))
       }
-      await exec(process.execPath, [oldPath, 'reload', '--config', optionsFile, '--theme', 'ember'], {
+      await exec(process.execPath, [oldPath, 'reload', '--config', optionsFile, '--theme', 'codex-ink'], {
         cwd: project, env: { ...env, VARGUS_CLI_MAIN: '1', CODEX_THREAD_ID: beforeUpgrade.thread },
       })
       const legacy = await runtime()
@@ -284,7 +284,7 @@ trust_level = "trusted"
       assert.equal(active.transcript, legacy.transcript)
       assert.deepEqual(active.target, legacy.target)
       assert.equal(active.reload.home, legacy.reload.home)
-      assert.equal(active.reload.options.theme, 'ember')
+      assert.equal(active.reload.options.theme, 'codex-ink')
       assert.equal(active.reload.options.session, false)
       assert.equal(active.reload.options.callCounts, false)
       assert.equal('codexDraftHold' in active.reload.options, false)
@@ -380,7 +380,7 @@ trust_level = "trusted"
       assert.deepEqual(second.target, first.target, 'same official TUI process and pane')
       assert.equal(second.thread, first.thread)
       assert.equal(second.transcript, first.transcript)
-      assert.equal(second.reload.options.theme, 'ember')
+      assert.equal(second.reload.options.theme, 'codex-ink')
       assert.equal(second.reload.options.session, false)
       assert.equal(second.reload.options.callCounts, false)
       assert.equal('codexDraftHold' in second.reload.options, false)
@@ -539,7 +539,7 @@ trust_level = "trusted"
         await tmux('send-keys', '-t', pane, 'C-e', 'C-u')
       }
       await submit(command('on', '--socket ' + quote(socket) + ' --pane ' + pane
-        + (selection === null ? ' --theme ember --config ' + quote(optionsFile) : '')))
+        + (selection === null ? ' --theme codex-ink --config ' + quote(optionsFile) : '')))
       await wait(row, /\S/)
       assert.equal(await tmux('show-options', '-A', '-v', '-t', 'test', 'status'), '2')
       const replacement = await readRuntime()

@@ -266,7 +266,7 @@ is shifted from 232° to about 242° so its OKLab distance from `add` is 0.086,
 above the 0.08 floor (the 232° candidate measured 0.077).
 
 The palette registry uses own-property lookup (case-insensitive, collapsing
-internal whitespace to hyphens so `tokyo night` resolves to `tokyo-night`) and
+internal whitespace to hyphens so `agy tokyonight` resolves to `agy-tokyonight`) and
 falls back to `graphite` for unknown names. When a host sees a non-empty
 `NO_COLOR`, the theme returns plain text. Run
 `vargus themes [NAME]` ([themes.ts](src/cli/themes.ts)) to preview bundled palettes

@@ -90,8 +90,8 @@ describe('render', () => {
 describe('options and labels', () => {
   test('defaults as VantageHUD, theme graphite; wrong types keep the default', () => {
     assert.deepEqual(resolveOptions({}), DEFAULTS)
-    assert.deepEqual(resolveOptions({ effort: false, theme: 'ember', folder: 'no' }), {
-      ...DEFAULTS, effort: false, theme: 'ember',
+    assert.deepEqual(resolveOptions({ effort: false, theme: 'codex-ink', folder: 'no' }), {
+      ...DEFAULTS, effort: false, theme: 'codex-ink',
     })
     assert.equal(Object.hasOwn(resolveOptions({ spendLimit: true }), 'spendLimit'), false)
     assert.equal(resolveOptions({ folderFoldThreshold: 16 }).folderFoldThreshold, 16)

@@ -199,10 +199,10 @@ describe('line file', () => {
     await writeLine(stub, writer, '~/proj/x', undefined, { t: theme, isWsl: false })
     await writeLine(stub, writer, '~/proj/x', undefined, { t: theme, isWsl: false })
     expect(liveWrites).toHaveLength(1)
-    const ember = makeTheme('ember', false)
-    await writeLine(stub, writer, '~/proj/x', undefined, { t: ember, isWsl: true })
+    const terracotta = makeTheme('claude-terracotta', false)
+    await writeLine(stub, writer, '~/proj/x', undefined, { t: terracotta, isWsl: true })
     expect(liveWrites).toHaveLength(2)
-    expect(liveWrites[1]).toBe(`6\n~/proj/x${ember.paint('sep', ' | ')}${ember.paint('label', '!:stale')}\n`)
+    expect(liveWrites[1]).toBe(`6\n~/proj/x${terracotta.paint('sep', ' | ')}${terracotta.paint('label', '!:stale')}\n`)
   })
 
   test('NO_COLOR preserves whole fragments containing ` | ` in line.live and across coalesced writeLine retries', FOLDER_ONLY, async ($, on) => {

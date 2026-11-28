@@ -131,13 +131,13 @@ to your options file.
 **Linux or macOS**
 
 ```json
-"vargus statusline --config \"$HOME/.config/vargus.json\" --theme ember"
+"vargus statusline --config \"$HOME/.config/vargus.json\" --theme agy-tokyonight"
 ```
 
 **Windows**
 
 ```json
-"vargus statusline --config \"C:\\Users\\Pat Lee\\.config\\vargus.json\" --theme ember"
+"vargus statusline --config \"C:\\Users\\Pat Lee\\.config\\vargus.json\" --theme agy-tokyonight"
 ```
 
 The explicit file accepts JSON or JSONC and uses the keys and defaults in

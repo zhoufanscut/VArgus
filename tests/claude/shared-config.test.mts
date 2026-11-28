@@ -20,7 +20,7 @@ test('Claude creates, cancels and commits shared edits, preserving a concurrent 
     assert.ifError(result.error)
     return result.status
   }
-  const first = '{ /* 保留 */ "theme": "ember" }\n'
+  const first = '{ /* 保留 */ "theme": "claude-terracotta" }\n'
   assert.equal(run('prepare', 'first', undefined, first), 0)
   await assert.rejects(readFile(file), { code: 'ENOENT' })
   assert.equal(run('cancel', 'first'), 0)
